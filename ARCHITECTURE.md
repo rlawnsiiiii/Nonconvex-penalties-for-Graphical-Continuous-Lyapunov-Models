@@ -4,7 +4,8 @@ How the code that reproduces **Figure 3** and **Figure 5** of Dettling, Drton & 
 organised, and how one number in those figures is actually produced.
 
 Companion documents: [`simulations/S1_reproduction.md`](simulations/S1_reproduction.md) is the
-*scientific* spec (model, settings, findings); [`R/ENCODING.md`](R/ENCODING.md) shows exactly how
+*scientific* spec (model, settings, findings); [`docs/FISTA.md`](docs/FISTA.md) covers the default
+solver and the package survey behind it; [`R/ENCODING.md`](R/ENCODING.md) shows exactly how
 the problem is encoded into the `glmnet` and `ncvreg` calls, with a worked example; this file is
 the *code* map. The research plan is [`plan.md`](plan.md).
 
@@ -33,6 +34,9 @@ repo/
 │   ├── run_m0.py     (97)         ▶ Figure 3   — minutes
 │   ├── run_s1.py    (114)         ▶ Figure 5   — ~7 h on 8 cores (measured)
 │   └── results/                   committed run outputs backing §8
+│
+├── docs/
+│   └── FISTA.md                   solve_fista: algorithm, references, package survey
 │
 ├── R/                             solver backends + metric reference
 │   ├── ENCODING.md                how X and y map into the package calls, worked by hand
@@ -166,31 +170,39 @@ flowchart LR
         W --> P
     end
     subgraph solve["lasso.py — four interchangeable backends"]
-        FI["<b>fista</b> (default)<br/><i>matrix-free, O(p³)/iter</i><br/>scales to p=50"]
+        FI["<b>fista</b> — DEFAULT<br/><i>matrix-free, O(p³)/iter</i><br/>only route to p=50"]
         DE["<b>design</b><br/><i>CD on explicit A(Σ̂)</i>"]
         GL["<b>glmnet</b> (R)<br/><i>Dettling's own choice</i>"]
-        NC["<b>ncvreg</b> (R)<br/><i>ncvfit; MCP/SCAD</i>"]
+        NC["<b>ncvreg</b> (R)<br/><i>ncvfit; MCP + SCAD</i>"]
+        SK["<b>skglm</b> (Python)<br/><i>AndersonCD; MCP, no R</i>"]
+        PX["<b>pyproximal</b><br/><i>packaged FISTA, matrix-free</i>"]
     end
     G --> FI
     L --> FI
     P --> FI
     P --> DE
-    FI -.->|"all four must agree"| NC
+    P --> SK
+    FI -.->|"all must agree"| NC
     DE -.-> NC
     GL -.-> NC
+    SK -.-> NC
+    P --> PX
+    PX -.-> NC
 
     classDef s fill:#e8f0fe,stroke:#4864a8,color:#1a2b4a
     classDef p fill:#fdeaea,stroke:#b5484a,color:#4a1a1b
     classDef rb fill:#eaf4ea,stroke:#4a8a4a,color:#1a3a1a
     class R,F,G,L s
     class W,P p
-    class GL,NC rb
+    class GL,NC,SK,PX rb
 ```
 
 Pick a backend with `lasso_path(..., solver=...)` or `run_s1.py --solver`. They minimize the same
-objective; they differ in accuracy and cost (S1_reproduction.md §7.2). `ncvreg` is the most
-accurate (4e-12 against the exact KKT solution) and the only one offering MCP/SCAD; `glmnet` is the
-least accurate but is what Dettling used; `fista` is the only one that reaches the full grid.
+objective; they differ in accuracy and cost (S1_reproduction.md §7.2, and `docs/FISTA.md` for why
+`fista` is hand-written rather than taken from a package). `ncvreg` is the most accurate (4e-12
+against the exact KKT solution) and the only one with SCAD; `skglm` gives MCP without an R
+dependency; `glmnet` is the least accurate but is what Dettling used; `fista` is the default and the only one
+that reaches the full grid.
 
 `_soft_threshold` at `lasso.py:37` is, in its entirety, the ℓ₁ penalty. Replacing it with the MCP or
 SCAD proximal operator is the whole of study S1b — nothing else in the diagram moves.
@@ -314,9 +326,9 @@ R installation.
 
 | I want to… | file | notes |
 |---|---|---|
-| run MCP / SCAD today | — | `run_s1.py --solver ncvreg --penalty MCP` (already wired) |
+| run MCP / SCAD today | — | `--solver ncvreg --penalty MCP\|SCAD`, or `--solver skglm --penalty MCP` (no R) |
 | implement MCP / SCAD in Python | `lasso.py:37` | replace `_soft_threshold`; nothing else moves |
-| choose a solver | `--solver`, or `S1Config.solver` | `fista` \| `design` \| `glmnet` \| `ncvreg` |
+| choose a solver | `--solver`, or `S1Config.solver` | `fista` (default) \| `ncvreg` \| `skglm` \| `glmnet` \| `pyproximal` \| `design` |
 | change the p/k grid, tolerance, or a convention flag | `config.py` | every knob is here, not scattered in the drivers |
 | add a metric | `metrics.py:103` | `evaluate_path` returns a dict; drivers just forward keys |
 | change the DGP | `dgp.py:25`, `:55` | `sample_drift`, `sample_volatility` |
@@ -334,7 +346,8 @@ R installation.
 | `test_dgp.py` | every drawn `M` stable, every `C` ≻ 0, edge density, `n=∞` | 0 of 18 |
 | `test_loss.py` | matrix vs. regression form, gradient vs. finite differences | 0 of 10 |
 | `test_metrics.py` | Definitions G.4/G.5, curve construction, degenerate cases | 3 of 7 |
+| `test_fista.py` | the default solver: analytic solution, duality gap, cvxpy/CLARABEL, invariances, convergence rate | 0 of 22 |
 | `test_encoding.py` | the worked example in `R/ENCODING.md`: design matrix, λ conversions, fitted estimate | 2 of 9 |
 | `test_lasso.py` | KKT optimality, **all four backends agree**, λ_max, rank deficiency, glmnet path truncation, MCP/SCAD plumbing, **Figure 3 population values** | 9 of 33 |
 
-Run `pytest` for all 94, `pytest -m "not r"` to skip the R bridge.
+Run `pytest` for all 124, `pytest -m "not r"` to skip the R bridge.

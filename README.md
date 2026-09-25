@@ -3,6 +3,7 @@
 Research plan and meeting notes: [`plan.md`](plan.md).
 Code map and diagrams: [`ARCHITECTURE.md`](ARCHITECTURE.md).
 How the problem is encoded into glmnet / ncvreg: [`R/ENCODING.md`](R/ENCODING.md).
+The default solver and why it is hand-written: [`docs/FISTA.md`](docs/FISTA.md).
 
 ## Layout
 
@@ -23,7 +24,7 @@ tests/                       pytest; the `r` marker needs Rscript + glmnet/ncvre
 
 ```bash
 pip install -e ".[dev]"
-pytest                       # 85 tests; R-backed ones skip if Rscript is absent
+pytest                       # 124 tests; R-backed ones skip if Rscript is absent
 pytest -m "not r"            # skip the R validation explicitly
 
 python simulations/run_m0.py --reps 100          # reproduces Figure 3
@@ -36,14 +37,17 @@ All four minimize the same objective and are cross-checked against each other
 (`test_all_four_backends_agree`). See S1_reproduction.md §7.2.
 
 ```bash
-python simulations/run_s1.py --solver fista    # default; the only one that reaches p = 50
-python simulations/run_s1.py --solver glmnet   # Dettling's own choice (Appendix A)
-python simulations/run_s1.py --solver ncvreg   # most accurate (4e-12 vs exact KKT)
-python simulations/run_s1.py --solver design   # transparent Python reference
+python simulations/run_s1.py                      # default: fista (reaches p = 50)
+python simulations/run_s1.py --solver ncvreg      # most accurate (4e-12 vs exact KKT)
+python simulations/run_s1.py --solver skglm       # pure Python, MCP, no R
+python simulations/run_s1.py --solver glmnet      # Dettling's own choice (Appendix A)
+python simulations/run_s1.py --solver pyproximal  # packaged FISTA, matrix-free
+python simulations/run_s1.py --solver design      # transparent Python reference
 
-# MCP / SCAD -- the S1b entry point, via ncvreg::ncvfit
+# MCP / SCAD -- the S1b entry point
 python simulations/run_s1.py --solver ncvreg --penalty MCP  --gamma 3
 python simulations/run_s1.py --solver ncvreg --penalty SCAD --gamma 3.7
+python simulations/run_s1.py --solver skglm  --penalty MCP  --gamma 3   # no R needed
 ```
 
 The R backends and validation tests need:
@@ -51,6 +55,8 @@ The R backends and validation tests need:
 ```r
 install.packages(c("glmnet", "ncvreg", "jsonlite"))
 ```
+
+Optional Python backends and test oracles: `pip install skglm pyproximal pylops cvxpy`.
 
 R is optional: nothing imports the bridge unless an R backend is selected, and every
 R-backed test skips cleanly without `Rscript`.

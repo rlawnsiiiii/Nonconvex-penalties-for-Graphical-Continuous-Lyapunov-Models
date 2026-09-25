@@ -272,10 +272,40 @@ objective and are cross-checked against each other in `test_all_four_backends_ag
 
 | `solver` | implementation | accuracy vs. exact KKT | cost, 100-λ path | use it for |
 |---|---|---|---|---|
-| **`fista`** *(default)* | Python, matrix-free accelerated proximal gradient | 2e-13 at `tol=1e-14`; ~1e-4 at the production `tol=1e-8` | $p{=}10$ 0.9 s, $p{=}20$ 5 s | **everything at scale** — the only backend that reaches $p=50$ |
-| **`ncvreg`** | R, `ncvreg::ncvfit` | **4e-12**, in 8–48 iterations | $p{=}10$ 10 s, $p{=}20$ 244 s | accuracy, and **MCP/SCAD in S1b** |
+| **`fista`** *(default)* | Python, hand-written accelerated proximal gradient + adaptive restart | 2e-13 at `tol=1e-14` | $p{=}10$ 0.9 s, $p{=}20$ 5 s | **everything** — the only backend that reaches $p=50$ |
+| **`ncvreg`** | R, `ncvreg::ncvfit` | **4e-12**, in 8–48 iterations | $p{=}10$ 10 s, $p{=}20$ 244 s | accuracy-critical runs, and MCP/SCAD in S1b |
+| **`pyproximal`** | Python, packaged FISTA on a matrix-free `pylops` operator | 2.7e-05 after 13.6 s | ~38× `fista` | a packaged FISTA, if one is wanted |
 | **`glmnet`** | R, transcription of Varando's `lassoB()` | 1e-4 – 7e-2 (see below) | $p{=}10$ ~1 s | **fidelity to Dettling**, who used it |
+| **`skglm`** | Python, `skglm` AndersonCD on explicit $A(\hat\Sigma)$ | 9e-7 | $p{=}10$ 2.2 s, $p{=}20$ 30 s | **MCP without R** |
 | **`design`** | Python, coordinate descent on explicit $A(\hat\Sigma)$ | 4e-8 | slow (~58 s at $p{=}8$) | a transparent reference in tests |
+
+**Default is `fista`.** Every package backend works on the explicit $p^2\times p^2$ design
+($O(p^4)$ per sweep against $O(p^3)$) and none reaches $p=50$ in practical time — at $p=20$
+`ncvreg` is already 48× slower — so the reproduction is only finishable with the matrix-free
+solver.
+
+Since that puts the burden of proof on our own code, `tests/test_fista.py` validates it against
+targets that share no failure mode with a first-order method:
+
+| evidence | measured |
+|---|---|
+| **analytic solution** for diagonal $\hat\Sigma$, $C$: $M^\star=\mathrm{diag}(-c_i/2s_i)$, exact for every $\lambda$ | 2.4e-14 |
+| **duality-gap certificate** — bounds suboptimality with no reference solution | 1.3e-13 … 6.7e-16 |
+| **`cvxpy`/CLARABEL**, an interior-point solver | 2.9e-08, and `fista` at the lower objective |
+| closed-form KKT solution on the active set | 1e-9 |
+| initialization independence / permutation / scale equivariance | 0.0 / 4.4e-16 / 1e-9 |
+| accelerated rate: $k^2(F_k-F^\star)$ bounded and decreasing | 4.31 → 0.56 → 1.2e-06 |
+
+Use a package backend where accuracy matters more than speed — notably **S1b's estimation-error
+comparison at moderate $p$**, where `ncvreg` reaches 4e-12:
+
+```bash
+python simulations/run_s1.py --p 10 15 --solver ncvreg
+```
+
+**[`docs/FISTA.md`](../docs/FISTA.md)** covers both FISTA backends, the full package survey
+(`pyproximal`, `skglm`, `copt`, `proxmin`, `celer`, `cvxpy`, `sklearn`), the references
+(Beck & Teboulle 2009; O'Donoghue & Candès 2015), and all the measurements.
 
 #### What the papers specify
 
@@ -326,11 +356,34 @@ python simulations/run_s1.py --solver ncvreg --penalty MCP   --gamma 3
 python simulations/run_s1.py --solver ncvreg --penalty SCAD  --gamma 3.7
 ```
 
-`ncvfit` is the right entry point, not `ncvreg()`: the latter always standardizes the design and
-always fits an intercept, neither of which this problem wants ($y = -\mathrm{vec}(C)$ has no
-constant term). `ncvfit` does neither and accepts `penalty.factor`, so the unpenalized diagonal is
-expressible. Smoke-tested in `test_ncvreg_backend_supports_nonconvex_penalties`; the statistical
-study itself is S1b and is not yet run.
+```bash
+python simulations/run_s1.py --solver skglm  --penalty MCP   --gamma 3   # no R needed
+```
+
+`ncvfit` is the right ncvreg entry point, not `ncvreg()` — its own help page says *"no
+standardization is applied, no intercept is included, no path is fit"*, while `?ncvreg` says
+*"`ncvreg` standardizes the data and includes an intercept by default"*. Neither is wanted here.
+`ncvfit` also accepts `penalty.factor`, so the unpenalized diagonal is expressible. Because MCP and
+SCAD are nonconvex, `ncvfit`'s docs warn that *"initial values are very important in determining
+which local solution an algorithm converges to"* — `backend_ncvreg.R` therefore walks the λ-grid
+downwards passing each solution as `init` for the next.
+
+`skglm` reaches MCP through `WeightedMCPenalty`, so it too can leave the diagonal unpenalized; it
+has **no weighted SCAD**, and the backend raises rather than silently penalizing the diagonal.
+Full encoding details for both R packages: **[`R/ENCODING.md`](../R/ENCODING.md)**.
+
+Smoke-tested in `test_ncvreg_backend_supports_nonconvex_penalties` and
+`test_skglm_backend_supports_weighted_mcp`; the statistical study itself is S1b and is not yet run.
+
+#### One shared convention: `zero_tol`
+
+Support recovery is decided by $\hat M_{ij}\neq 0$, so "zero" must mean the same thing in every
+backend. FISTA's proximal step returns exact zeros; the coordinate-descent backends can leave dust
+of order 1e-13 — most visibly at $\lambda_{\max}$, where one off-diagonal coefficient sits exactly
+on the threshold, and the same solution would otherwise be scored with a different edge count
+depending on the solver. `lasso_path(..., zero_tol=1e-12)` snaps such entries to zero for all
+backends. It is a no-op for `fista` (verified bit-identical), and leaves the M0 regression values
+unchanged.
 
 #### λ conversions
 

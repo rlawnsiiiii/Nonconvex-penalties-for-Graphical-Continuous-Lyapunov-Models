@@ -45,7 +45,7 @@ def main() -> None:
     ap.add_argument("--out", type=Path, default=Path("results/m0.csv"))
     ap.add_argument("--seed", type=int, default=cfg.seed)
     ap.add_argument("--solver", default="fista",
-                    choices=["fista", "design", "glmnet", "ncvreg"])
+                    choices=["fista", "ncvreg", "skglm", "glmnet", "pyproximal", "design"])
     args = ap.parse_args()
 
     args.out.parent.mkdir(parents=True, exist_ok=True)

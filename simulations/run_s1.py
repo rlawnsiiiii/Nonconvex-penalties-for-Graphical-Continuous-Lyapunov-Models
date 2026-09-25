@@ -30,7 +30,7 @@ from gclm.metrics import evaluate_path
 
 FIELDS = ["p", "k", "c_choice", "rep", "max_acc", "max_f1", "auc", "aupr", "seconds"]
 
-SOLVERS = ("fista", "design", "glmnet", "ncvreg")
+SOLVERS = ("fista", "ncvreg", "skglm", "glmnet", "pyproximal", "design")
 
 
 def run_one(task):
@@ -76,13 +76,15 @@ def main() -> None:
                     help="use the covariance matrix instead of the correlation matrix")
     ap.add_argument("--tol", type=float, default=base.tol)
     ap.add_argument("--solver", default=base.solver,
-                    choices=["fista", "design", "glmnet", "ncvreg"],
-                    help="fista: default, the only one that scales to p=50. "
+                    choices=["fista", "ncvreg", "skglm", "glmnet", "pyproximal", "design"],
+                    help="fista: default; the only one that reaches p=50. "
+                         "ncvreg: most accurate, MCP and SCAD. "
+                         "skglm: pure-Python MCP, no R. "
                          "glmnet: Dettling's own choice. "
-                         "ncvreg: most accurate, and the route to MCP/SCAD.")
+                         "pyproximal: packaged FISTA.")
     ap.add_argument("--penalty", default=base.penalty,
                     choices=["lasso", "MCP", "SCAD"],
-                    help="MCP/SCAD require --solver ncvreg")
+                    help="MCP needs --solver ncvreg or skglm; SCAD needs ncvreg")
     ap.add_argument("--gamma", type=float, default=base.gamma,
                     help="MCP/SCAD concavity parameter (ncvreg default: 3 / 3.7)")
     ap.add_argument("--out", type=Path, default=Path("results/s1.csv"))

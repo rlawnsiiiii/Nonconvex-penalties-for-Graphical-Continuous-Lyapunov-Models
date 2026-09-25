@@ -32,12 +32,16 @@ class S1Config:
 
     seed: int = 20260922
 
-    # Solver backend: "fista" (default; the only one that scales to the full
-    # p = 50 grid), "design", "glmnet" (Dettling's own choice), or "ncvreg"
-    # (most accurate, and the only backend offering MCP/SCAD).  See
-    # simulations/S1_reproduction.md Section 7.2.
+    # Solver backend.  Default "fista": the hand-written accelerated proximal
+    # gradient.  It is the only backend that reaches p = 50 in practical time
+    # (the others work on the explicit p^2 x p^2 design, O(p^4) per sweep), and
+    # it is validated against an analytic solution, a duality-gap certificate,
+    # cvxpy/CLARABEL, and every other backend -- see tests/test_fista.py and
+    # docs/FISTA.md.  Alternatives: "ncvreg" (MCP/SCAD, most accurate),
+    # "skglm" (pure-Python MCP), "glmnet" (Dettling's choice), "pyproximal",
+    # "design".
     solver: str = "fista"
-    penalty: str = "lasso"          # "MCP"/"SCAD" require solver="ncvreg"
+    penalty: str = "lasso"          # "MCP": ncvreg or skglm; "SCAD": ncvreg
     gamma: float | None = None      # concavity parameter for MCP/SCAD
 
     @property

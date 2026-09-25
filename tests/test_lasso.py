@@ -591,3 +591,81 @@ def test_glmnet_backend_returns_every_requested_lambda():
         path = lasso_path(sigma, c, lambdas=lams, solver="glmnet")
         assert len(path.estimates) == n_lambda
         assert np.allclose(path.lambdas, lams)
+
+
+try:
+    import pyproximal  # noqa: F401
+    import pylops  # noqa: F401
+    PYPROXIMAL_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    PYPROXIMAL_AVAILABLE = False
+
+requires_pyproximal = pytest.mark.skipif(
+    not PYPROXIMAL_AVAILABLE,
+    reason="pyproximal/pylops not installed (pip install pyproximal pylops)",
+)
+
+
+@requires_pyproximal
+def test_pyproximal_operator_is_the_design_matrix():
+    """The matrix-free LinearOperator must reproduce A(Sigma) and its adjoint.
+
+    This is what lets a packaged FISTA run at O(p^3) instead of forming the
+    p^2 x p^2 design.  If either direction were wrong the solver would silently
+    minimize the wrong objective.
+    """
+    from pylops import LinearOperator
+
+    rng = np.random.default_rng(0)
+    p = 4
+    sigma = rng.normal(size=(p, p))
+    sigma = sigma @ sigma.T + p * np.eye(p)
+    a = design_matrix(sigma)
+
+    class Op(LinearOperator):
+        def __init__(self):
+            super().__init__(dtype=np.dtype(float), shape=(p * p, p * p))
+
+        def _matvec(self, v):
+            m = unvec(v, p)
+            return vec(m @ sigma + sigma @ m.T)
+
+        def _rmatvec(self, u):
+            m = unvec(u, p)
+            return vec((m + m.T) @ sigma)
+
+    op = Op()
+    for _ in range(5):
+        v = rng.normal(size=p * p)
+        assert np.allclose(op @ v, a @ v)
+        assert np.allclose(op.H @ v, a.T @ v)
+
+
+@requires_pyproximal
+def test_pyproximal_backend_agrees_with_ncvreg_supports():
+    """The packaged-FISTA backend selects the same supports as the default.
+
+    Coefficients are only compared loosely: pyproximal's FISTA has no adaptive
+    restart, so on this singular-Hessian problem it stops much further from the
+    optimum for the same budget (docs/FISTA.md Section 3).
+    """
+    rng = np.random.default_rng(3)
+    p = 5
+    _, _, _, sigma = draw_instance(p, 2, 300, CChoice.ID, rng)
+    c = 2 * np.eye(p)
+    lams = lambda_grid(lambda_max(sigma, c), n_lambda=8, ratio=1e-2)
+
+    ref = lasso_path(sigma, c, lambdas=lams, solver="fista",
+                     tol=1e-14, max_iter=500_000).estimates
+    got = lasso_path(sigma, c, lambdas=lams, solver="pyproximal",
+                     niter=50_000).estimates
+    for lam, a, b in zip(lams, got, ref):
+        assert np.array_equal(a != 0, b != 0), lam
+        assert np.allclose(a, b, atol=1e-3), lam
+
+
+@requires_pyproximal
+def test_pyproximal_backend_rejects_nonconvex_penalty(instance):
+    _, sigma, c = instance
+    with pytest.raises(ValueError, match="penalty='lasso' only"):
+        lasso_path(sigma, c, n_lambda=3, solver="pyproximal", penalty="MCP")

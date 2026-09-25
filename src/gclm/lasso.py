@@ -21,8 +21,17 @@ selected with ``lasso_path(..., solver=...)``:
              Reaches the exact KKT solution in tens of iterations, and is the
              route to MCP/SCAD in S1b (``penalty=``).
 ``skglm``    Python, ``skglm`` (Bertrand et al., JMLR 2025).  Coordinate descent
-             with Anderson acceleration on the explicit design.  Slower and less
-             accurate here than ``fista``, but offers MCP/SCAD **without R**.
+             with Anderson acceleration on the explicit design.  Offers MCP
+             **without R**.
+``pyproxim`` Python, ``pyproximal`` + ``pylops``.  A packaged FISTA, driven
+             matrix-free through a custom ``LinearOperator``.  Its FISTA has no
+             adaptive restart, which costs it badly on this singular-Hessian
+             problem: ~38x slower than ``fista`` for far lower accuracy.
+``fista``    Python, hand-written accelerated proximal gradient with the adaptive
+             restart of O'Donoghue & Candes (2015).  **The default.**  The only
+             backend that scales to ``p = 50``; validated in
+             ``tests/test_fista.py`` against an analytic solution, a duality-gap
+             certificate, ``cvxpy``/CLARABEL and every other backend.
 ===========  ===================================================================
 
 Accuracy and cost differ; see ``simulations/S1_reproduction.md`` Section 7.2.
@@ -278,6 +287,70 @@ def to_ncvreg_lambda(lam, p: int):
     return np.asarray(lam) / p ** 2
 
 
+def _pyproximal_path(
+    sigma: np.ndarray,
+    c: np.ndarray,
+    lambdas: np.ndarray,
+    weights: np.ndarray,
+    penalty: str = "lasso",
+    niter: int = 20_000,
+    tol: float = 1e-14,
+    **_ignored,
+) -> list[np.ndarray]:
+    """Fit the path with ``pyproximal``'s FISTA, warm-started.
+
+    The design is applied matrix-free through a ``pylops`` ``LinearOperator``
+    that evaluates ``v -> vec(V Sigma + Sigma V')`` in ``O(p^3)``, so no
+    ``p^2 x p^2`` matrix is ever formed -- the same trick the hand-written
+    backend uses.  Only the iteration itself comes from the package.
+    """
+    try:
+        import pyproximal
+        from pylops import LinearOperator
+        from pyproximal.optimization.primal import ProximalGradient
+    except ImportError as exc:  # pragma: no cover
+        raise ImportError(
+            "solver='pyproximal' needs: pip install pyproximal pylops"
+        ) from exc
+
+    if penalty != "lasso":
+        raise ValueError("the pyproximal backend supports penalty='lasso' only")
+
+    p = sigma.shape[0]
+    s_mat = np.asarray(sigma, dtype=float)
+
+    class _LyapunovOperator(LinearOperator):
+        """``vec(M) -> vec(M Sigma + Sigma M')`` and its adjoint, both O(p^3)."""
+
+        def __init__(self):
+            super().__init__(dtype=np.dtype(float), shape=(p * p, p * p))
+
+        def _matvec(self, v):
+            m = unvec(v, p)
+            return vec(m @ s_mat + s_mat @ m.T)
+
+        def _rmatvec(self, u):
+            m = unvec(u, p)
+            return vec((m + m.T) @ s_mat)
+
+    op = _LyapunovOperator()
+    y = -vec(c)
+    wv = vec(weights)
+    tau = 1.0 / lipschitz_bound(s_mat)
+    smooth = pyproximal.L2(Op=op, b=y)
+
+    x = np.zeros(p * p)
+    estimates: list[np.ndarray] = []
+    for lam in np.asarray(lambdas)[::-1]:
+        x = ProximalGradient(
+            smooth, pyproximal.L1(sigma=float(lam) * wv), x0=x, tau=tau,
+            acceleration="fista", niter=niter, tol=tol, show=False,
+        )
+        estimates.append(unvec(x, p).copy())
+    estimates.reverse()
+    return estimates
+
+
 def _skglm_path(
     sigma: np.ndarray,
     c: np.ndarray,
@@ -456,6 +529,10 @@ def lasso_path(
         estimates = _skglm_path(sigma, c, lambdas, weights, **solver_kwargs)
         return LassoPath(lambdas=lambdas, estimates=_snap(estimates, zero_tol))
 
+    if solver == "pyproximal":
+        estimates = _pyproximal_path(sigma, c, lambdas, weights, **solver_kwargs)
+        return LassoPath(lambdas=lambdas, estimates=_snap(estimates, zero_tol))
+
     if solver in _R_BACKENDS:
         if penalize_diagonal:
             raise ValueError(
@@ -468,7 +545,7 @@ def lasso_path(
     if solver not in ("fista", "design"):
         raise ValueError(
             f"unknown solver {solver!r}; expected one of "
-            f"{('fista', 'design', 'skglm') + tuple(_R_BACKENDS)}"
+            f"{('fista', 'design', 'skglm', 'pyproximal') + tuple(_R_BACKENDS)}"
         )
     # the Python solvers implement the l1 prox only; drop the penalty knobs that
     # are meaningful to the ncvreg backend alone
