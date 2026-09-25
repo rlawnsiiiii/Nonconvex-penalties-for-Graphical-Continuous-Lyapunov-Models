@@ -1,0 +1,13 @@
+# editors
+.idea/
+.vscode/
+
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.venv/
+
+# simulation output
+/results/

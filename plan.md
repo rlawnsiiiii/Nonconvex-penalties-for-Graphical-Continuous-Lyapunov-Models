@@ -41,6 +41,3 @@ Thesis - Joon Kim
     -  here you would need to code up something, if you do a gradient based method, then Varando Hansen explain how to compute the gradient of the Gaussian log-likelihood a bit more efficient than "naive"
 - when this is done, you can consider a score-based search method as an alternative (with quadratic loss + BIC-type penalty or likelihood + BIC-type penalty)
     - [again you would need to code up something]
-
-### Reading list
-- 
