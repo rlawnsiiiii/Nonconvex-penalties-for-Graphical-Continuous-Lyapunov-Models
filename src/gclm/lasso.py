@@ -23,10 +23,11 @@ selected with ``lasso_path(..., solver=...)``:
 ``skglm``    Python, ``skglm`` (Bertrand et al., JMLR 2025).  Coordinate descent
              with Anderson acceleration on the explicit design.  Offers MCP
              **without R**.
-``pyproxim`` Python, ``pyproximal`` + ``pylops``.  A packaged FISTA, driven
-             matrix-free through a custom ``LinearOperator``.  Its FISTA has no
-             adaptive restart, which costs it badly on this singular-Hessian
-             problem: ~38x slower than ``fista`` for far lower accuracy.
+``pyproxim`` Python, ``pyproximal`` + ``pylops``, driven matrix-free through a
+             custom ``LinearOperator``.  Defaults to ``AndersonProximalGradient``
+             (``method="anderson"``); ``method="fista"`` selects the plain FISTA,
+             which is ~10x slower because ``pyproximal`` offers no adaptive
+             restart.
 ``fista``    Python, hand-written accelerated proximal gradient with the adaptive
              restart of O'Donoghue & Candes (2015).  **The default.**  The only
              backend that scales to ``p = 50``; validated in
@@ -293,11 +294,21 @@ def _pyproximal_path(
     lambdas: np.ndarray,
     weights: np.ndarray,
     penalty: str = "lasso",
-    niter: int = 20_000,
+    method: str = "anderson",
+    niter: int = 200_000,
+    nhistory: int = 5,
     tol: float = 1e-14,
     **_ignored,
 ) -> list[np.ndarray]:
-    """Fit the path with ``pyproximal``'s FISTA, warm-started.
+    """Fit the path with ``pyproximal``, warm-started.
+
+    ``method``: ``"anderson"`` (default) uses ``AndersonProximalGradient``;
+    ``"fista"`` uses ``ProximalGradient(acceleration="fista")``.
+
+    Anderson is the better choice here by a wide margin (~10x).  ``pyproximal``
+    offers no adaptive restart, so its plain FISTA suffers the momentum
+    overshoot that restart exists to prevent; Anderson acceleration cures the
+    same pathology by a different mechanism.
 
     The design is applied matrix-free through a ``pylops`` ``LinearOperator``
     that evaluates ``v -> vec(V Sigma + Sigma V')`` in ``O(p^3)``, so no
@@ -307,7 +318,10 @@ def _pyproximal_path(
     try:
         import pyproximal
         from pylops import LinearOperator
-        from pyproximal.optimization.primal import ProximalGradient
+        from pyproximal.optimization.primal import (
+            AndersonProximalGradient,
+            ProximalGradient,
+        )
     except ImportError as exc:  # pragma: no cover
         raise ImportError(
             "solver='pyproximal' needs: pip install pyproximal pylops"
@@ -339,13 +353,21 @@ def _pyproximal_path(
     tau = 1.0 / lipschitz_bound(s_mat)
     smooth = pyproximal.L2(Op=op, b=y)
 
+    if method not in ("anderson", "fista"):
+        raise ValueError(f"unknown pyproximal method {method!r}")
+
     x = np.zeros(p * p)
     estimates: list[np.ndarray] = []
     for lam in np.asarray(lambdas)[::-1]:
-        x = ProximalGradient(
-            smooth, pyproximal.L1(sigma=float(lam) * wv), x0=x, tau=tau,
-            acceleration="fista", niter=niter, tol=tol, show=False,
-        )
+        g = pyproximal.L1(sigma=float(lam) * wv)
+        if method == "anderson":
+            x = AndersonProximalGradient(smooth, g, x0=x, tau=tau,
+                                         nhistory=nhistory, niter=niter,
+                                         tol=tol, show=False)
+        else:
+            x = ProximalGradient(smooth, g, x0=x, tau=tau,
+                                 acceleration="fista", niter=niter,
+                                 tol=tol, show=False)
         estimates.append(unvec(x, p).copy())
     estimates.reverse()
     return estimates

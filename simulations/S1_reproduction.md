@@ -274,15 +274,18 @@ objective and are cross-checked against each other in `test_all_four_backends_ag
 |---|---|---|---|---|
 | **`fista`** *(default)* | Python, hand-written accelerated proximal gradient + adaptive restart | 2e-13 at `tol=1e-14` | $p{=}10$ 0.9 s, $p{=}20$ 5 s | **everything** — the only backend that reaches $p=50$ |
 | **`ncvreg`** | R, `ncvreg::ncvfit` | **4e-12**, in 8–48 iterations | $p{=}10$ 10 s, $p{=}20$ 244 s | accuracy-critical runs, and MCP/SCAD in S1b |
-| **`pyproximal`** | Python, packaged FISTA on a matrix-free `pylops` operator | 2.7e-05 after 13.6 s | ~38× `fista` | a packaged FISTA, if one is wanted |
+| **`pyproximal`** | Python, packaged FISTA on a matrix-free `pylops` operator | machine precision, ~40–50× slower | $p{=}10$ 1.0 s, $p{=}20$ 1.6 s | a packaged FISTA, if one is wanted |
 | **`glmnet`** | R, transcription of Varando's `lassoB()` | 1e-4 – 7e-2 (see below) | $p{=}10$ ~1 s | **fidelity to Dettling**, who used it |
 | **`skglm`** | Python, `skglm` AndersonCD on explicit $A(\hat\Sigma)$ | 9e-7 | $p{=}10$ 2.2 s, $p{=}20$ 30 s | **MCP without R** |
 | **`design`** | Python, coordinate descent on explicit $A(\hat\Sigma)$ | 4e-8 | slow (~58 s at $p{=}8$) | a transparent reference in tests |
 
-**Default is `fista`.** Every package backend works on the explicit $p^2\times p^2$ design
-($O(p^4)$ per sweep against $O(p^3)$) and none reaches $p=50$ in practical time — at $p=20$
-`ncvreg` is already 48× slower — so the reproduction is only finishable with the matrix-free
-solver.
+**Default is `fista`, for speed only.** It is the same algorithm as any FISTA and converges to the
+same point. Against `ncvreg`/`skglm`/`glmnet` the advantage is structural — they need the explicit
+$p^2\times p^2$ design, $O(p^4)$ per sweep against $O(p^3)$, and at $p=20$ `ncvreg` is already 48×
+slower. Against `pyproximal`, which also runs matrix-free, the advantage is incidental (~4× lower
+per-iteration overhead, ~2–3× fewer iterations from adaptive restart). Either way, $p=50$ is not
+reachable with a package backend in practical time, so the reproduction is only finishable with the
+matrix-free solver.
 
 Since that puts the burden of proof on our own code, `tests/test_fista.py` validates it against
 targets that share no failure mode with a first-order method:
