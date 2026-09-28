@@ -84,20 +84,13 @@ def test_matches_analytic_solution_for_diagonal_inputs(p, lam):
 
 
 def _duality_gap(m, sigma, c, lam, w):
-    """Primal minus dual value at a feasible dual point.
-
-    For `min 0.5||y - Xb||^2 + lam * sum_j w_j |b_j|`, any residual `r = y - Xb`
-    rescaled to satisfy `|x_j' theta| <= lam w_j` is dual feasible, and
-    `D(theta) = 0.5||y||^2 - 0.5||y - theta||^2` lower-bounds the optimum.  The
-    gap therefore bounds suboptimality from above with no reference solution.
-    """
     x, y = design_matrix(sigma), -vec(c)
-    b = vec(m)
+    b, wv = vec(m), vec(w)
     r = y - x @ b
-    wv = vec(w)
     pen = wv > 0
-    scale = max(1.0, float(np.max(np.abs(x.T @ r)[pen] / (lam * wv[pen]))))
-    theta = r / scale
+    xu = x[:, ~pen]                                           # unpenalized columns
+    theta = r - xu @ np.linalg.lstsq(xu, r, rcond=None)[0]    # enforce X_U' theta = 0
+    theta /= max(1.0, float(np.max(np.abs(x.T @ theta)[pen] / (lam * wv[pen]))))
     primal = 0.5 * r @ r + lam * float(np.sum(wv * np.abs(b)))
     dual = 0.5 * y @ y - 0.5 * float(np.sum((y - theta) ** 2))
     return primal - dual
@@ -108,7 +101,8 @@ def test_duality_gap_certifies_optimality(lam):
     """The gap bounds suboptimality without needing a reference solution."""
     sigma, c, w = _problem()
     m = solve_fista(sigma, c, lam, weights=w, **TIGHT)
-    assert abs(_duality_gap(m, sigma, c, lam, w)) < 1e-10
+    gap = _duality_gap(m, sigma, c, lam, w)
+    assert -1e-12 < gap < 1e-10
 
 
 def test_duality_gap_shrinks_with_tolerance():

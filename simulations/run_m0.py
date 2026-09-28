@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 import time
 from pathlib import Path
@@ -25,7 +26,7 @@ from gclm.dgp import sample_covariance, sample_data
 from gclm.examples import example2_cycle, example2_path
 from gclm.lasso import lasso_path
 from gclm.lyap import solve_lyapunov
-from gclm.metrics import evaluate_path
+from gclm.metrics import confusion, evaluate_path
 
 SETTINGS = ("path", "cycle_fixed", "cycle_random")
 
@@ -52,6 +53,7 @@ def main() -> None:
     c = 2.0 * np.eye(5)
     rng = np.random.default_rng(args.seed)
     rows = []
+    detail = []
     t0 = time.time()
 
     for setting in SETTINGS:
@@ -72,6 +74,17 @@ def main() -> None:
                     "max_acc": ev["max_acc"], "max_f1": ev["max_f1"],
                     "auc": ev["auc"], "aupr": ev["aupr"],
                 })
+                # full per-lambda detail, so any metric can be recomputed later
+                # without re-running (see run_s1_shard.py for the same idea)
+                off = np.array([[(cf := confusion(m, m_star, False)).tp, cf.fp,
+                                 cf.tn, cf.fn] for m in path.estimates], np.int32)
+                inc = np.array([[(cf := confusion(m, m_star, True)).tp, cf.fp,
+                                 cf.tn, cf.fn] for m in path.estimates], np.int32)
+                detail.append({
+                    "setting": SETTINGS.index(setting), "n": float(n), "rep": rep,
+                    "lambdas": path.lambdas, "conf_offdiag": off,
+                    "conf_incdiag": inc, "m15": m_star[0, 4],
+                })
                 # the fixed settings are deterministic at n = inf
                 if np.isinf(n) and setting in ("path", "cycle_fixed"):
                     break
@@ -82,7 +95,28 @@ def main() -> None:
         w.writeheader()
         w.writerows(rows)
 
-    print(f"\nwrote {len(rows)} rows to {args.out}\n")
+    npz = args.out.with_suffix(".npz")
+    np.savez_compressed(
+        npz,
+        setting=np.array([d["setting"] for d in detail]),
+        setting_names=np.array(SETTINGS),
+        n=np.array([d["n"] for d in detail]),
+        rep=np.array([d["rep"] for d in detail]),
+        m15=np.array([d["m15"] for d in detail]),
+        lambdas=np.array([d["lambdas"] for d in detail]),
+        conf_offdiag=np.array([d["conf_offdiag"] for d in detail]),
+        conf_incdiag=np.array([d["conf_incdiag"] for d in detail]),
+        config_json=json.dumps({
+            "n_rep": args.reps, "n_lambda": cfg.n_lambda,
+            "lambda_ratio": cfg.lambda_ratio, "seed": args.seed,
+            "solver": args.solver, "sample_sizes": [float(x) for x in cfg.sample_sizes],
+            "diagonal": list(cfg.diagonal), "subdiagonal": cfg.subdiagonal,
+            "m15_fixed": cfg.m15_fixed, "m15_range": list(cfg.m15_range),
+        }),
+    )
+
+    print(f"\nwrote {len(rows)} rows to {args.out}")
+    print(f"wrote per-lambda detail for {len(detail)} paths to {npz}\n")
     print(f"{'setting':<14}{'n':>8}  {'max_acc':>8}{'max_f1':>9}{'auc':>8}")
     for setting in SETTINGS:
         for n in cfg.sample_sizes:

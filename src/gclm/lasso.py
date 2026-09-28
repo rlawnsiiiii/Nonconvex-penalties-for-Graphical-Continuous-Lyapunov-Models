@@ -538,12 +538,18 @@ def lasso_path(
     """
     p = sigma.shape[0]
     weights = penalty_weights(p, penalize_diagonal=penalize_diagonal)
+
+    # lambda_max is needed for the grid, and again below to short-circuit the
+    # sparse end of the path: for lam >= lambda_max the minimiser is exactly the
+    # diagonal least-squares fit, by the definition of lambda_max.  With the
+    # diagonal unpenalised it is a closed form (O(p^3)), so computing it even
+    # when the caller supplied its own grid is cheap.
+    lam_max: float | None = None
+    if lambdas is None or not penalize_diagonal:
+        lam_max = lambda_max(sigma, c, penalize_diagonal=penalize_diagonal)
     if lambdas is None:
-        lambdas = lambda_grid(
-            lambda_max(sigma, c, penalize_diagonal=penalize_diagonal),
-            n_lambda=n_lambda,
-            ratio=ratio,
-        )
+        lambdas = lambda_grid(lam_max, n_lambda=n_lambda, ratio=ratio)
+
     lambdas = np.asarray(lambdas, dtype=float)
     solver_kwargs = dict(solver_kwargs)
 
@@ -587,7 +593,7 @@ def lasso_path(
     estimates: list[np.ndarray] = []
     warm = None
     for lam in lambdas[::-1]:
-        if not penalize_diagonal and lam >= lam_max:
+        if lam_max is not None and not penalize_diagonal and lam >= lam_max:
             warm = diagonal_fit(sigma, c)  # exact: KKT holds by definition of lam_max
         else:
             warm = fit(sigma, c, lam, weights=weights, m_init=warm, **solver_kwargs)
