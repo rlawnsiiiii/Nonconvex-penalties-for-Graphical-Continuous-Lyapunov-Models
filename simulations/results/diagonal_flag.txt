@@ -1,0 +1,10 @@
+p= 10 include_diagonal=False  max_acc=0.802 max_f1=0.535 auc=0.688 aupr=0.363
+p= 10 include_diagonal=True   max_acc=0.822 max_f1=0.702 auc=0.793 aupr=0.673
+p= 20 include_diagonal=False  max_acc=0.886 max_f1=0.445 auc=0.725 aupr=0.300
+p= 20 include_diagonal=True   max_acc=0.892 max_f1=0.635 auc=0.816 aupr=0.633
+
+Dettling Fig.5 C_ID reference (read off the published axes):
+  p=10: max_acc~0.88  max_f1~0.58  auc~0.85  aupr~0.44
+  p=20: max_acc~0.91  max_f1~0.57  auc~0.85  aupr~0.43
+
+[exited with code 0]

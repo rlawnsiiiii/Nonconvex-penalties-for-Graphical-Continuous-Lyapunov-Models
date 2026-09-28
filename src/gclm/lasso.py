@@ -586,8 +586,11 @@ def lasso_path(
 
     estimates: list[np.ndarray] = []
     warm = None
-    for lam in lambdas[::-1]:  # decreasing lambda, warm start
-        warm = fit(sigma, c, lam, weights=weights, m_init=warm, **solver_kwargs)
+    for lam in lambdas[::-1]:
+        if not penalize_diagonal and lam >= lam_max:
+            warm = diagonal_fit(sigma, c)  # exact: KKT holds by definition of lam_max
+        else:
+            warm = fit(sigma, c, lam, weights=weights, m_init=warm, **solver_kwargs)
         estimates.append(warm.copy())
     estimates.reverse()
     return LassoPath(lambdas=lambdas, estimates=_snap(estimates, zero_tol))
