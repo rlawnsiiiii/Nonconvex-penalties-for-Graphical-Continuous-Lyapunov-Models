@@ -4,6 +4,7 @@ Research plan and meeting notes: [`plan.md`](plan.md).
 Code map and diagrams: [`ARCHITECTURE.md`](ARCHITECTURE.md).
 How the problem is encoded into glmnet / ncvreg: [`R/ENCODING.md`](R/ENCODING.md).
 The default solver and why it is hand-written: [`docs/FISTA.md`](docs/FISTA.md).
+Running the full reproduction on a cluster: [`docs/REPRODUCTION.md`](docs/REPRODUCTION.md).
 
 ## Layout
 
@@ -13,9 +14,14 @@ ARCHITECTURE.md              repository structure, with diagrams
 simulations/
   S1_reproduction.md         spec + implementation plan for study S1
   run_m0.py                  Dettling Example 2 / Figure 3   (minutes)
-  run_s1.py                  Dettling Section 5 / Figure 5   (~7 h on 8 cores)
+  run_s1.py                  Dettling Section 5 / Figure 5   (local, multiprocessing)
+  run_s1_shard.py            the same grid, one shard -> .npz  (cluster)
+  aggregate_s1.py            shards -> tidy CSVs
+  plot_figures.py            CSVs -> figures            (LOCAL ONLY)
   results/                   committed run outputs
 src/gclm/                    the library (see S1_reproduction.md Section 7.1)
+cluster/                     LRZ SLURM batch scripts + env setup
+figures/                     generated plots (local)
 R/                           glmnet + ncvreg solver backends (see R/ENCODING.md)
 tests/                       pytest; the `r` marker needs Rscript + glmnet/ncvreg
 ```

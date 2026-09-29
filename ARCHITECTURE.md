@@ -31,12 +31,21 @@ repo/
 │
 ├── simulations/
 │   ├── S1_reproduction.md         spec, configs, findings (§8), status (§9)
-│   ├── run_m0.py     (97)         ▶ Figure 3   — minutes
-│   ├── run_s1.py    (114)         ▶ Figure 5   — ~7 h on 8 cores (measured)
+│   ├── run_m0.py                  ▶ Figure 3   — minutes
+│   ├── run_s1.py                  ▶ Figure 5   — local, multiprocessing
+│   ├── run_s1_shard.py            ▶ Figure 5   — one cluster shard -> rich .npz
+│   ├── aggregate_s1.py            shards -> s1_per_dataset / _summary / _curves
+│   ├── plot_figures.py            CSVs -> figures  (LOCAL ONLY, never on the cluster)
 │   └── results/                   committed run outputs backing §8
 │
 ├── docs/
-│   └── FISTA.md                   solve_fista: algorithm, references, package survey
+│   ├── FISTA.md                   solve_fista: algorithm, references, package survey
+│   └── REPRODUCTION.md            cluster recipe: what runs where, what comes back
+│
+├── cluster/                       LRZ SLURM job scripts
+│   ├── setup_env.sh               one-time venv setup on a login node
+│   ├── s1_array.sbatch            Figure 5, 64-task array on serial_std
+│   └── m0.sbatch                  Figure 3, single serial job
 │
 ├── R/                             solver backends + metric reference
 │   ├── ENCODING.md                how X and y map into the package calls, worked by hand

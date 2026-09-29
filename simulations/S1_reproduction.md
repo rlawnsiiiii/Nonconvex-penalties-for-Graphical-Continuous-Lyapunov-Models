@@ -682,6 +682,52 @@ rather than 100. Worth resolving before the figure is treated as fully reproduce
 
 Raw output: `results/s1_allC_allp_reps10_standardized.csv`.
 
+### 8.8 Checked against the actual figure — two defects found, one fixed
+
+Everything above compared our numbers to Figure 5's *axis tick ranges*, because the text is all the
+extracted PDF gives. That is a weak test. Rendering page 10 of the PDF and reading the plotted
+curves directly is a much sharper one, and it exposed two problems.
+
+**Defect 1 (fixed): the PR curve was truncated, biasing `aupr` down by 0.05–0.14.**
+
+The lasso path *saturates*. Because `A(Σ)` has rank $p(p+1)/2$ out of $p^2$ (§2.3), the lasso can
+never select more than $p(p+1)/2$ entries, and the densest fit on the grid is nowhere near dense:
+
+| $p$ | nonzeros at $\lambda_{\min}$ | $=\,p(p+1)/2$? | max tpr | max fpr |
+|---|---|---|---|---|
+| 10 | 45 off-diag + 10 diag = 55 | 55 ✓ | 0.72 | 0.44 |
+| 15 | 105 + 15 = 120 | 120 ✓ | 0.76 | 0.46 |
+| 20 | 190 + 20 = 210 | 210 ✓ | 0.79 | 0.46 |
+
+So the PR curve stops at recall ≈ 0.72–0.79 and the area from there up to recall 1 was simply
+dropped. Varando's `lassoB()` avoids this by prepending `list(B = Sigma, lambda = 0)` — a fully
+dense pseudo-estimate — before scoring, and Dettling's "interpolation and extrapolation if
+necessary" (Definition G.5) says the same. `evaluate_path(..., anchor_dense=True)` now prepends
+that point. The ROC is unaffected (it already anchored at (1,1)); `max_acc`/`max_f1` are unaffected
+(maxima over the grid only).
+
+Effect on `aupr` at $p=10$: C_ID −0.054 → **+0.037**, C_Random_Diag −0.067 → **+0.027**.
+
+**Defect 2 (open): `C_Random_Full` is systematically too hard in our DGP.**
+
+After the fix, three of the four volatility choices match Figure 5 well. The fourth does not:
+
+| metric | C_ID | C_Random_Min_Diag | C_Random_Diag | **C_Random_Full** |
+|---|---|---|---|---|
+| `max_acc` | ±0.005 | ±0.003 | ±0.006 | −0.003 … −0.012 |
+| `max_f1` | ±0.007 | ±0.013 | +0.004 … +0.038 | **−0.037 … −0.040** |
+| `auc` | −0.006 … −0.017 | ±0.002 | −0.013 … +0.013 | **−0.037 … −0.052** |
+| `aupr` | −0.004 … +0.037 | +0.016 … +0.026 | +0.021 … +0.027 | **−0.031 … −0.050** |
+
+The deficit is consistent in sign and size across all three metrics and all three $p$, so it is a
+property of choice 4's data-generating process, not noise. Our §3.2 implementation follows the text
+literally: $\tilde\omega_{ij}\sim\mathrm{Bernoulli}(2/p)$ over the full $p\times p$ matrix, giving
+$P(C_{ij}\neq0)=1-(1-2/p)^2\approx 4/p$ and so ≈ 4 nonzero off-diagonals per row.
+
+Next diagnostic: measure how far $\Sigma(M,C)$ under choice 4 sits from the $C=2I$ model actually
+being fitted, and compare against a reading where $\tilde\omega$ is drawn only for $i<j$ (≈ 2
+nonzeros per row instead of 4). A sparser $C$ would make choice 4 easier and could close the gap.
+
 ---
 
 ## 9. Status and what is left
@@ -712,9 +758,9 @@ Run outputs backing §8 are committed under [`results/`](results/).
    (§8.4, $p \le 20$). The paper uses 100 replicates and all four $C$ choices at all seven $p$:
    11,200 datasets, ~7 h on 8 cores — measured from the 1,120-dataset run in §8.7, which
    spans the same $p$ range and $C$ choices. Nothing blocks this on cluster access.
-2. **`C_Random_Full` sits below two axis floors** (§8.7): `aupr` 0.25–0.27 against a floor of 0.30,
-   and `max_f1` below 0.45 for $p \ge 20$. The other three $C$ curves are inside on every metric.
-   Re-run choice 4 at 100 replicates first; if the gap persists, re-read §3.2 against the paper.
+2. **`C_Random_Full` is systematically too hard** — see §8.8, now measured against the plotted
+   curves rather than the axis ranges: `max_f1`, `auc` and `aupr` all sit 0.03–0.05 below Dettling
+   at every $p$, while the other three choices match. Test the $i<j$ reading of $\tilde\omega$.
 3. **`penalize_diagonal`** is still inferred from Varando's `penalty.factor = 1 - diag(p)`, not
    confirmed against Dettling. Cheap to test the same way as §8.5 and §8.6.
 4. **`metzler`** (§3.1): the papers' text and Varando's code disagree on whether off-diagonal

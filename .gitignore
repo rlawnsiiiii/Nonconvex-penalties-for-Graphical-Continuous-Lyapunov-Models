@@ -14,3 +14,7 @@ __pycache__/
 
 # simulation output
 /results/
+
+# generated figures and cluster logs
+figures/
+logs/
