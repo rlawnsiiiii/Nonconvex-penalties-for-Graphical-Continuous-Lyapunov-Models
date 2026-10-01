@@ -5,7 +5,9 @@ The cluster writes numbers only; this script turns them into figures.  It reads
 nothing but the aggregated CSV/NPZ files, so it can be re-run and restyled
 without touching the simulation.
 
-    python simulations/plot_figures.py --results results --out figures
+    python simulations/plot_figures.py --results runs/s1_dettling_reproduction
+
+writes the figures to ``<results>/figures/``, next to the numbers they are made from.
 
 Palette: categorical slots blue / orange / aqua / violet, validated for
 colourblind separation and normal-vision separation (see docs/REPRODUCTION.md).
@@ -158,9 +160,13 @@ def plot_figure3(results: Path, out: Path):
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--results", type=Path, default=Path("results"))
-    ap.add_argument("--out", type=Path, default=Path("figures"))
+    ap.add_argument("--results", type=Path, default=Path("runs/s1_dettling_reproduction"),
+                    help="a run directory: m0_reps100.csv and/or s1_summary.csv")
+    ap.add_argument("--out", type=Path, default=None,
+                    help="where to write the figures (default: <results>/figures)")
     args = ap.parse_args()
+    if args.out is None:
+        args.out = args.results / "figures"
     args.out.mkdir(parents=True, exist_ok=True)
     print(f"reading {args.results}, writing {args.out}")
     plot_figure3(args.results, args.out)

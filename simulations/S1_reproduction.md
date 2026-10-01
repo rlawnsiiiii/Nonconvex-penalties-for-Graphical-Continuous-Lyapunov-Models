@@ -1,7 +1,8 @@
 # S1 — Reproduction: Direct Lyapunov Lasso (quadratic loss + $\ell_1$)
 
-**Status:** specification + implementation plan. Baseline for the thesis; the SCAD/MCP
-variants (S1b) plug into the same harness by swapping only the proximal operator.
+**Status:** specification, implementation and reproduction record. Baseline for the thesis.
+The MCP/SCAD variants (S1b) are implemented on the same harness — see
+[`docs/NONCONVEX.md`](../docs/NONCONVEX.md).
 
 **Target:** reproduce Dettling, Drton & Kolar (2024), *On the Lasso for Graphical Continuous
 Lyapunov Models*, PMLR v236 — Section 5 (Figure 5) and Section 1.3 (Figure 3).
@@ -185,7 +186,7 @@ flag defaulting to the value we believe matches Dettling, with the alternative t
 |---|---|---|
 | `penalize_diagonal` | `False` | Eq. (1.4) literally writes $\lambda\|M\|_1$ (all entries). But Dettling used `glmnet`, and Varando's `lassoB` passes `penalty.factor = 1 - diag(p)`, i.e. **diagonal unpenalized**. Unpenalized diagonal is also what makes "smallest $\lambda$ such that $\hat M$ is diagonal" a well-posed, closed-form quantity — if the diagonal were penalized, large $\lambda$ would drive $\hat M \to 0$, which is *also* diagonal. |
 | `metrics_include_diagonal` | `False` | **RESOLVED — see §8.5.** Definition G.4 counts over all $\hat M_{ij}$ with no stated exclusion, but Varando's `evaluatePathB` scores `lower.tri \| upper.tri` only. Settled empirically in favour of `False`. |
-| `standardize` | `True` | **RESOLVED — see §8.6.** Varando's `simulate.R` uses `cor(data)`; Dettling never mentions it. Settled empirically in favour of `True`: it is what brings all four metrics inside Figure 5's ranges across $10 \le p \le 50$. Standardization does **not** change the support: if $\Sigma = D R D$ then the correlation-scale drift is $D^{-1}MD$, same zero pattern. |
+| `standardize` | `True` | **RESOLVED — see §8.6.** Varando's `simulate.R` uses `cor(data)`; Dettling's CLeaR paper never mentions it, but his dissertation does (§3.7.2: "the sample covariance matrix Σ̂ on the standardized data"; §3.7.3: $(X-\mu)/\sigma$, i.e. centred and scaled). Ours is uncentred, an $O(1/n)$ difference. Settled empirically first, in favour of `True`: it is what brings all four metrics inside Figure 5's ranges across $10 \le p \le 50$. Standardization does **not** change the support: if $\Sigma = D R D$ then the correlation-scale drift is $D^{-1}MD$, same zero pattern. |
 | `cov_denominator` | `n` | Dettling eq. (1.3) is explicit: $1/n$. |
 
 > **Floor argument for `metrics_include_diagonal`.** If diagonal entries are scored, they are
@@ -245,14 +246,18 @@ proximal operator only. Everything in §3–§5 is reused unchanged so the compa
 
 ```
 src/gclm/
-  lyap.py       vec/unvec, commutation_matrix, design_matrix A(Sigma), solve_lyapunov
-  dgp.py        sample_drift, sample_volatility (4 choices), sample_data
-  loss.py       frobenius_loss, frobenius_grad, lipschitz_bound
-  lasso.py      4 solver backends + lambda_max + path + lambda conversions
-  metrics.py    Definitions G.4/G.5, ROC/PR curves, auc/aupr
-  examples.py   the fixed 5-node models of Example 2
-  rbridge.py    subprocess/JSON bridge to R; R stays optional
-  config.py     S1Config / M0Config dataclasses
+  lyapunov.py            vec/unvec, commutation_matrix, design_matrix A(Sigma), solve_lyapunov
+  data/simulate.py       sample_drift, sample_volatility (4 choices), sample_data
+  objective/direct.py    direct_loss, direct_grad, lipschitz_bound, diagonal_fit, lambda_max
+  objective/penalties.py lasso / MCP / SCAD, penalty weights
+  solvers/proxgrad.py    FISTA (default) and the monotone APG for MCP/SCAD
+  solvers/coordinate.py  coordinate descent on the explicit design (reference)
+  solvers/backends.py    glmnet / ncvreg / skglm / pyproximal + lambda conversions
+  solvers/path.py        lambda grid, lasso_path
+  data/examples.py       the fixed 5-node models of Example 2
+  metrics.py             Definitions G.4/G.5, ROC/PR curves, auc/aupr
+  rbridge.py             subprocess/JSON bridge to R; R stays optional
+  config.py              S1Config / M0Config dataclasses
 simulations/
   S1_reproduction.md      (this file)
   run_m0.py               driver for Figure 3
@@ -260,7 +265,7 @@ simulations/
   results/                committed run outputs
 R/
   backend_glmnet.R        production backend + validation; port of Varando's lassoB()
-  backend_ncvreg.R        production backend via ncvreg::ncvfit; MCP/SCAD for S1b
+  backend_ncvreg.R        production backend via ncvreg::ncvfit; MCP/SCAD (ncvreg convention)
   reference_metrics.R     port of evaluatePathB()/AUROC()/AUCPR(); validation only
 tests/                    pytest
 ```
@@ -349,34 +354,17 @@ accurate enough to measure what is being claimed. Use `fista` at a tight `tol`, 
 
 #### MCP / SCAD
 
-`plan.md` records the advisor's suggestion to use an off-the-shelf package for the nonconvex
-penalties: *"you can use any package that does linear regression with such penalties, you have to
-create a suitable response vector y and a design matrix X out of your input."* That is `ncvreg`,
-and it is wired up now:
+Implemented and documented in **[`docs/NONCONVEX.md`](../docs/NONCONVEX.md)**. In brief:
 
-```bash
-python simulations/run_s1.py --solver ncvreg --penalty MCP   --gamma 3
-python simulations/run_s1.py --solver ncvreg --penalty SCAD  --gamma 3.7
-```
-
-```bash
-python simulations/run_s1.py --solver skglm  --penalty MCP   --gamma 3   # no R needed
-```
-
-`ncvfit` is the right ncvreg entry point, not `ncvreg()` — its own help page says *"no
-standardization is applied, no intercept is included, no path is fit"*, while `?ncvreg` says
-*"`ncvreg` standardizes the data and includes an intercept by default"*. Neither is wanted here.
-`ncvfit` also accepts `penalty.factor`, so the unpenalized diagonal is expressible. Because MCP and
-SCAD are nonconvex, `ncvfit`'s docs warn that *"initial values are very important in determining
-which local solution an algorithm converges to"* — `backend_ncvreg.R` therefore walks the λ-grid
-downwards passing each solution as `init` for the next.
-
-`skglm` reaches MCP through `WeightedMCPenalty`, so it too can leave the diagonal unpenalized; it
-has **no weighted SCAD**, and the backend raises rather than silently penalizing the diagonal.
-Full encoding details for both R packages: **[`R/ENCODING.md`](../R/ENCODING.md)**.
-
-Smoke-tested in `test_ncvreg_backend_supports_nonconvex_penalties` and
-`test_skglm_backend_supports_weighted_mcp`; the statistical study itself is S1b and is not yet run.
+- `fista` (default) handles MCP and SCAD through the monotone accelerated proximal gradient of
+  Li & Lin (2015). Plain FISTA is not guaranteed to converge with a nonconvex penalty.
+- **ncvreg's MCP/SCAD use a different convention.** On a design whose columns are not standardized,
+  `ncvfit` minimizes $\sum_j P(v_j\beta_j)/v_j$ with $v_j$ the column's curvature, not the textbook
+  $\sum_j P(\beta_j)$. This is established to $10^{-16}$ on a plain regression. The two coincide
+  for the lasso, so nothing in S1 is affected. `convention="textbook"` (default; `fista`, `skglm`)
+  or `"ncvreg"` (`fista`, `ncvreg`) selects which estimator is meant, and the backends refuse a
+  convention they do not solve.
+- Which convention defines the thesis estimator is a modeling choice to settle with the advisor.
 
 #### One shared convention: `zero_tol`
 
@@ -390,7 +378,7 @@ unchanged.
 
 #### λ conversions
 
-Each backend has its own parameterization; the conversions are in `lasso.py` and asserted by tests,
+Each backend has its own parameterization; the conversions are in `solvers/backends.py` and asserted by tests,
 not trusted from documentation.
 
 | backend | objective | conversion |
@@ -433,6 +421,7 @@ with zero off-diagonal.
 | `test_all_four_backends_agree` | all four backends: identical supports and metrics | metrics exact |
 | `test_glmnet_backend_returns_every_requested_lambda` | glmnet never returns a truncated path | — |
 | `test_ncvreg_backend_supports_nonconvex_penalties` | MCP/SCAD plumbing (S1b entry point) | smoke |
+| `tests/test_nonconvex.py` (83 tests) | MCP/SCAD: proxes vs brute force/skglm/pyproximal, what ncvfit minimises, solver stationarity, backends | see docs/NONCONVEX.md §6 |
 | `test_example2_*` | Dettling Figure 3 population-limit values | 0.02–0.03 abs |
 | `test_glmnet_lambda_scaling` | our $\lambda_{\max}$ vs. `glmnet`'s first all-diagonal $\lambda$, through $p^3/(p-1)$ | 3% in $\log\lambda$ |
 | `test_all_metrics_match_r` | `acc/f1/tpr/fpr/auc/aupr` vs. a port of `evaluatePathB`/`AUROC`/`AUCPR` | 1e-12, exact |
@@ -611,7 +600,7 @@ and it does not. Default confirmed; flag retained for the record.
 `standardize=True` (Varando's `cor(data)`), then a larger $p$ sweep — the published curves are
 plotted against $p$ up to 50, and our $p \le 20$ slice may simply be sampling the low-$p$ end.
 
-### 8.6 Resolved: Dettling standardizes. Figure 5 then reproduces across $10 \le p \le 50$
+### 8.6 Resolved: Dettling standardizes (confirmed later by his dissertation, §3.7.2–3.7.3). Figure 5 then reproduces across $10 \le p \le 50$
 
 The §8.4 gap was the `standardize` flag. `C_ID`, all seven $p$, $k=1,\dots,4$, 5 replicates,
 identical in every other respect — the only difference is $\hat\Sigma$ vs. the empirical
@@ -728,6 +717,97 @@ Next diagnostic: measure how far $\Sigma(M,C)$ under choice 4 sits from the $C=2
 being fitted, and compare against a reading where $\tilde\omega$ is drawn only for $i<j$ (≈ 2
 nonzeros per row instead of 4). A sparser $C$ would make choice 4 easier and could close the gap.
 
+### 8.9 Is the remaining gap Monte Carlo noise? — No, for choice 4 only
+
+Dettling's plotted values and error bars were extracted exactly from the vector PDF
+(`diagnostics/extract_dettling_fig5.py` → `results/dettling_fig5_extracted.json`; tick-fit
+residual ≤ 5e-6), and every cell tested as
+$z = (\text{ours}-\text{Dettling})/\sqrt{\mathrm{se}_\text{ours}^2+\mathrm{se}_\text{Dettling}^2}$.
+Our run has 100 datasets per point, his 400.
+
+| C choice | mean $z$ over 12 cells | cells with $\lvert z\rvert>3$ | verdict |
+|---|---|---|---|
+| `C_ID` | −0.3 | 0 / 12 | matches within noise |
+| `C_Random_Min_Diag` | +0.7 | 0 / 12 | matches within noise |
+| `C_Random_Diag` | +1.2 | 1 / 12 (`max_f1`, $p=20$, +5.0) | matches, one cell to re-check at large $p$ |
+| `C_Random_Full` | **−3.4** | **8 / 12**, all negative | **systematic** |
+
+Direct test at $p=10$, **400 datasets per configuration** (Dettling's own sample size),
+`diagnostics/choice4_dgp_readings.py`:
+
+| configuration | `max_f1` | `auc` | off-diag nonzeros of $C$ per row |
+|---|---|---|---|
+| Dettling, `C_Random_Full` | **0.553** | **0.690** | — |
+| ours, literal reading, seed 111 | 0.508 | 0.639 | 3.2 |
+| ours, literal reading, seed 222 | 0.514 | 0.642 | 3.2 |
+| ours, literal reading, seed 333 | 0.507 | 0.633 | 3.2 |
+| ours, $\tilde\omega$ only for $i<j$ | 0.530 | 0.659 | 1.8 |
+| ours, one $\tilde\omega$ per pair, $C_{ij}=\tilde\omega_{ij}(\tilde\varepsilon_{ij}+\tilde\varepsilon_{ji})$ | 0.523 | 0.649 | 1.8 |
+| *control:* `C_ID`, seeds 111 / 222 vs Dettling 0.618 / 0.737 | 0.621 / 0.610 | 0.731 / 0.726 | 0 |
+
+Three conclusions:
+
+1. **Not randomness.** Three independent seeds at Dettling's sample size agree with each other to
+   within 0.009, and sit 0.045–0.05 below his values — a gap roughly ten times the seed-to-seed
+   spread. Changing the seed (or R vs NumPy) changes individual draws, not the expectation over 400
+   datasets; what remains is Monte Carlo error, which the standard errors quantify, and the gap is far
+   outside them. The control (`C_ID`) reproduces under the same procedure.
+2. **Not the uniform draws.** Choices 2 and 3 are the ones that use $\mathrm{Unif}$ distributions,
+   and both match. Choice 4 uses Bernoulli and Normal draws only.
+3. **Not simply a misread density.** Both alternative readings of the choice-4 definition make $C$
+   sparser and both help, but the better one closes only about half the gap (`max_f1` 0.508 → 0.530
+   against 0.553). The literal reading is kept as the default.
+
+The cause is most likely an implementation detail of choice 4 that the paper does not state.
+Resolving it needs the authors' code or a question to them.
+
+**Judgement.** The estimator is verified independently of the paper (§4 of `docs/FISTA.md`), three
+of four settings reproduce within Monte Carlo error, and every qualitative conclusion of Section 5
+holds — including choice 4 being the worst setting, only by a larger margin than published. The
+discrepancy sits in the data-generating process of one misspecification scenario, not in the
+method. For S1b, which compares penalties on the *same* data, it affects both sides equally.
+
+Minor, same direction throughout: with the dense anchor of §8.8, our `aupr` for the three matching
+choices runs +0.01 to +0.035 above Dettling ($z\le2.9$), suggesting his PR extrapolation to recall 1
+is slightly more conservative than a straight segment to the base rate.
+
+### 8.10 Full grid from the cluster — two settings reproduce, two do not
+
+The complete run (`runs/s1_dettling_reproduction/`, 11,200 datasets, **400 per point** — Dettling's
+own sample size) against his extracted values, $z$ as in §8.9, over 7 $p$ × 4 metrics = 28 cells
+per setting (`comparison_vs_dettling.csv`):
+
+| C choice | mean $z$ | cells with $\lvert z\rvert>3$ | verdict |
+|---|---|---|---|
+| `C_ID` | −0.0 | 1 / 28 | **reproduced** |
+| `C_Random_Min_Diag` | +0.2 | 1 / 28 | **reproduced** |
+| `C_Random_Diag` | **+2.7** | **12 / 28** | too *good* at large $p$ on `max_f1`, `aupr` |
+| `C_Random_Full` | **−6.2** | **20 / 28** | too *poor* everywhere on `max_f1`, `auc`, `aupr` |
+
+`max_acc` matches for all four (|diff| ≤ 0.013).
+
+**`C_Random_Diag` — new at full $p$.** Our `max_f1` exceeds Dettling's by +0.020 at $p=15$, growing
+to +0.043 at $p=40$ and $50$ ($z\approx10$); `aupr` likewise (+0.02–0.03). `auc` matches. His text
+says this setting's metrics fall with $p$ until, at $p=40$–$50$, they are "similar to choice 4". Ours
+fall more slowly and stay close to `C_ID`. At $p\le20$ (§8.9) this showed as a single outlier; with
+the full range it is systematic. §8.9's remark that the uniform-draw settings both match is
+therefore superseded for $\mathrm{Unif}[0.5,4]$.
+
+A clue for later: the early unstandardized slice (§8.4) put this setting's `max_f1` *below*
+Dettling's (0.518 / 0.448 / 0.425 at $p=10/15/20$ against his 0.601 / 0.549 / 0.517), while
+standardized it is above (0.609 / 0.569 / 0.554). His values lie in between. Standardizing absorbs
+part of the diagonal heterogeneity of $C$ into the rescaled problem, and this is the setting with the
+most diagonal heterogeneity (ratio up to 8). So the difference plausibly lies in how the
+standardization and this $C$ interact in his pipeline.
+
+**`C_Random_Full`** is as before (§8.9), and clearer at the larger sample size.
+
+**Judgment, updated.** The estimator, the metrics, Figure 3, and the two near-homogeneous
+volatility settings reproduce within Monte Carlo error at Dettling's sample size. The two most
+heterogeneous settings do not, in opposite directions, and not through noise. Both discrepancies
+sit in the data-generating side of misspecification scenarios, where the paper's description
+leaves implementation choices open. They are the natural questions for the authors.
+
 ---
 
 ## 9. Status and what is left
@@ -770,14 +850,18 @@ Run outputs backing §8 are committed under [`results/`](results/).
    the axes, the standardized one inside), but an exact per-curve check needs the figure's data.
    Worth asking Dettling at the Oct 10–11 meeting.
 
-### 9.3 Not started
+### 9.3 The other studies
 
-- **M2 / S1b** — MCP and SCAD. The harness is ready: only the proximal operator changes
-  (`gclm.lasso._soft_threshold`), and §2.3 already identifies RSC as the condition to argue under.
-  Add `ncvreg` as the R-side reference (§7.2), mirroring `glmnet`'s role in S1. Use our solvers,
-  not `ncvreg`/`glmnet`, to produce the numbers in any MSE comparison (§8.2).
-- **S2** (likelihood loss) and **S3** (score-based search with BIC) — see `plan.md`. The CRAN
-  package `gclm` is the reference for S2, not for S1.
+- **S1b** — MCP and SCAD on the direct loss: **implemented and validated** (docs/NONCONVEX.md;
+  83 tests), run as a pilot at $p=10,20$ on the same datasets as the lasso here; results and the
+  cluster budget in [`S2_penalties_losses.md`](S2_penalties_losses.md). The textbook convention
+  defines the estimator; the ncvreg convention is available (§7.2, docs/NONCONVEX.md §2).
+- **S2** — Varando's log-likelihood and Frobenius losses with all three penalties:
+  **implemented and validated** against the CRAN package `gclm` (docs/LIKELIHOOD.md; 63 tests),
+  pilot in the same document. The losses are nonconvex and nearly flat along $p(p-1)/2$
+  directions, which makes both the solver and the definition of the estimator a matter of
+  record there.
+- **S3** (score-based search with BIC) — see `plan.md`; not started.
 
 ---
 
@@ -791,7 +875,7 @@ Run outputs backing §8 are committed under [`results/`](results/).
 - Beck, Teboulle (2009). *A Fast Iterative Shrinkage-Thresholding Algorithm for Linear Inverse
   Problems.* SIAM J. Imaging Sci. 2(1):183–202. — FISTA; `solve_fista`.
 - O'Donoghue, Candès (2015). *Adaptive Restart for Accelerated Gradient Schemes.* Found. Comput.
-  Math. 15:715–732. — the restart condition at `lasso.py`'s FISTA loop.
+  Math. 15:715–732. — the restart condition in `solvers/proxgrad.py`'s FISTA loop.
 - Nesterov (1983). *A method of solving a convex programming problem with convergence rate
   $O(1/k^2)$.* Soviet Math. Dokl. 27:372–376. — the underlying acceleration.
 - Parikh, Boyd (2014). *Proximal Algorithms.* Found. Trends Optim. 1(3):127–239. — also cited by

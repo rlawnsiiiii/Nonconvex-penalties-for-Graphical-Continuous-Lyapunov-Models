@@ -14,7 +14,9 @@ Reads every ``shard_*.npz`` written by ``run_s1_shard.py`` and produces:
 
 Run on the cluster login node or locally; it is cheap either way.
 
-    python simulations/aggregate_s1.py --in-dir results/s1 --out-dir results
+    python simulations/aggregate_s1.py --in-dir runs/s1_dettling_reproduction/s1_shards
+
+writes the CSVs next to the shard folder (``--out-dir`` defaults to its parent).
 """
 
 from __future__ import annotations
@@ -76,9 +78,12 @@ def metrics_from_counts(counts: np.ndarray, anchor_dense: bool = True) -> dict[s
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--in-dir", type=Path, required=True)
-    ap.add_argument("--out-dir", type=Path, required=True)
+    ap.add_argument("--out-dir", type=Path, default=None,
+                    help="default: the parent of --in-dir, i.e. the run directory")
     args = ap.parse_args()
 
+    if args.out_dir is None:
+        args.out_dir = args.in_dir.parent
     shards = sorted(args.in_dir.glob("shard_*.npz"))
     if not shards:
         raise SystemExit(f"no shard_*.npz under {args.in_dir}")

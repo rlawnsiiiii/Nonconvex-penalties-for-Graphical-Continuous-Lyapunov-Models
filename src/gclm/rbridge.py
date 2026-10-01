@@ -1,6 +1,6 @@
 """Bridge to the R solver backends.
 
-Used by :func:`gclm.lasso.lasso_path` when ``solver`` is ``"glmnet"`` or
+Used by :func:`gclm.solvers.path.lasso_path` when ``solver`` is ``"glmnet"`` or
 ``"ncvreg"``, and by the validation tests.  Communication is a JSON file pair
 over a subprocess -- no rpy2 dependency, and R stays entirely optional: nothing
 here is imported unless an R backend is actually selected.

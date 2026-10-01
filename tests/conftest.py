@@ -11,7 +11,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from gclm.dgp import CChoice, draw_instance  # noqa: E402
+from gclm.data.simulate import CChoice, draw_instance
 
 
 from gclm.rbridge import r_available, run_r  # noqa: E402,F401

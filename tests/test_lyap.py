@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from gclm.lyap import (
+from gclm.lyapunov import (
     commutation_matrix,
     design_matrix,
     gram_matrix,

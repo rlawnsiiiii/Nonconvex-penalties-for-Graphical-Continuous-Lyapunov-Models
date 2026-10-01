@@ -12,9 +12,12 @@ __pycache__/
 *.egg-info/
 .venv/
 
-# simulation output
-/results/
+# simulation runs: one folder per run under runs/.  The summaries and figures
+# are small and worth keeping; the raw shards are large and exactly
+# reproducible from the config stored inside them.
+runs/**/s1_shards/
+runs/local/
 
 # generated figures and cluster logs
-figures/
+/figures/
 logs/

@@ -19,15 +19,28 @@ repo/
 ├── README.md                      quick start
 ├── ARCHITECTURE.md                this file
 │
-├── src/gclm/                      the library — ~350 lines of logic
-│   ├── lyap.py       (82)         vec/unvec, A(Σ), Γ(Σ), Lyapunov solve   ← no internal deps
-│   ├── dgp.py       (115)         drift + volatility sampling, one replicate
-│   ├── loss.py       (48)         ½‖R‖²_F and ∇f = 2RΣ          ← smooth half of the objective
-│   ├── lasso.py     (~400)        penalty, prox, 4 backends, λ_max, path ← penalised half
-│   ├── metrics.py   (128)         Definitions G.4/G.5, ROC/PR curves
-│   ├── examples.py   (35)         the fixed 5-node models of Example 2
-│   ├── rbridge.py    (67)         subprocess/JSON bridge to R; R stays optional
-│   └── config.py     (58)         S1Config / M0Config — every knob in one place
+├── src/gclm/                      the library, one subpackage per concern
+│   ├── lyapunov.py                the model: vec/unvec, A(Σ), Γ(Σ), Lyapunov solves incl. the
+│   │                              Schur-based solver        ← no internal deps
+│   ├── data/
+│   │   ├── simulate.py            drift + volatility sampling, one replicate
+│   │   └── examples.py            the fixed 5-node models of Example 2
+│   ├── objective/
+│   │   ├── direct.py              Dettling's loss ½‖R‖²_F, ∇f = 2RΣ, Lipschitz bound,
+│   │   │                          diagonal fit, λ_max, penalised objective
+│   │   ├── covariance.py          Varando's losses on Σ(M): loglik / Frobenius, gradient,
+│   │   │                          Hessian, diagonal + dense fits, λ_max   (docs/LIKELIHOOD.md)
+│   │   └── penalties.py           lasso / MCP / SCAD: values, proxes, stationarity, weights,
+│   │                              the textbook / ncvreg conventions
+│   ├── solvers/
+│   │   ├── proxgrad.py            FISTA with restart (lasso), monotone APG (MCP/SCAD) — default
+│   │   ├── coordinate.py          coordinate descent on the explicit design (reference)
+│   │   ├── backends.py            glmnet / ncvreg (R), skglm / pyproximal (Python), λ conversions
+│   │   ├── covariance.py          APG (the estimator) / proximal (reference) / Newton (experiment only)
+│   │   └── path.py                λ grid, warm-started paths: lasso_path, covloss_path, fit_path
+│   ├── metrics.py                 Definitions G.4/G.5, ROC/PR curves
+│   ├── rbridge.py                 subprocess/JSON bridge to R; R stays optional
+│   └── config.py                  S1Config / M0Config — every knob in one place
 │
 ├── simulations/
 │   ├── S1_reproduction.md         spec, configs, findings (§8), status (§9)
@@ -36,11 +49,20 @@ repo/
 │   ├── run_s1_shard.py            ▶ Figure 5   — one cluster shard -> rich .npz
 │   ├── aggregate_s1.py            shards -> s1_per_dataset / _summary / _curves
 │   ├── plot_figures.py            CSVs -> figures  (LOCAL ONLY, never on the cluster)
+│   ├── plot_penalties.py          overlay several runs: penalties / losses vs. p  (LOCAL)
+│   ├── S2_penalties_losses.md     S1b + S2: MCP/SCAD on the direct loss, and all three
+│   │                              penalties on Varando's losses — setup, pilot results
 │   └── results/                   committed run outputs backing §8
 │
 ├── docs/
 │   ├── FISTA.md                   solve_fista: algorithm, references, package survey
+│   ├── NONCONVEX.md               MCP / SCAD: definitions, conventions, algorithm, tests
+│   ├── LIKELIHOOD.md              Varando's losses: gradient, Hessian, Newton solver, the
+│   │                              flat valley, multiple stationary points, gclm validation
 │   └── REPRODUCTION.md            cluster recipe: what runs where, what comes back
+│
+├── runs/                          one folder per run: shards (gitignored), CSVs, figures
+│   └── s1_dettling_reproduction/  full Figures 3 + 5 from the cluster
 │
 ├── cluster/                       LRZ SLURM job scripts
 │   ├── setup_env.sh               one-time venv setup on a login node
@@ -50,7 +72,8 @@ repo/
 ├── R/                             solver backends + metric reference
 │   ├── ENCODING.md                how X and y map into the package calls, worked by hand
 │   ├── backend_glmnet.R           Varando's lassoB(), i.e. glmnet on A(Σ) — Dettling's choice
-│   ├── backend_ncvreg.R           ncvreg::ncvfit — most accurate, and MCP/SCAD for S1b
+│   ├── backend_ncvreg.R           ncvreg::ncvfit — lasso, and MCP/SCAD (ncvreg convention)
+│   ├── backend_gclm.R             gclm::gclm — Varando's Algorithm 1; validation reference only
 │   └── reference_metrics.R  (61)  Varando's evaluatePathB()/AUROC()/AUCPR() — validation only
 │
 └── tests/           (733)         77 tests; the `r` marker needs Rscript + glmnet
@@ -65,45 +88,67 @@ every R-backed test skips cleanly without `Rscript`.
 
 ## 2. Module dependencies
 
-Strictly layered — no cycles, and `lyap.py` sits at the bottom with no internal imports.
+Strictly layered — no cycles, and `lyapunov.py` sits at the bottom with no internal imports. Within
+the library the direction is always `solvers → objective → lyapunov`; the drivers sit on top.
 
 ```mermaid
 graph TD
-    lyap["lyap.py<br/><i>vec, A(Σ), Lyapunov solve</i>"]
-    loss["loss.py<br/><i>½‖R‖²_F, ∇f</i>"]
-    lasso["lasso.py<br/><i>prox, solvers, path</i>"]
-    dgp["dgp.py<br/><i>sampling</i>"]
+    lyap["lyapunov.py<br/><i>vec, A(Σ), Lyapunov solves</i>"]
+    simulate["data/simulate.py<br/><i>sampling</i>"]
+    examples["data/examples.py<br/><i>Example 2 models</i>"]
+    penalties["objective/penalties.py<br/><i>lasso / MCP / SCAD, weights</i>"]
+    direct["objective/direct.py<br/><i>½‖R‖²_F, ∇f, λ_max</i>"]
+    covariance["objective/covariance.py<br/><i>L(Σ(M)), ∇, Hessian, λ_max</i>"]
+    proxgrad["solvers/proxgrad.py<br/><i>FISTA, monotone APG</i>"]
+    coordinate["solvers/coordinate.py"]
+    backends["solvers/backends.py<br/><i>glmnet, ncvreg, skglm, pyproximal</i>"]
+    covsolve["solvers/covariance.py<br/><i>apg / prox / newton</i>"]
+    path["solvers/path.py<br/><i>λ grid, lasso_path, covloss_path, fit_path</i>"]
     metrics["metrics.py<br/><i>Def. G.4/G.5</i>"]
-    examples["examples.py<br/><i>Example 2 models</i>"]
     config["config.py<br/><i>S1Config, M0Config</i>"]
 
-    loss --> lyap
-    lasso --> loss
-    lasso --> lyap
-    dgp --> lyap
-    config --> dgp
+    penalties --> lyap
+    direct --> lyap
+    direct --> penalties
+    covariance --> lyap
+    covariance --> penalties
+    simulate --> lyap
+    config --> simulate
+    proxgrad --> direct
+    proxgrad --> penalties
+    coordinate --> proxgrad
+    backends --> direct
+    covsolve --> covariance
+    path --> direct
+    path --> covariance
+    path --> proxgrad
+    path --> coordinate
+    path --> backends
+    path --> covsolve
 
     m0["run_m0.py — Figure 3"]
-    s1["run_s1.py — Figure 5"]
-    m0 --> lasso
+    s1["run_s1.py / run_s1_shard.py — Figures 5, S1b, S2"]
+    m0 --> path
     m0 --> metrics
     m0 --> examples
     m0 --> config
-    m0 --> dgp
-    m0 --> lyap
-    s1 --> lasso
+    s1 --> path
+    s1 --> covariance
     s1 --> metrics
     s1 --> config
-    s1 --> dgp
+    s1 --> simulate
 
     classDef core fill:#e8f0fe,stroke:#4864a8,color:#1a2b4a
     classDef driver fill:#fdf0e3,stroke:#b5762a,color:#4a3413
-    class lyap,loss,lasso,dgp,metrics,examples,config core
+    class lyap,simulate,examples,penalties,direct,covariance,proxgrad,coordinate,backends,covsolve,path,metrics,config core
     class m0,s1 driver
 ```
 
-`metrics.py` and `examples.py` are deliberately dependency-free: metrics take plain arrays, so they
-can be tested against R without any of the estimation machinery being involved.
+`metrics.py` and `data/examples.py` are deliberately dependency-free: metrics take plain arrays, so
+they can be tested against R without any of the estimation machinery being involved. The
+`objective/` modules know nothing about optimisation; each loss carries its own closed forms for the
+sparse end of the path (`diagonal_fit`, `lambda_max`), because they differ between losses, and only
+the λ grid is shared (`solvers/path.py`).
 
 ---
 
@@ -128,14 +173,14 @@ flowchart TD
     B --> J
     J --> K["max_acc, max_f1, auc, aupr"]
 
-    B -.- b1["dgp.sample_drift"]
-    C -.- c1["dgp.sample_volatility"]
-    D -.- d1["lyap.solve_lyapunov"]
-    E -.- e1["dgp.sample_data"]
-    F -.- f1["dgp.sample_covariance"]
-    G -.- g1["lasso.lambda_max"]
-    H -.- h1["lasso.lambda_grid"]
-    I -.- i1["lasso.lasso_path → solve_fista"]
+    B -.- b1["data.simulate.sample_drift"]
+    C -.- c1["data.simulate.sample_volatility"]
+    D -.- d1["lyapunov.solve_lyapunov"]
+    E -.- e1["data.simulate.sample_data"]
+    F -.- f1["data.simulate.sample_covariance"]
+    G -.- g1["objective.direct.lambda_max"]
+    H -.- h1["solvers.path.lambda_grid"]
+    I -.- i1["solvers.path.lasso_path → proxgrad.solve_fista"]
     J -.- j1["metrics.confusion"]
     K -.- k1["metrics.evaluate_path"]
 
@@ -151,7 +196,7 @@ the whole simulation a closed loop and makes `test_solve_lyapunov_residual` mean
 
 **Estimation always uses `C = 2·I`**, whatever `C` generated the data. That mismatch *is* Dettling's
 misspecification experiment — it is why `C_Random_Full` scores worst — and it is one line in
-`run_s1.py:42`.
+`run_s1.py` (`c_est = 2.0 * np.eye(p)`).
 
 ---
 
@@ -159,31 +204,37 @@ misspecification experiment — it is why `C_Random_Full` scores worst — and i
 
 The estimator is
 
-$$\hat M(\lambda)=\arg\min_M\ \underbrace{\tfrac12\|M\hat\Sigma+\hat\Sigma M^\top+C\|_F^2}_{\text{loss.py}}\ +\ \underbrace{\lambda\|M\|_1}_{\text{lasso.py}}$$
+$$\hat M(\lambda)=\arg\min_M\ \underbrace{\tfrac12\|M\hat\Sigma+\hat\Sigma M^\top+C\|_F^2}_{\text{objective/direct.py}}\ +\ \underbrace{\lambda\|M\|_1}_{\text{objective/penalties.py}}$$
 
-and the split across two files is deliberate: **S1b (MCP/SCAD) changes only the right-hand box.**
+and the split is deliberate: **S1b (MCP/SCAD) leaves the left-hand box untouched.** On the right it
+swaps the proximal operator (`objective/penalties.py`) and, because plain FISTA carries no
+convergence guarantee once the penalty is nonconvex, the iteration too (`solvers/proxgrad.py:_solve_mapg`,
+docs/NONCONVEX.md §4). **S2 swaps the left-hand box** for one of Varando's losses on the implied
+covariance (`objective/covariance.py`), which needs a solver family of its own
+(`solvers/covariance.py`, docs/LIKELIHOOD.md) because those losses are nonconvex and nearly flat
+along $p(p-1)/2$ directions.
 
 ```mermaid
 flowchart LR
-    subgraph smooth["loss.py — smooth part"]
-        R["R(M) = MΣ̂ + Σ̂Mᵀ + C<br/><i>lyap.lyapunov_residual</i>"]
-        F["f(M) = ½‖R‖²_F<br/><i>frobenius_loss:20</i>"]
-        G["∇f = 2 R Σ̂ &nbsp;&nbsp;O(p³)<br/><i>frobenius_grad:25</i>"]
-        L["L = 4 λ_max(Σ̂)²<br/><i>lipschitz_bound:29</i>"]
+    subgraph smooth["objective/direct.py — smooth part"]
+        R["R(M) = MΣ̂ + Σ̂Mᵀ + C<br/><i>lyapunov.lyapunov_residual</i>"]
+        F["f(M) = ½‖R‖²_F<br/><i>direct_loss</i>"]
+        G["∇f = 2 R Σ̂ &nbsp;&nbsp;O(p³)<br/><i>direct_grad</i>"]
+        L["L = 4 λ_max(Σ̂)²<br/><i>lipschitz_bound</i>"]
         R --> F
         R --> G
     end
-    subgraph pen["lasso.py — penalised part"]
-        W["W: 1 off-diagonal, 0 on it<br/><i>penalty_weights:29</i>"]
-        P["prox = soft-threshold<br/><i>_soft_threshold:37</i>"]
+    subgraph pen["objective/penalties.py — penalised part"]
+        W["W: 1 off-diagonal, 0 on it<br/><i>penalty_weights</i>"]
+        P["prox: soft-threshold (lasso),<br/>firm / SCAD thresholding<br/><i>prox</i>"]
         W --> P
     end
-    subgraph solve["lasso.py — four interchangeable backends"]
+    subgraph solve["solvers/ — interchangeable backends for the direct loss"]
         FI["<b>fista</b> — DEFAULT<br/><i>matrix-free, O(p³)/iter</i><br/>only route to p=50"]
         DE["<b>design</b><br/><i>CD on explicit A(Σ̂)</i>"]
         GL["<b>glmnet</b> (R)<br/><i>Dettling's own choice</i>"]
-        NC["<b>ncvreg</b> (R)<br/><i>ncvfit; MCP + SCAD</i>"]
-        SK["<b>skglm</b> (Python)<br/><i>AndersonCD; MCP, no R</i>"]
+        NC["<b>ncvreg</b> (R)<br/><i>ncvfit; MCP/SCAD, ncvreg conv.</i>"]
+        SK["<b>skglm</b> (Python)<br/><i>AndersonCD; textbook MCP</i>"]
         PX["<b>pyproximal</b><br/><i>packaged FISTA, matrix-free</i>"]
     end
     G --> FI
@@ -213,12 +264,16 @@ against the exact KKT solution) and the only one with SCAD; `skglm` gives MCP wi
 dependency; `glmnet` is the least accurate but is what Dettling used; `fista` is the default and the only one
 that reaches the full grid.
 
-`_soft_threshold` at `lasso.py:37` is, in its entirety, the ℓ₁ penalty. Replacing it with the MCP or
-SCAD proximal operator is the whole of study S1b — nothing else in the diagram moves.
+For the lasso, soft-thresholding is, in its entirety, the penalty. MCP and SCAD live in
+`objective/penalties.py` and change two things: the proximal operator, and — because plain FISTA has no
+convergence guarantee with a nonconvex penalty — the iteration, replaced by Li & Lin's monotone
+APG. The loss and everything left of it stay unchanged. There are two ways to apply MCP/SCAD
+(`convention="textbook"` or `"ncvreg"`), and only `fista` solves both; see
+[`docs/NONCONVEX.md`](docs/NONCONVEX.md) §2.
 
 ### The two equivalent views of the problem
 
-`lyap.py` provides the bridge that makes `glmnet` comparison possible at all:
+`lyapunov.py` provides the bridge that makes `glmnet` comparison possible at all:
 
 ```mermaid
 flowchart LR
@@ -228,7 +283,7 @@ flowchart LR
         M1 --> L1
     end
     subgraph reg["regression view — what R sees"]
-        X["X = A(Σ̂) ∈ ℝ^(p²×p²)<br/><i>lyap.design_matrix:40</i>"]
+        X["X = A(Σ̂) ∈ ℝ^(p²×p²)<br/><i>lyapunov.design_matrix</i>"]
         Y["y = −vec(C)"]
         L2["½‖y − Xβ‖²₂, β = vec(M)"]
         X --> L2
@@ -257,17 +312,17 @@ Same library underneath; they differ only in where `M*` comes from and what is s
 flowchart TD
     subgraph m0["run_m0.py → Figure 3"]
         A1["3 settings ×<br/>8 sample sizes ×<br/>100 reps"]
-        A2["M* is <b>fixed</b><br/>examples.example2_path / _cycle"]
+        A2["M* is <b>fixed</b><br/>data.examples.example2_path / _cycle"]
         A3["sweeps <b>n</b>: 100 … 10⁵, ∞"]
         A4["single process, minutes"]
     end
     subgraph s1["run_s1.py → Figure 5"]
         B1["7 p × 4 k ×<br/>4 C-choices × 100 reps<br/>= 11,200 datasets"]
-        B2["M* is <b>random</b><br/>dgp.sample_drift"]
+        B2["M* is <b>random</b><br/>data.simulate.sample_drift"]
         B3["sweeps <b>p</b>, fixed n = 1000"]
         B4["ProcessPoolExecutor<br/>+ --shard i/N for a cluster"]
     end
-    core["lasso.lasso_path → metrics.evaluate_path"]
+    core["solvers.path.fit_path → metrics.evaluate_path"]
     m0 --> core
     s1 --> core
     core --> out["one CSV row per dataset"]
@@ -335,15 +390,17 @@ R installation.
 
 | I want to… | file | notes |
 |---|---|---|
-| run MCP / SCAD today | — | `--solver ncvreg --penalty MCP\|SCAD`, or `--solver skglm --penalty MCP` (no R) |
-| implement MCP / SCAD in Python | `lasso.py:37` | replace `_soft_threshold`; nothing else moves |
+| run MCP / SCAD | — | `--penalty MCP\|SCAD` (fista); `--solver skglm` (textbook MCP); `--solver ncvreg --convention ncvreg` |
+| change a penalty or add one | `objective/penalties.py` | value, derivative, prox, stationarity; both solver families are generic in the penalty |
 | choose a solver | `--solver`, or `S1Config.solver` | `fista` (default) \| `ncvreg` \| `skglm` \| `glmnet` \| `pyproximal` \| `design` |
 | change the p/k grid, tolerance, or a convention flag | `config.py` | every knob is here, not scattered in the drivers |
-| add a metric | `metrics.py:103` | `evaluate_path` returns a dict; drivers just forward keys |
-| change the DGP | `dgp.py:25`, `:55` | `sample_drift`, `sample_volatility` |
+| add a metric | `metrics.py` | `evaluate_path` returns a dict; drivers just forward keys |
+| change the DGP | `data/simulate.py` | `sample_drift`, `sample_volatility` |
 | run on a cluster | `run_s1.py` | `--shard i/N`; tasks are independent, one CSV row each |
 | call R from Python | `rbridge.py` | JSON over subprocess; no rpy2, R stays optional |
-| use the likelihood loss (S2) | new `loss` module | `lasso.py` only needs `grad` and a Lipschitz constant |
+| use the likelihood or Frobenius loss (S2) | `--loss loglik\|frobenius` | `objective/covariance.py` + `solvers/covariance.py` (docs/LIKELIHOOD.md); `--solver` is ignored |
+| change how the covariance losses are solved | `solvers/covariance.py:solve` | `method`, `tol`, `newton_after`; `covloss_path` adds `direction` |
+| add a loss | `objective/<name>.py` + a solver | value, gradient, `diagonal_fit`, `lambda_max`; then a branch in `solvers/path.py:fit_path` |
 
 ---
 
@@ -351,12 +408,14 @@ R installation.
 
 | test file | covers | R-backed |
 |---|---|---|
-| `test_lyap.py` | vec/commutation identities, `A(Σ)`, Lyapunov residual | 2 of 16 |
-| `test_dgp.py` | every drawn `M` stable, every `C` ≻ 0, edge density, `n=∞` | 0 of 18 |
-| `test_loss.py` | matrix vs. regression form, gradient vs. finite differences | 0 of 10 |
+| `test_lyap.py` | `lyapunov.py`: vec/commutation identities, `A(Σ)`, Lyapunov residual | 2 of 16 |
+| `test_dgp.py` | `data/simulate.py`: every drawn `M` stable, every `C` ≻ 0, edge density, `n=∞` | 0 of 18 |
+| `test_loss.py` | `objective/direct.py`: matrix vs. regression form, gradient vs. finite differences | 0 of 10 |
 | `test_metrics.py` | Definitions G.4/G.5, curve construction, degenerate cases | 3 of 7 |
+| `test_nonconvex.py` | MCP/SCAD: values, proxes vs brute force/skglm/pyproximal, what ncvfit minimises, solver, backends, bias removal | 6 of 83 |
 | `test_fista.py` | the default solver: analytic solution, duality gap, cvxpy/CLARABEL, invariances, convergence rate | 0 of 22 |
 | `test_encoding.py` | the worked example in `R/ENCODING.md`: design matrix, λ conversions, fitted estimate | 2 of 9 |
 | `test_lasso.py` | KKT optimality, **all four backends agree**, λ_max, rank deficiency, glmnet path truncation, MCP/SCAD plumbing, **Figure 3 population values** | 9 of 33 |
+| `test_covloss.py` | `objective/covariance.py` + `solvers/covariance.py` — Varando's losses: Schur Lyapunov solves, gradient and Hessian vs finite differences, Prop. 3.1, the two path ends, λ_max, both solvers reach stationary points, scaling identity, MCP→lasso limit, **gclm package** (objective scale, fixed points, same-basin agreement), paths | 6 of 63 |
 
-Run `pytest` for all 124, `pytest -m "not r"` to skip the R bridge.
+Run `pytest` for all 274, `pytest -m "not r"` to skip the R bridge.

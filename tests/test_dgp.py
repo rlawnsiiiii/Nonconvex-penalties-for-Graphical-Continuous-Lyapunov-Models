@@ -5,8 +5,14 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from gclm.dgp import CChoice, draw_instance, sample_covariance, sample_drift, sample_volatility
-from gclm.lyap import is_stable
+from gclm.data.simulate import (
+    CChoice,
+    draw_instance,
+    sample_covariance,
+    sample_drift,
+    sample_volatility,
+)
+from gclm.lyapunov import is_stable
 
 
 @pytest.mark.parametrize("p", [5, 20])

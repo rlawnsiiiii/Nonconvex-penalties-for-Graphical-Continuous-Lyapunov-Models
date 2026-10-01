@@ -15,4 +15,5 @@ the write-up can be traced back to a file rather than re-derived.
 The two ad-hoc scripts were one-off probes and are not in the repo; both are reproducible from
 the parameters stated in the corresponding section. The full M1 grid has **not** been run yet.
 
-`/results/` at the repo root is gitignored — that is where the large production runs should go.
+Full production runs live in `runs/<run name>/` at the repository root (e.g.
+`runs/s1_dettling_reproduction/`). Their raw shards are gitignored; summaries and figures are not.

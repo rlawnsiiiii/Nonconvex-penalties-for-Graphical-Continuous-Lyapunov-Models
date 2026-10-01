@@ -18,7 +18,10 @@ module load python 2>/dev/null || module load anaconda3 2>/dev/null || {
   exit 1
 }
 
-VENV="${GCLM_VENV:-$HOME/venvs/gclm}"
+# Fixed path: the batch scripts use exactly this one.  An environment variable
+# would not help -- with --export=NONE it never reaches the job.  If you change
+# it, change VENV= in cluster/s1_array.sbatch and cluster/m0.sbatch too.
+VENV="$HOME/venvs/gclm"
 python3 -m venv "$VENV"
 # shellcheck disable=SC1091
 source "$VENV/bin/activate"
@@ -33,4 +36,7 @@ print("python", sys.version.split()[0], "numpy", numpy.__version__, "scipy", sci
 PY
 echo
 echo "OK. venv at $VENV"
-echo "Next: sbatch cluster/s1_array.sbatch"
+echo
+echo "In every new login session:"
+echo "  module load python"
+echo "  source ~/venvs/gclm/bin/activate"

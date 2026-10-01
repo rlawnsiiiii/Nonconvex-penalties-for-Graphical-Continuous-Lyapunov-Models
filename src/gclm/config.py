@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from gclm.dgp import CChoice
+from gclm.data.simulate import CChoice
 
 
 @dataclass(frozen=True)
@@ -41,8 +41,22 @@ class S1Config:
     # "skglm" (pure-Python MCP), "glmnet" (Dettling's choice), "pyproximal",
     # "design".
     solver: str = "fista"
-    penalty: str = "lasso"          # "MCP": ncvreg or skglm; "SCAD": ncvreg
-    gamma: float | None = None      # concavity parameter for MCP/SCAD
+    # Which loss the penalty is attached to.  "direct": Dettling's quadratic
+    # loss on the Lyapunov residual (the S1 estimator; src/gclm/objective/direct.py, every
+    # `solver` above).  "loglik" / "frobenius": Varando & Hansen's losses on the
+    # implied covariance Sigma(M) (src/gclm/objective/covariance.py, its own solvers;
+    # `solver` is then ignored).  docs/LIKELIHOOD.md.
+    loss: str = "direct"            # "direct" | "loglik" | "frobenius"
+    # Path order for the covariance losses, which are nonconvex: "down" walks
+    # from lambda_max to the dense end (as the direct loss does), "up" is
+    # Varando's order from the dense fit.  Ignored for loss="direct".
+    direction: str = "down"
+    penalty: str = "lasso"          # "lasso" | "MCP" | "SCAD"  (docs/NONCONVEX.md)
+    gamma: float | None = None      # concavity; None -> 3 (MCP) / 3.7 (SCAD)
+    # How MCP/SCAD are applied -- irrelevant for the lasso.  "textbook": P(M_ij)
+    # on every entry (fista, skglm).  "ncvreg": P(v_ij M_ij)/v_ij with v_ij the
+    # loss curvature, which is what ncvreg minimises (fista, ncvreg).
+    convention: str = "textbook"
 
     @property
     def n_datasets(self) -> int:

@@ -3,6 +3,14 @@
 A line-by-line account of how the Direct Lyapunov Lasso becomes a call to `glmnet()` or
 `ncvreg::ncvfit()`, with a fully worked $p=3$ example whose numbers you can check by hand.
 
+> **Revision (MCP/SCAD work).** Two changes on the ncvreg side, both explained below. (1) The
+> design is now passed to `ncvfit` as $\sqrt n\,X$, $\sqrt n\,y$, so λ goes through unchanged:
+> $\lambda_n=\lambda_{\text{paper}}$, where it was $\lambda_{\text{paper}}/p^2$. For the lasso the two
+> encodings give identical estimates (checked: $6\cdot10^{-17}$), so the worked example's $\hat M$ is
+> unchanged. (2) **§7 previously stated a wrong MCP/SCAD encoding.** It is corrected, and the finding
+> behind it — ncvfit uses its own convention for MCP/SCAD — is in §7 and
+> [`docs/NONCONVEX.md`](../docs/NONCONVEX.md) §2.
+
 Implemented in [`backend_glmnet.R`](backend_glmnet.R) and [`backend_ncvreg.R`](backend_ncvreg.R);
 selected from Python with `lasso_path(..., solver="glmnet" | "ncvreg")`.
 
@@ -115,11 +123,11 @@ fit_g <- glmnet(X, y,
 Mg <- matrix(as.numeric(fit_g$beta), p, p)
 
 ## ncvreg --------------------------------------------------------------------
-lam_n <- lambda_paper / p^2                              # = 0.0777778
-fit_n <- ncvfit(X, y,
-                xtx            = apply(X, 2, crossprod) / nrow(X),
-                penalty        = "lasso",                # or "MCP" / "SCAD"
-                lambda         = lam_n,
+n     <- nrow(X)                                         # = p^2 = 9
+fit_n <- ncvfit(sqrt(n) * X, sqrt(n) * y,                # paper scale, see §4
+                xtx            = colSums(X^2),           # = colSums((sqrt(n) X)^2) / n
+                penalty        = "lasso",
+                lambda         = lambda_paper,           # = 0.7, unchanged
                 penalty.factor = pf,
                 eps = 1e-12, max.iter = 1e5)
 Mn <- matrix(fit_n$beta, p, p)
@@ -169,11 +177,19 @@ Two adjustments:
 Together: $\lambda_{\text{paper}}=\lambda_g\cdot p^2\cdot\frac{p}{p-1}=\lambda_g\,p^3/(p-1)$.
 At $p=3$: $0.7 = \lambda_g\cdot 27/2 \Rightarrow \lambda_g=0.0518519$. ✓
 
-### `ncvfit`: $\lambda_{\text{paper}} = \lambda_n\cdot p^2$
+### `ncvfit`: $\lambda_n = \lambda_{\text{paper}}$, with the design scaled by $\sqrt n$
 
-`ncvfit` uses the same $1/(2n)$ factor but **does not rescale `penalty.factor`**, so only
-adjustment 1 applies: $\lambda_{\text{paper}}=\lambda_n\,p^2$. At $p=3$:
-$0.7=\lambda_n\cdot 9\Rightarrow\lambda_n=0.0777778$. ✓
+`ncvfit` uses the same $1/(2n)$ factor as glmnet but **does not rescale `penalty.factor`**.
+Instead of converting λ, the backend passes $\tilde X=\sqrt n\,X$ and $\tilde y=\sqrt n\,y$:
+
+$$\frac1{2n}\|\tilde y-\tilde X\beta\|^2=\frac1{2n}\,n\,\|y-X\beta\|^2=\tfrac12\|y-X\beta\|^2 ,$$
+
+exactly the paper-scale loss, so $\lambda_n=\lambda_{\text{paper}}$ (and γ unchanged).
+`test_scaled_design_makes_ncvfit_loss_the_paper_loss` asserts the identity.
+
+For the lasso the older encoding, an unscaled $X$ with $\lambda_n=\lambda_{\text{paper}}/p^2 = 0.0777778$
+at $p=3$, is equivalent and gives the same $\hat M$. It does not extend to SCAD, which is why the
+scaled one is used throughout: see §7.
 
 ### Confirmed against the packages' own documentation
 
@@ -202,7 +218,7 @@ is the primary evidence; the documentation corroborates it.
 > The worked example is the eyeball version of the same check: the two λ values differ by exactly
 > $p/(p-1)=1.5$, and both produce the same $\hat M$.
 
-In Python these live in `gclm.lasso` as `to_glmnet_lambda`, `from_glmnet_lambda`,
+In Python these live in `gclm.solvers.backends` as `to_glmnet_lambda`, `from_glmnet_lambda`,
 `to_ncvreg_lambda`.
 
 ---
@@ -214,10 +230,10 @@ In Python these live in `gclm.lasso` as `to_glmnet_lambda`, `from_glmnet_lambda`
 | `intercept` | `FALSE` | The Lyapunov equation has no constant term; $y=-\mathrm{vec}(C)$ is fully explained by $X\beta$. A free intercept would absorb signal — note $\bar y=-2/p\neq 0$. |
 | `standardize` | `FALSE` | Columns of $A(\hat\Sigma)$ carry the problem's own scaling. Standardizing changes the penalty from $\lambda\lvert\beta_j\rvert$ to $\lambda\,\mathrm{sd}_j\lvert\beta_j\rvert$, i.e. a different estimator. |
 | `penalty.factor` | `c(1 - diag(p))` | Leaves the diagonal of $M$ unpenalized, matching Varando's `lassoB()`. See `S1_reproduction.md` §4.1. |
-| `lambda` | see §4 | Converted from our scale. |
+| `lambda` | see §4 | glmnet: converted. ncvfit: our λ unchanged, because the design is passed as $\sqrt n X$. |
 | `thresh` / `eps` | `1e-14` / `1e-12` | Tight, because $X$ is rank-deficient and the objective is flat near the dense end of the path. |
 | `dfmax`, `pmax` | $p^2+1$ | glmnet only: stops it capping the active set. |
-| `xtx` | `apply(X, 2, crossprod)/nrow(X)` | `ncvfit` only: precomputed column norms it would otherwise expect. |
+| `xtx` | `colSums(X^2)` | `ncvfit` only: $\tilde x_j^\top\tilde x_j/n$ for the scaled design, which equals the squared column norm of the unscaled $A(\hat\Sigma)$. |
 
 **Use `ncvfit()`, not `ncvreg()`.** This is the single most important detail on the ncvreg side,
 and both help pages say so explicitly.
@@ -273,8 +289,9 @@ pf <- c(1 - diag(p))
 
 fit_g <- glmnet(X, y, intercept = FALSE, standardize = FALSE,
                 lambda = lambda_paper*(p-1)/p^3, thresh = 1e-14, penalty.factor = pf)
-fit_n <- ncvfit(X, y, xtx = apply(X, 2, crossprod)/nrow(X), penalty = "lasso",
-                lambda = lambda_paper/p^2, penalty.factor = pf, eps = 1e-12, max.iter = 1e5)
+n <- nrow(X)
+fit_n <- ncvfit(sqrt(n) * X, sqrt(n) * y, xtx = colSums(X^2), penalty = "lasso",
+                lambda = lambda_paper, penalty.factor = pf, eps = 1e-12, max.iter = 1e5)
 
 print(round(matrix(as.numeric(fit_g$beta), p, p), 6))
 print(round(matrix(fit_n$beta, p, p), 6))
@@ -288,7 +305,7 @@ cat(obj(matrix(as.numeric(fit_g$beta), p, p)),
 The same numbers come out of the Python side with
 
 ```python
-from gclm.lasso import lasso_path
+from gclm.solvers.path import lasso_path
 lasso_path(sigma, c, lambdas=[0.7], solver="glmnet")   # or solver="ncvreg"
 ```
 
@@ -297,12 +314,48 @@ identical metrics on a shared problem.
 
 ## 7. MCP and SCAD
 
-Only the `penalty` argument changes; `X`, `y`, `pf` and the λ conversion are untouched:
+> **Correction.** An earlier version of this section said that for MCP/SCAD only the `penalty`
+> argument changes, with `lambda = lambda_paper/p^2` and γ unchanged. That was wrong on two
+> counts. With an unscaled design MCP would need γ rescaled as well (`gamma = 3` would mean
+> γ = 3/p² on our scale), and SCAD has no equivalent parameters at all. Worse, ncvfit uses
+> a different convention for MCP/SCAD, described next.
+
+### What ncvfit minimizes for MCP/SCAD
+
+On a design whose columns are not standardized, `ncvfit` minimizes
+
+$$\frac1{2n}\|y-X\beta\|^2+\sum_j \frac{P_{\lambda\,\mathrm{pf}_j,\gamma}(v_j\beta_j)}{v_j},\qquad v_j=\frac{x_j^\top x_j}{n},$$
+
+the **ncvreg convention**: γ measured relative to each coordinate's loss curvature. It is **not**
+the textbook $\sum_j P_{\lambda,\gamma}(\beta_j)$. This was established to $10^{-16}$ on a plain
+regression (`tests/test_nonconvex.py::test_what_ncvfit_actually_minimises`). For the lasso the
+two coincide, which is why everything above is unaffected.
+
+The columns of $A(\hat\Sigma)$ have unequal norms, $v_{ik}=2(\|\hat\Sigma_{k,\cdot}\|^2+\hat\Sigma_{ik}^2)$,
+so the difference is real on our problem. ncvfit's MCP/SCAD solutions violate the textbook
+stationarity condition by 0.28–1.3 and satisfy the ncvreg-convention condition to $10^{-11}$.
+
+### The call
+
+With the scaled design of §4, only `penalty` and `gamma` change:
 
 ```r
-ncvfit(X, y, xtx = ..., penalty = "MCP",  gamma = 3,   lambda = lambda_paper/p^2, penalty.factor = pf)
-ncvfit(X, y, xtx = ..., penalty = "SCAD", gamma = 3.7, lambda = lambda_paper/p^2, penalty.factor = pf)
+ncvfit(sqrt(n) * X, sqrt(n) * y, xtx = colSums(X^2), penalty = "MCP",  gamma = 3,
+       lambda = lambda_paper, penalty.factor = pf, init = <previous fit>)
+ncvfit(sqrt(n) * X, sqrt(n) * y, xtx = colSums(X^2), penalty = "SCAD", gamma = 3.7,
+       lambda = lambda_paper, penalty.factor = pf, init = <previous fit>)
 ```
 
-From Python: `run_s1.py --solver ncvreg --penalty MCP --gamma 3`. `glmnet` cannot do this — the
-backend raises rather than silently falling back to the lasso.
+This computes the **ncvreg-convention** estimator. From Python:
+
+```bash
+python simulations/run_s1.py --penalty MCP --solver ncvreg --convention ncvreg
+```
+
+and the backend refuses `--convention textbook`, rather than returning a different estimator
+under that name. For the textbook MCP/SCAD use `--solver fista` (default) or `--solver skglm`.
+`fista` solves both conventions and is cross-checked against ncvreg under the ncvreg convention
+(stationarity and fixed-point property to $10^{-8}$). Which convention defines the thesis
+estimator is a modeling choice; see [`docs/NONCONVEX.md`](../docs/NONCONVEX.md) §2.
+
+`glmnet` cannot fit MCP/SCAD; the backend raises rather than silently falling back to the lasso.

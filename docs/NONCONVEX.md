@@ -1,7 +1,8 @@
 # MCP and SCAD for the Direct Lyapunov estimator
 
 How the nonconvex penalties of study S1b are defined, implemented and validated. Code:
-`src/gclm/penalties.py` (the penalties), `src/gclm/lasso.py` (`_solve_mapg` and the backends),
+`src/gclm/objective/penalties.py` (the penalties), `src/gclm/solvers/proxgrad.py` (`_solve_mapg`),
+`src/gclm/solvers/backends.py` (the package backends), `src/gclm/solvers/path.py` (the path),
 tests in `tests/test_nonconvex.py` (83 tests).
 
 ```bash
@@ -277,6 +278,11 @@ correctness, so it is not implemented.
 | `glmnet` | ✓ | — | — | — |
 | `pyproximal` | ✓ | — | — | — |
 | `design` | ✓ | — | — | — |
+
+All of these minimise the **direct** loss. For Varando's losses on the implied covariance
+(`--loss loglik|frobenius`) the same three penalties are solved by the active-set Newton method of
+`src/gclm/solvers/covariance.py` under the textbook convention only — there is no design matrix, so the
+ncvreg convention does not apply. See docs/LIKELIHOOD.md.
 
 ---
 

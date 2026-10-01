@@ -21,8 +21,17 @@
 # Each array task is a single core and writes ONE .npz of numbers.  No plots are
 # produced here -- plotting happens locally from the aggregated output.
 #
-#   mkdir -p logs results/s1
-#   sbatch cluster/s1_array.sbatch
+#   mkdir -p logs
+#   sbatch cluster/s1_array.sbatch                              # -> runs/s1_dettling_reproduction
+#   sbatch cluster/s1_array.sbatch runs/s1b_mcp --penalty MCP   # a new run, its own folder
+#   sbatch cluster/s1_array.sbatch runs/s2_loglik_scad --loss loglik --penalty SCAD
+#
+# Argument 1 is the run directory; shards go to <run>/s1_shards.  Any further
+# arguments are passed through to simulations/run_s1_shard.py: --penalty,
+# --gamma, --convention, --loss, --direction, --p, --reps, ...  (Arguments,
+# not environment variables: with --export=NONE the job inherits no environment.)
+# One submission per (loss, penalty) combination; see docs/REPRODUCTION.md
+# Section 4 for the list and the cost of each.
 #
 # Memory: one worker peaks around 70 MB even at p=50 (the solver is matrix-free),
 # so 2G is generous.  Time: the slowest shard should finish well inside 2 h;
@@ -31,12 +40,24 @@
 set -euo pipefail
 module load slurm_setup
 
-VENV="${GCLM_VENV:-$HOME/venvs/gclm}"
+# --export=NONE starts the job with a clean environment: nothing from the
+# submitting shell -- no loaded modules, no active venv -- carries over.  Load
+# the same Python module the venv was built on (cluster/setup_env.sh), then
+# activate the venv.  Without the module, a venv built on a module's Python can
+# fail at start-up with a missing libpython.
+module load python 2>/dev/null || module load anaconda3 2>/dev/null || {
+  echo "!! no python module found; see docs/REPRODUCTION.md Section 2.1" >&2
+  exit 1
+}
+VENV="$HOME/venvs/gclm"
 # shellcheck disable=SC1091
 source "$VENV/bin/activate"
+echo "python=$(command -v python) $(python --version 2>&1)"
 
 N_SHARDS=64
-OUT_DIR="${GCLM_OUT:-results/s1}"
+RUN_DIR="${1:-runs/s1_dettling_reproduction}"
+[ "$#" -gt 0 ] && shift
+OUT_DIR="$RUN_DIR/s1_shards"
 mkdir -p "$OUT_DIR"
 
 echo "host=$(hostname) shard=${SLURM_ARRAY_TASK_ID}/${N_SHARDS} start=$(date -Is)"
@@ -44,6 +65,6 @@ echo "host=$(hostname) shard=${SLURM_ARRAY_TASK_ID}/${N_SHARDS} start=$(date -Is
 srun python simulations/run_s1_shard.py \
     --shard "${SLURM_ARRAY_TASK_ID}" \
     --n-shards "${N_SHARDS}" \
-    --out-dir "${OUT_DIR}"
+    --out-dir "${OUT_DIR}" ${1+"$@"}
 
 echo "done=$(date -Is)"

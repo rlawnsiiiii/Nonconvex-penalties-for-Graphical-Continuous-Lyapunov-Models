@@ -5,20 +5,16 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from gclm.dgp import CChoice, draw_instance
-from gclm.examples import example2_cycle, example2_path
-from gclm.lasso import (
-    to_glmnet_lambda,
-    diagonal_fit,
-    lambda_grid,
-    lambda_max,
-    lasso_path,
-    penalty_weights,
-    solve_design,
-    solve_fista,
-)
-from gclm.loss import frobenius_grad, frobenius_loss, objective
-from gclm.lyap import (
+from gclm.data.simulate import CChoice, draw_instance
+from gclm.data.examples import example2_cycle, example2_path
+from gclm.objective.direct import diagonal_fit, lambda_max
+from gclm.objective.penalties import penalty_weights
+from gclm.solvers.backends import to_glmnet_lambda
+from gclm.solvers.coordinate import solve_design
+from gclm.solvers.path import lambda_grid, lasso_path
+from gclm.solvers.proxgrad import solve_fista
+from gclm.objective.direct import direct_grad, direct_loss, objective
+from gclm.lyapunov import (
     design_matrix,
     gram_matrix,
     lyapunov_residual,
@@ -74,7 +70,7 @@ def solution_is_unique(m, sigma):
 
 def kkt_violation(m, sigma, c, lam, weights):
     """max |subgradient| violation; 0 at an exact optimum."""
-    g = frobenius_grad(m, sigma, c)
+    g = direct_grad(m, sigma, c)
     thr = lam * weights
     active = m != 0
     viol = np.zeros_like(m)
@@ -372,8 +368,8 @@ def test_null_space_is_flat_for_every_c(p):
     m = rng.normal(size=(p, p))
     spd = rng.normal(size=(p, p))
     for c in (2 * np.eye(p), spd @ spd.T + p * np.eye(p), np.zeros((p, p))):
-        assert np.isclose(frobenius_loss(m, sigma, c),
-                          frobenius_loss(m + v, sigma, c), rtol=1e-12)
+        assert np.isclose(direct_loss(m, sigma, c),
+                          direct_loss(m + v, sigma, c), rtol=1e-12)
 
 
 @requires_ncvreg
@@ -389,20 +385,21 @@ def test_fista_matches_ncvreg(seed):
     this is a far sharper external check than ``test_lasso_path_matches_glmnet``,
     where ``glmnet``'s own tolerance is the limiting factor (see §8.2).
 
-    ncvfit minimizes ``(1/(2n))||y - Xb||^2 + lambda * pf_j * pen(b_j)`` with
-    ``n = nrow(X) = p^2``, so ``lambda_paper = lambda_ncv * p^2``.
+    ``R/backend_ncvreg.R`` hands ncvfit ``sqrt(n) X`` and ``sqrt(n) y`` so that
+    its ``(1/(2n))`` loss equals our ``0.5 ||y - Xb||^2``; lambda then goes
+    through unchanged (docs/NONCONVEX.md Section 2).
     """
     rng = np.random.default_rng(seed)
     p = 5
     _, _, _, sigma = draw_instance(p, 2, 300, CChoice.ID, rng)
     c = 2 * np.eye(p)
     w = penalty_weights(p)
-    n = p * p
 
     lams = lambda_grid(lambda_max(sigma, c), n_lambda=12, ratio=1e-2)
     out = run_r("backend_ncvreg.R",
                 {"Sigma": sigma.tolist(), "C": c.tolist(),
-                 "lambda_ncv": [lam / n for lam in lams], "penalty": "lasso"}, ("glmnet", "jsonlite"))
+                 "lambda": lams.tolist(), "penalty": "lasso"},
+                ("ncvreg", "jsonlite"))
     beta = np.asarray(out["beta"])
 
     for lam, b in zip(lams, beta):
@@ -546,7 +543,9 @@ def test_ncvreg_backend_supports_nonconvex_penalties(penalty):
     lams = lambda_grid(lambda_max(sigma, c), n_lambda=8, ratio=1e-2)
 
     lasso = lasso_path(sigma, c, lambdas=lams, solver="ncvreg", penalty="lasso")
-    ncvx = lasso_path(sigma, c, lambdas=lams, solver="ncvreg", penalty=penalty)
+    # ncvreg solves MCP/SCAD under its own convention -- see test_nonconvex.py
+    ncvx = lasso_path(sigma, c, lambdas=lams, solver="ncvreg", penalty=penalty,
+                      convention="ncvreg")
     assert len(ncvx.estimates) == len(lams)
     off = ~np.eye(p, dtype=bool)
     # nonconvex penalties leave large entries unshrunk: bigger max |off-diagonal|
@@ -556,7 +555,7 @@ def test_ncvreg_backend_supports_nonconvex_penalties(penalty):
 
 def test_glmnet_backend_rejects_nonconvex_penalty(instance):
     _, sigma, c = instance
-    with pytest.raises(ValueError, match="penalty='lasso' only"):
+    with pytest.raises(ValueError, match="l1 penalty only"):
         lasso_path(sigma, c, n_lambda=3, solver="glmnet", penalty="MCP")
 
 
@@ -667,5 +666,5 @@ def test_pyproximal_backend_agrees_with_ncvreg_supports():
 @requires_pyproximal
 def test_pyproximal_backend_rejects_nonconvex_penalty(instance):
     _, sigma, c = instance
-    with pytest.raises(ValueError, match="penalty='lasso' only"):
+    with pytest.raises(ValueError, match="l1 penalty only"):
         lasso_path(sigma, c, n_lambda=3, solver="pyproximal", penalty="MCP")

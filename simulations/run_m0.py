@@ -5,7 +5,7 @@ Path (G1) vs. 5-cycle (G2) across sample sizes.  Cheap, and the sharpest check
 that the whole pipeline is right: G1 should approach perfect recovery, G2 should
 not, even at n = infinity.
 
-    python simulations/run_m0.py --reps 100 --out results/m0.csv
+    python simulations/run_m0.py --reps 100 --out runs/local/m0_reps100.csv
 """
 
 from __future__ import annotations
@@ -22,10 +22,10 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from gclm.config import M0Config
-from gclm.dgp import sample_covariance, sample_data
-from gclm.examples import example2_cycle, example2_path
-from gclm.lasso import lasso_path
-from gclm.lyap import solve_lyapunov
+from gclm.data.simulate import sample_covariance, sample_data
+from gclm.data.examples import example2_cycle, example2_path
+from gclm.solvers.path import lasso_path
+from gclm.lyapunov import solve_lyapunov
 from gclm.metrics import confusion, evaluate_path
 
 SETTINGS = ("path", "cycle_fixed", "cycle_random")
@@ -43,7 +43,7 @@ def main() -> None:
     cfg = M0Config()
     ap = argparse.ArgumentParser()
     ap.add_argument("--reps", type=int, default=cfg.n_rep)
-    ap.add_argument("--out", type=Path, default=Path("results/m0.csv"))
+    ap.add_argument("--out", type=Path, default=Path("runs/local/m0.csv"))
     ap.add_argument("--seed", type=int, default=cfg.seed)
     ap.add_argument("--solver", default="fista",
                     choices=["fista", "ncvreg", "skglm", "glmnet", "pyproximal", "design"])

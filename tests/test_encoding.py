@@ -10,13 +10,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from gclm.lasso import (
-    lasso_path,
-    penalty_weights,
-    to_glmnet_lambda,
-    to_ncvreg_lambda,
-)
-from gclm.lyap import design_matrix, unvec, vec
+from gclm.objective.penalties import penalty_weights
+from gclm.solvers.backends import to_glmnet_lambda, to_ncvreg_lambda
+from gclm.solvers.path import lasso_path
+from gclm.lyapunov import design_matrix, unvec, vec
 
 from conftest import requires_ncvreg, requires_r
 
@@ -85,11 +82,19 @@ def test_column_index_map():
 
 
 def test_lambda_conversions_match_document():
+    # glmnet: unscaled design, 1/(2n) loss and penalty.factor rescaled to nvars
     assert np.isclose(to_glmnet_lambda(LAMBDA, P), 0.0518519, atol=1e-7)
-    assert np.isclose(to_ncvreg_lambda(LAMBDA, P), 0.0777778, atol=1e-7)
-    # the two differ by exactly p/(p-1) -- glmnet's penalty.factor rescaling
-    assert np.isclose(to_ncvreg_lambda(LAMBDA, P) / to_glmnet_lambda(LAMBDA, P),
-                      P / (P - 1))
+    # ncvfit: design passed as sqrt(n) X, so lambda goes through unchanged
+    assert to_ncvreg_lambda(LAMBDA, P) == LAMBDA
+
+
+def test_scaled_design_makes_ncvfit_loss_the_paper_loss():
+    """(1/(2n)) ||sqrt(n) y - sqrt(n) X b||^2 == 0.5 ||y - X b||^2 for any b."""
+    x, y = design_matrix(SIGMA), -vec(C)
+    n = x.shape[0]
+    b = np.random.default_rng(0).normal(size=P * P)
+    ncv = np.sum((np.sqrt(n) * y - np.sqrt(n) * x @ b) ** 2) / (2 * n)
+    assert np.isclose(ncv, 0.5 * np.sum((y - x @ b) ** 2))
 
 
 @requires_r

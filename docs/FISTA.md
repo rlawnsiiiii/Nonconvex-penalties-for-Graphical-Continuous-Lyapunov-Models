@@ -6,8 +6,8 @@
 > This note covers both FISTA backends — `pyproximal` (packaged) and `fista` — and the package
 > survey behind the choice.
 
-Implementation: `src/gclm/lasso.py::solve_fista` (hand-written) and
-`src/gclm/lasso.py::_pyproximal_path` (packaged).
+Implementation: `src/gclm/solvers/proxgrad.py::solve_fista` (hand-written) and
+`src/gclm/solvers/backends.py::_pyproximal_path` (packaged).
 
 ---
 
@@ -170,7 +170,7 @@ Neither source is deep. Restart is a published technique (O'Donoghue & Candès 2
 | `copt` | **Unusable here** — segfaults on import in this environment (`mutex lock failed`). Its `minimize_proximal_gradient(accelerated=True)` would otherwise have been a good matrix-free fit. |
 | `proxmin` | Installs, but is a general multi-block PGM/APGM toolkit with no weighted-L1 prox out of the box; subsumed by `pyproximal` for our purposes. |
 | `celer` | `skglm`'s predecessor; superseded by it. |
-| **`skglm`** (Bertrand et al., JMLR 2025) | **Works** — `WeightedL1`, `WeightedMCPenalty`, `Quadratic` datafit, no intercept, and MCP **without R**. Wired in as `solver="skglm"`. But it operates on the explicit $p^2\times p^2$ design, so it is $O(p^4)$ per sweep against our $O(p^3)$ per iteration. Measured below. `SCAD` has no weighted variant, so the unpenalized diagonal is not expressible there. |
+| **`skglm`** (JMLR 26, 2025) | **Works** — `WeightedL1`, `WeightedMCPenalty`, `Quadratic` datafit, no intercept, and MCP **without R**. Wired in as `solver="skglm"`. But it operates on the explicit $p^2\times p^2$ design, so it is $O(p^4)$ per sweep against our $O(p^3)$ per iteration. Measured below. `SCAD` has no weighted variant, so the unpenalized diagonal is not expressible there. |
 | `ncvreg::ncvfit` (R) | **Works and is the most accurate** — see `R/ENCODING.md`. Also $O(p^4)$; 48× slower than `fista` at $p=20$. |
 | `glmnet` (R) | Dettling's own choice. Least accurate, and silently truncates the λ path when it fails to converge. |
 | `cvxpy` | General convex modelling; would need the explicit design and is far slower for a 100-point path. |
@@ -286,7 +286,7 @@ in particular for **S1b's estimation-error comparison at moderate $p$**, where `
 ```bash
 python simulations/run_s1.py                                   # fista (default)
 python simulations/run_s1.py --p 10 15 --solver ncvreg         # accuracy-critical runs
-python simulations/run_s1.py --solver ncvreg --penalty MCP     # S1b
+python simulations/run_s1.py --penalty MCP                     # S1b (docs/NONCONVEX.md)
 ```
 
 ---

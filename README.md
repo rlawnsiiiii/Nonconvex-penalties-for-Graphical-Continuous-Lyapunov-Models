@@ -4,6 +4,8 @@ Research plan and meeting notes: [`plan.md`](plan.md).
 Code map and diagrams: [`ARCHITECTURE.md`](ARCHITECTURE.md).
 How the problem is encoded into glmnet / ncvreg: [`R/ENCODING.md`](R/ENCODING.md).
 The default solver and why it is hand-written: [`docs/FISTA.md`](docs/FISTA.md).
+MCP and SCAD — definitions, the two conventions, validation: [`docs/NONCONVEX.md`](docs/NONCONVEX.md).
+Varando's likelihood and Frobenius losses, and their Newton solver: [`docs/LIKELIHOOD.md`](docs/LIKELIHOOD.md).
 Running the full reproduction on a cluster: [`docs/REPRODUCTION.md`](docs/REPRODUCTION.md).
 
 ## Layout
@@ -18,19 +20,23 @@ simulations/
   run_s1_shard.py            the same grid, one shard -> .npz  (cluster)
   aggregate_s1.py            shards -> tidy CSVs
   plot_figures.py            CSVs -> figures            (LOCAL ONLY)
+  plot_penalties.py          overlay runs: penalties / losses vs. p (LOCAL ONLY)
+  S2_penalties_losses.md     S1b + S2: setup and pilot results
   results/                   committed run outputs
-src/gclm/                    the library (see S1_reproduction.md Section 7.1)
+src/gclm/                    the library: lyapunov.py, data/, objective/, solvers/, metrics.py (ARCHITECTURE.md §1)
 cluster/                     LRZ SLURM batch scripts + env setup
+runs/                        one folder per simulation run (raw shards gitignored)
+  s1_dettling_reproduction/  the full cluster run: data, figures, comparison with the paper
 figures/                     generated plots (local)
-R/                           glmnet + ncvreg solver backends (see R/ENCODING.md)
-tests/                       pytest; the `r` marker needs Rscript + glmnet/ncvreg
+R/                           glmnet + ncvreg solver backends (see R/ENCODING.md); gclm reference
+tests/                       pytest; the `r` marker needs Rscript + glmnet/ncvreg/gclm
 ```
 
 ## Getting started
 
 ```bash
 pip install -e ".[dev]"
-pytest                       # 124 tests; R-backed ones skip if Rscript is absent
+pytest                       # 274 tests; R-backed ones skip if Rscript is absent
 pytest -m "not r"            # skip the R validation explicitly
 
 python simulations/run_m0.py --reps 100          # reproduces Figure 3
@@ -50,16 +56,21 @@ python simulations/run_s1.py --solver glmnet      # Dettling's own choice (Appen
 python simulations/run_s1.py --solver pyproximal  # packaged FISTA, matrix-free
 python simulations/run_s1.py --solver design      # transparent Python reference
 
-# MCP / SCAD -- the S1b entry point
-python simulations/run_s1.py --solver ncvreg --penalty MCP  --gamma 3
-python simulations/run_s1.py --solver ncvreg --penalty SCAD --gamma 3.7
-python simulations/run_s1.py --solver skglm  --penalty MCP  --gamma 3   # no R needed
+# MCP / SCAD (study S1b) -- see docs/NONCONVEX.md, in particular Section 2
+python simulations/run_s1.py --penalty MCP                         # fista, textbook MCP
+python simulations/run_s1.py --penalty SCAD --gamma 3.7
+python simulations/run_s1.py --penalty MCP --solver skglm          # package, textbook
+python simulations/run_s1.py --penalty MCP --solver ncvreg --convention ncvreg
+
+# Varando's losses on the implied covariance (study S2) -- see docs/LIKELIHOOD.md
+python simulations/run_s1.py --loss loglik    --penalty lasso   # own Newton solver; --solver ignored
+python simulations/run_s1.py --loss frobenius --penalty SCAD
 ```
 
 The R backends and validation tests need:
 
 ```r
-install.packages(c("glmnet", "ncvreg", "jsonlite"))
+install.packages(c("glmnet", "ncvreg", "gclm", "jsonlite"))
 ```
 
 Optional Python backends and test oracles: `pip install skglm pyproximal pylops cvxpy`.
@@ -71,7 +82,7 @@ R-backed test skips cleanly without `Rscript`.
 
 | id | loss | penalty | status |
 |---|---|---|---|
-| **S1** | quadratic (Frobenius) Lyapunov loss | $\ell_1$ | reproduction in progress |
-| S1b | quadratic | MCP / SCAD | planned — swaps the prox only |
-| S2 | Gaussian log-likelihood | $\ell_1$ vs. nonconvex | planned |
+| **S1** | direct (quadratic) Lyapunov loss | $\ell_1$ | Figure 5 reproduced at full scale; two $C$ settings differ from the paper ([`simulations/S1_reproduction.md`](simulations/S1_reproduction.md) §8.10) |
+| S1b | direct | MCP / SCAD | implemented and validated ([`docs/NONCONVEX.md`](docs/NONCONVEX.md)); pilot at $p=10,20$ in [`simulations/S2_penalties_losses.md`](simulations/S2_penalties_losses.md) |
+| S2 | Gaussian log-likelihood, Frobenius on $\Sigma(M)$ | $\ell_1$ vs. MCP / SCAD | implemented and validated ([`docs/LIKELIHOOD.md`](docs/LIKELIHOOD.md)); pilot in the same document |
 | S3 | quadratic or likelihood | BIC-type, score-based search | planned |

@@ -5,8 +5,8 @@ Writes one CSV row per (p, k, C_choice, rep) with the four reported metrics.
 Tasks are independent, so this maps directly onto a cluster array job: use
 --shard i/N to run a slice.
 
-    python simulations/run_s1.py --p 10 15 --reps 20 --out results/s1.csv
-    python simulations/run_s1.py --shard 3/64 --out results/s1_shard03.csv
+    python simulations/run_s1.py --p 10 15 --reps 20 --out runs/local/s1.csv
+    python simulations/run_s1.py --shard 3/64 --out runs/local/s1_shard03.csv
 """
 
 from __future__ import annotations
@@ -24,8 +24,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from gclm.config import S1Config
-from gclm.dgp import CChoice, draw_instance
-from gclm.lasso import lasso_path
+from gclm.data.simulate import CChoice, draw_instance
+from gclm.solvers.path import covloss_path, lasso_path
 from gclm.metrics import evaluate_path
 
 FIELDS = ["p", "k", "c_choice", "rep", "max_acc", "max_f1", "auc", "aupr", "seconds"]
@@ -43,12 +43,19 @@ def run_one(task):
         metzler=cfg.metzler, standardize=cfg.standardize,
     )
     c_est = 2.0 * np.eye(p)                       # always C = 2 I for estimation
-    path = lasso_path(
-        sigma_hat, c_est,
-        n_lambda=cfg.n_lambda, ratio=cfg.lambda_ratio,
-        penalize_diagonal=cfg.penalize_diagonal, solver=cfg.solver, tol=cfg.tol,
-        penalty=cfg.penalty, gamma=cfg.gamma,
-    )
+    if cfg.loss == "direct":
+        path = lasso_path(
+            sigma_hat, c_est,
+            n_lambda=cfg.n_lambda, ratio=cfg.lambda_ratio,
+            penalize_diagonal=cfg.penalize_diagonal, solver=cfg.solver, tol=cfg.tol,
+            penalty=cfg.penalty, gamma=cfg.gamma, convention=cfg.convention,
+        )
+    else:
+        path = covloss_path(
+            sigma_hat, c_est, cfg.loss,
+            n_lambda=cfg.n_lambda, ratio=cfg.lambda_ratio, tol=cfg.tol,
+            penalty=cfg.penalty, gamma=cfg.gamma, direction=cfg.direction,
+        )
     ev = evaluate_path(path.estimates, m_true,
                        include_diagonal=cfg.metrics_include_diagonal)
     return {
@@ -84,10 +91,18 @@ def main() -> None:
                          "pyproximal: packaged FISTA.")
     ap.add_argument("--penalty", default=base.penalty,
                     choices=["lasso", "MCP", "SCAD"],
-                    help="MCP needs --solver ncvreg or skglm; SCAD needs ncvreg")
+                    help="MCP/SCAD: fista (default), ncvreg or skglm -- see --convention")
+    ap.add_argument("--convention", default=base.convention, choices=["textbook", "ncvreg"],
+                    help="MCP/SCAD only. textbook: P(M_ij) (fista, skglm). "
+                         "ncvreg: gamma relative to each coordinate's curvature (fista, ncvreg).")
     ap.add_argument("--gamma", type=float, default=base.gamma,
                     help="MCP/SCAD concavity parameter (ncvreg default: 3 / 3.7)")
-    ap.add_argument("--out", type=Path, default=Path("results/s1.csv"))
+    ap.add_argument("--loss", default=base.loss, choices=["direct", "loglik", "frobenius"],
+                    help="direct: Dettling's loss (default). loglik / frobenius: "
+                         "Varando's losses on Sigma(M); --solver is then ignored.")
+    ap.add_argument("--direction", default=base.direction, choices=["down", "up"],
+                    help="path order for the covariance losses")
+    ap.add_argument("--out", type=Path, default=Path("runs/local/s1.csv"))
     args = ap.parse_args()
 
     cfg = S1Config(
@@ -98,6 +113,7 @@ def main() -> None:
         metrics_include_diagonal=args.metrics_include_diagonal,
         standardize=args.standardize, tol=args.tol,
         solver=args.solver, penalty=args.penalty, gamma=args.gamma,
+        convention=args.convention, loss=args.loss, direction=args.direction,
     )
 
     tasks = [(p, k, c, r, cfg)
@@ -109,7 +125,9 @@ def main() -> None:
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     print(f"{len(tasks)} tasks on {args.workers} workers "
-          f"[solver={cfg.solver}, penalty={cfg.penalty}] -> {args.out}", flush=True)
+          f"[loss={cfg.loss}, solver={cfg.solver}, penalty={cfg.penalty}, "
+          f"convention={cfg.convention}] "
+          f"-> {args.out}", flush=True)
 
     t0 = time.time()
     with args.out.open("w", newline="") as fh:

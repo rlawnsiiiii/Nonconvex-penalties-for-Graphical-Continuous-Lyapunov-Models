@@ -10,7 +10,7 @@ from enum import Enum
 
 import numpy as np
 
-from gclm.lyap import solve_lyapunov
+from gclm.lyapunov import solve_lyapunov
 
 
 class CChoice(str, Enum):

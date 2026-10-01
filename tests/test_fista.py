@@ -1,4 +1,4 @@
-"""Correctness of the hand-written FISTA solver (`gclm.lasso.solve_fista`).
+"""Correctness of the hand-written FISTA solver (`gclm.solvers.proxgrad.solve_fista`).
 
 `solve_fista` is the default backend, so it carries more of the burden of proof
 than a library would.  These tests attack it from several independent
@@ -22,15 +22,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from gclm.dgp import CChoice, draw_instance
-from gclm.lasso import (
-    lambda_grid,
-    lambda_max,
-    penalty_weights,
-    solve_fista,
-)
-from gclm.loss import objective
-from gclm.lyap import design_matrix, vec
+from gclm.data.simulate import CChoice, draw_instance
+from gclm.objective.direct import lambda_max
+from gclm.objective.penalties import penalty_weights
+from gclm.solvers.path import lambda_grid
+from gclm.solvers.proxgrad import solve_fista
+from gclm.objective.direct import objective
+from gclm.lyapunov import design_matrix, vec
 
 try:
     import cvxpy as cp
@@ -196,11 +194,11 @@ def test_is_scale_equivariant_in_c():
 
 def test_zero_lambda_solves_the_unpenalized_problem():
     """At lambda = 0 the gradient must vanish (no penalty to balance it)."""
-    from gclm.loss import frobenius_grad
+    from gclm.objective.direct import direct_grad
 
     sigma, c, w = _problem()
     m = solve_fista(sigma, c, 0.0, weights=w, **TIGHT)
-    assert np.max(np.abs(frobenius_grad(m, sigma, c))) < 1e-6
+    assert np.max(np.abs(direct_grad(m, sigma, c))) < 1e-6
 
 
 # --------------------------------------------------------------------------- #
@@ -252,7 +250,7 @@ def test_objective_never_increases_along_the_path():
 @pytest.mark.parametrize("p", [3, 6, 10])
 def test_converges_from_any_problem_size(p):
     """Smoke test across sizes: KKT satisfied and diagonal negative."""
-    from gclm.loss import frobenius_grad
+    from gclm.objective.direct import direct_grad
 
     rng = np.random.default_rng(p)
     _, _, _, sigma = draw_instance(p, 2, 500, CChoice.ID, rng)
@@ -260,7 +258,7 @@ def test_converges_from_any_problem_size(p):
     lam = 0.5 * lambda_max(sigma, c)
     m = solve_fista(sigma, c, lam, weights=w, **TIGHT)
 
-    g = frobenius_grad(m, sigma, c)
+    g = direct_grad(m, sigma, c)
     thr = lam * w
     active = m != 0
     viol = np.zeros_like(m)
