@@ -153,3 +153,101 @@ def evaluate_path(
         "auc": auc_roc(cfpr, ctpr),
         "aupr": aupr(ctpr, cprec),
     }
+
+
+# --------------------------------------------------------------------------- #
+# skeleton and orientation: where does a directed error come from?
+# --------------------------------------------------------------------------- #
+
+ORIENTATION_KEYS = (
+    "correct", "reversed", "hedged",            # truth has one direction, estimate detects the pair
+    "both", "half",                             # truth has both directions (a 2-cycle)
+    "missed_single", "missed_double",           # pair not detected at all
+    "fp_single", "fp_double",                   # pair detected, truth has neither direction
+)
+
+
+def _pair_patterns(m: np.ndarray) -> np.ndarray:
+    """For every unordered pair i < j: 0 none, 1 entry (i,j) only, 2 entry (j,i) only, 3 both."""
+    nz = np.asarray(m) != 0.0
+    iu, ju = np.triu_indices(nz.shape[0], k=1)
+    return nz[iu, ju].astype(int) + 2 * nz[ju, iu].astype(int)
+
+
+def skeleton_confusion(m_hat: np.ndarray, m_star: np.ndarray) -> Confusion:
+    """Confusion counts of the *undirected* skeleton: a pair {i, j} is an edge
+    if either direction is nonzero.  Same conventions as :func:`confusion`."""
+    est, truth = _pair_patterns(m_hat) > 0, _pair_patterns(m_star) > 0
+    return Confusion(
+        tp=int(np.sum(est & truth)), fp=int(np.sum(est & ~truth)),
+        tn=int(np.sum(~est & ~truth)), fn=int(np.sum(~est & truth)),
+    )
+
+
+def orientation_breakdown(m_hat: np.ndarray, m_star: np.ndarray) -> dict[str, float]:
+    """Classify every unordered pair by what the truth has and what the estimate
+    has, so that the off-diagonal directed confusion of :func:`confusion` splits
+    exactly into orientation errors, 2-cycle errors and skeleton errors:
+
+        tp = correct + hedged + 2 both + half
+        fp = reversed + hedged + fp_single + 2 fp_double
+        fn = reversed + half + missed_single + 2 missed_double
+
+    ``correct``: one true direction, estimate has exactly that one.
+    ``reversed``: one true direction, estimate has exactly the other one.
+    ``hedged``: one true direction, estimate keeps both (true direction present,
+    one false positive).  ``both`` / ``half``: a true 2-cycle recovered fully /
+    as one direction.  Also returned: ``skeleton_f1`` (from
+    :func:`skeleton_confusion`), ``orientation_accuracy`` = correct / (correct +
+    reversed) over the detected single-direction true edges on which the
+    estimate committed to one direction (nan if none), and
+    ``orientation_recall`` = (correct + hedged) / (correct + reversed + hedged),
+    the fraction of detected single-direction true edges whose true direction is
+    present.
+    """
+    e, t = _pair_patterns(m_hat), _pair_patterns(m_star)
+    single_t = (t == 1) | (t == 2)
+    out = {
+        "correct": int(np.sum(single_t & (e == t))),
+        "reversed": int(np.sum(single_t & (e > 0) & (e < 3) & (e != t))),
+        "hedged": int(np.sum(single_t & (e == 3))),
+        "both": int(np.sum((t == 3) & (e == 3))),
+        "half": int(np.sum((t == 3) & (e > 0) & (e < 3))),
+        "missed_single": int(np.sum(single_t & (e == 0))),
+        "missed_double": int(np.sum((t == 3) & (e == 0))),
+        "fp_single": int(np.sum((t == 0) & (e > 0) & (e < 3))),
+        "fp_double": int(np.sum((t == 0) & (e == 3))),
+        "n_true_single": int(np.sum(single_t)),
+        "n_true_double": int(np.sum(t == 3)),
+    }
+    committed = out["correct"] + out["reversed"]
+    detected = committed + out["hedged"]
+    out["orientation_accuracy"] = out["correct"] / committed if committed else float("nan")
+    out["orientation_recall"] = (out["correct"] + out["hedged"]) / detected if detected else float("nan")
+    out["skeleton_f1"] = skeleton_confusion(m_hat, m_star).f1
+    return out
+
+
+def evaluate_skeleton_path(
+    estimates: list[np.ndarray],
+    m_star: np.ndarray,
+    anchor_dense: bool = True,
+) -> dict[str, float | np.ndarray]:
+    """The Definition G.5 quantities for the *skeleton* along a path -- the same
+    curve construction as :func:`evaluate_path`, on :func:`skeleton_confusion`.
+    """
+    confs = [skeleton_confusion(m, m_star) for m in estimates]
+    tpr = np.array([c.tpr for c in confs])
+    fpr = np.array([c.fpr for c in confs])
+    f1 = np.array([c.f1 for c in confs])
+    prec = np.array([c.precision for c in confs])
+    ctpr, cfpr, cprec = tpr, fpr, prec
+    if anchor_dense and confs:
+        c0 = confs[0]
+        total = c0.tp + c0.fn + c0.fp + c0.tn
+        base = 1.0 if total == 0 else (c0.tp + c0.fn) / total
+        ctpr = np.concatenate(([1.0], tpr))
+        cfpr = np.concatenate(([1.0], fpr))
+        cprec = np.concatenate(([base], prec))
+    return {"tpr": tpr, "fpr": fpr, "f1": f1, "precision": prec,
+            "max_f1": float(np.nanmax(f1)), "auc": auc_roc(cfpr, ctpr), "aupr": aupr(ctpr, cprec)}

@@ -174,3 +174,53 @@ def test_dense_anchor_is_a_noop_when_the_path_already_reaches_recall_one():
     anchored = evaluate_path(estimates, m_star, anchor_dense=True)
     assert np.isclose(plain["aupr"], anchored["aupr"])
     assert np.isclose(plain["auc"], anchored["auc"])
+
+
+# --------------------------------------------------------------------------- #
+# skeleton and orientation
+# --------------------------------------------------------------------------- #
+
+from gclm.metrics import evaluate_skeleton_path, orientation_breakdown, skeleton_confusion  # noqa: E402
+
+
+def _random_pattern(rng, p, density):
+    m = (rng.random((p, p)) < density) * rng.normal(size=(p, p))
+    np.fill_diagonal(m, -1.0)
+    return m
+
+
+def test_orientation_breakdown_decomposes_the_directed_confusion():
+    rng = np.random.default_rng(0)
+    for _ in range(50):
+        m_star, m_hat = _random_pattern(rng, 7, 0.3), _random_pattern(rng, 7, 0.4)
+        b = orientation_breakdown(m_hat, m_star)
+        c = confusion(m_hat, m_star)
+        assert c.tp == b["correct"] + b["hedged"] + 2 * b["both"] + b["half"]
+        assert c.fp == b["reversed"] + b["hedged"] + b["fp_single"] + 2 * b["fp_double"]
+        assert c.fn == b["reversed"] + b["half"] + b["missed_single"] + 2 * b["missed_double"]
+        s = skeleton_confusion(m_hat, m_star)
+        assert s.tp == b["correct"] + b["reversed"] + b["hedged"] + b["both"] + b["half"]
+        assert s.fn == b["missed_single"] + b["missed_double"]
+        assert s.fp == b["fp_single"] + b["fp_double"]
+
+
+def test_orientation_cases_by_hand():
+    m_star = np.diag([-1.0, -1.0, -1.0]); m_star[1, 0] = 0.5          # one edge: entry (1,0)
+    reversed_ = np.diag([-1.0, -1.0, -1.0]); reversed_[0, 1] = 0.5    # the other direction
+    hedged = reversed_.copy(); hedged[1, 0] = 0.2
+    for est, key in ((m_star, "correct"), (reversed_, "reversed"), (hedged, "hedged")):
+        b = orientation_breakdown(est, m_star)
+        assert b[key] == 1 and sum(b[k] for k in ("correct", "reversed", "hedged")) == 1
+        assert b["skeleton_f1"] == 1.0
+    assert orientation_breakdown(reversed_, m_star)["orientation_accuracy"] == 0.0
+    assert orientation_breakdown(hedged, m_star)["orientation_recall"] == 1.0
+    assert np.isnan(orientation_breakdown(hedged, m_star)["orientation_accuracy"])
+
+
+def test_skeleton_path_of_a_perfect_skeleton_is_one():
+    m_star = np.diag([-1.0, -1.0, -1.0]); m_star[1, 0] = 0.5
+    reversed_ = np.diag([-1.0, -1.0, -1.0]); reversed_[0, 1] = 0.5
+    empty = np.diag([-1.0, -1.0, -1.0])
+    ev = evaluate_skeleton_path([reversed_, empty], m_star)       # increasing lambda
+    assert ev["max_f1"] == 1.0 and ev["auc"] == 1.0 and ev["aupr"] == 1.0
+    assert evaluate_path([reversed_, empty], m_star)["max_f1"] == 0.0

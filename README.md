@@ -12,6 +12,7 @@ Running the full reproduction on a cluster: [`docs/REPRODUCTION.md`](docs/REPROD
 
 ```
 plan.md                      topic, references, meeting notes
+next_steps/                  dated next-steps memos (next_steps_011026.md: orientation finding, literature, remedies, plan)
 ARCHITECTURE.md              repository structure, with diagrams
 simulations/
   S1_reproduction.md         spec + implementation plan for study S1
@@ -83,6 +84,6 @@ R-backed test skips cleanly without `Rscript`.
 | id | loss | penalty | status |
 |---|---|---|---|
 | **S1** | direct (quadratic) Lyapunov loss | $\ell_1$ | Figure 5 reproduced at full scale; two $C$ settings differ from the paper ([`simulations/S1_reproduction.md`](simulations/S1_reproduction.md) §8.10) |
-| S1b | direct | MCP / SCAD | implemented and validated ([`docs/NONCONVEX.md`](docs/NONCONVEX.md)); pilot at $p=10,20$ in [`simulations/S2_penalties_losses.md`](simulations/S2_penalties_losses.md) |
-| S2 | Gaussian log-likelihood, Frobenius on $\Sigma(M)$ | $\ell_1$ vs. MCP / SCAD | implemented and validated ([`docs/LIKELIHOOD.md`](docs/LIKELIHOOD.md)); pilot in the same document |
+| S1b | direct | MCP / SCAD | pilot at $p=10,20$: both find the **skeleton as well as the lasso but orient edges worse** (directed $z$ −6…−18); mechanism in [`simulations/S2_penalties_losses.md`](simulations/S2_penalties_losses.md) §3.1 |
+| S2 | Gaussian log-likelihood, Frobenius on $\Sigma(M)$ | $\ell_1$ vs. MCP / SCAD | pilot at $p=10$: same ordering on both losses; lasso + log-likelihood slightly beats the direct lasso (§3.2–3.3); larger $p$ on the cluster (§6) |
 | S3 | quadratic or likelihood | BIC-type, score-based search | planned |

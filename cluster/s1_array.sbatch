@@ -26,7 +26,9 @@
 #   sbatch cluster/s1_array.sbatch runs/s1b_mcp --penalty MCP   # a new run, its own folder
 #   sbatch cluster/s1_array.sbatch runs/s2_loglik_scad --loss loglik --penalty SCAD
 #
-# Argument 1 is the run directory; shards go to <run>/s1_shards.  Any further
+# Argument 1 is the run directory; shards go to <run>/s1_shards.  If that folder
+# holds a file n_shards, it sets the shard count (default 64; see
+# cluster/submit_nsweep.sh, which also sets --array and --time).  Any further
 # arguments are passed through to simulations/run_s1_shard.py: --penalty,
 # --gamma, --convention, --loss, --direction, --p, --reps, ...  (Arguments,
 # not environment variables: with --export=NONE the job inherits no environment.)
@@ -54,11 +56,25 @@ VENV="$HOME/venvs/gclm"
 source "$VENV/bin/activate"
 echo "python=$(command -v python) $(python --version 2>&1)"
 
-N_SHARDS=64
+# One core per task: keep NumPy/SciPy's BLAS single-threaded so a task never
+# starts more threads than its one core (the local pilot scripts do the same).
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+
 RUN_DIR="${1:-runs/s1_dettling_reproduction}"
 [ "$#" -gt 0 ] && shift
 OUT_DIR="$RUN_DIR/s1_shards"
 mkdir -p "$OUT_DIR"
+
+# Shard count: 64, unless the run folder says otherwise (cluster/submit_nsweep.sh
+# writes <run>/n_shards before submitting, together with a matching --array).  It
+# is read from the folder rather than from the array size so that resubmitting a
+# few failed shards (--array=3,17) still slices the grid the same way.
+N_SHARDS=64
+[ -f "$RUN_DIR/n_shards" ] && N_SHARDS="$(cat "$RUN_DIR/n_shards")"
+if [ "${SLURM_ARRAY_TASK_ID}" -ge "${N_SHARDS}" ]; then
+  echo "!! array index ${SLURM_ARRAY_TASK_ID} >= ${N_SHARDS} shards for $RUN_DIR" >&2
+  exit 1
+fi
 
 echo "host=$(hostname) shard=${SLURM_ARRAY_TASK_ID}/${N_SHARDS} start=$(date -Is)"
 

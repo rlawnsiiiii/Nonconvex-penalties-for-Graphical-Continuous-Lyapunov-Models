@@ -187,6 +187,18 @@ says the same.
 
 ### 5.1 They remove the lasso's shrinkage bias
 
+> **What the simulations found (S1b, simulations/S2_penalties_losses.md §3.1–3.6):** they do
+> remove it, and they find the *undirected skeleton* as well as the lasso — but they orient
+> edges worse, and three quarters of their loss on the directed metrics is orientation. The
+> design $A(\hat\Sigma)$ has a $p(p-1)/2$-dimensional null space (for a correlation matrix,
+> nearly the skew-symmetric matrices), so $M_{ij}$ and $M_{ji}$ are almost interchangeable. The
+> $\ell_1$ norm is constant along that swap, so the lasso lets the loss decide and keeps both
+> directions when it is unsure; a penalty with a kink at zero and a flat part charges $\lambda$
+> on the entering direction and refunds nothing on the exiting one, which freezes whichever
+> direction entered first. Read that section before expecting the bias removal below to
+> translate into better graphs.
+
+
 On Dettling's Example 2 path graph with the population covariance, at every λ where both methods
 recover the support exactly (`test_nonconvex_penalties_remove_the_lasso_bias`):
 

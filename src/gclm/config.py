@@ -2,9 +2,25 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 from gclm.data.simulate import CChoice
+
+
+def parse_n_obs(text: str) -> int | float:
+    """Sample size from the command line: ``"1000"`` or ``"1e5"`` -> an int,
+    ``"inf"`` -> ``float("inf")``, which feeds the population covariance (no
+    sampling; see :func:`gclm.data.simulate.draw_instance`)."""
+    try:
+        x = float(text)
+    except ValueError:
+        raise ValueError(f"sample size must be an integer or 'inf', got {text!r}") from None
+    if math.isinf(x) and x > 0:
+        return math.inf
+    if not (math.isfinite(x) and x >= 2 and x == int(x)):
+        raise ValueError(f"sample size must be an integer >= 2 or 'inf', got {text!r}")
+    return int(x)
 
 
 @dataclass(frozen=True)
@@ -15,7 +31,8 @@ class S1Config:
     k_values: tuple[int, ...] = (1, 2, 3, 4)
     c_choices: tuple[CChoice, ...] = tuple(CChoice)
     n_rep: int = 100
-    n_obs: int = 1000
+    n_obs: int | float = 1000       # math.inf -> the population covariance
+
     n_lambda: int = 100
     lambda_ratio: float = 1e-4
 

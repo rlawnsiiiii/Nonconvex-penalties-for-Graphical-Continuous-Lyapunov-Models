@@ -20,6 +20,8 @@ means every metric -- including ones not yet defined, and the
         --out-dir runs/s1_dettling_reproduction/s1_shards
     python simulations/run_s1_shard.py --shard 0 --n-shards 64 --loss loglik \
         --penalty MCP --out-dir runs/s2_loglik_mcp/s1_shards
+    python simulations/run_s1_shard.py --shard 0 --n-shards 64 --n-obs inf \
+        --p 10 20 --reps 25 --out-dir runs/nsweep_p10-20/direct_lasso_ninf/s1_shards
 """
 
 from __future__ import annotations
@@ -38,7 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from gclm import __name__ as _pkg  # noqa: F401  (ensures src/ is importable)
 from gclm.objective import covariance
-from gclm.config import S1Config
+from gclm.config import S1Config, parse_n_obs
 from gclm.data.simulate import CChoice, draw_instance
 from gclm.objective.direct import lambda_max
 from gclm.objective.penalties import penalty_weights
@@ -148,6 +150,10 @@ def main() -> None:
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument("--reps", type=int, default=None, help="override n_rep (testing)")
     ap.add_argument("--p", type=int, nargs="+", default=None)
+    ap.add_argument("--n-obs", type=parse_n_obs, default=None,
+                    help="sample size, e.g. 1000, 1e5 or inf (the population "
+                         "covariance); default 1000.  M* and C do not depend on it, "
+                         "so runs at different n are paired dataset by dataset")
     ap.add_argument("--solver", default=None)
     ap.add_argument("--tol", type=float, default=None)
     ap.add_argument("--penalty", default=None, choices=["lasso", "MCP", "SCAD"])
@@ -159,11 +165,14 @@ def main() -> None:
     ap.add_argument("--direction", default=None, choices=["down", "up"],
                     help="path order for the covariance losses (default: down)")
     args = ap.parse_args()
+    if not 0 <= args.shard < args.n_shards:
+        ap.error(f"--shard must be in 0..{args.n_shards - 1}, got {args.shard}")
 
     base = S1Config()
     cfg = S1Config(
         p_values=tuple(args.p) if args.p else base.p_values,
         n_rep=args.reps if args.reps else base.n_rep,
+        n_obs=args.n_obs if args.n_obs is not None else base.n_obs,
         solver=args.solver or base.solver,
         tol=args.tol if args.tol else base.tol,
         penalty=args.penalty or base.penalty,
@@ -178,7 +187,7 @@ def main() -> None:
     out = args.out_dir / f"shard_{args.shard:04d}_of_{args.n_shards:04d}.npz"
 
     print(f"shard {args.shard}/{args.n_shards}: {len(tasks)} datasets "
-          f"-> {out}", flush=True)
+          f"[n={cfg.n_obs}, loss={cfg.loss}, penalty={cfg.penalty}] -> {out}", flush=True)
 
     store: dict[str, list] = {}
     t0 = time.time()

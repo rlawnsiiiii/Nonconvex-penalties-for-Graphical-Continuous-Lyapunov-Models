@@ -23,7 +23,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from gclm.config import S1Config
+from gclm.config import S1Config, parse_n_obs
 from gclm.data.simulate import CChoice, draw_instance
 from gclm.solvers.path import covloss_path, lasso_path
 from gclm.metrics import evaluate_path
@@ -73,7 +73,8 @@ def main() -> None:
     ap.add_argument("--k", type=int, nargs="+", default=list(base.k_values))
     ap.add_argument("--c", nargs="+", default=[c.value for c in base.c_choices])
     ap.add_argument("--reps", type=int, default=base.n_rep)
-    ap.add_argument("--n-obs", type=int, default=base.n_obs)
+    ap.add_argument("--n-obs", type=parse_n_obs, default=base.n_obs,
+                    help="sample size, e.g. 1000, 1e5 or inf (population covariance)")
     ap.add_argument("--workers", type=int, default=os.cpu_count())
     ap.add_argument("--shard", default=None, help="i/N -- run shard i of N")
     ap.add_argument("--penalize-diagonal", action="store_true")

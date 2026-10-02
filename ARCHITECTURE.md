@@ -16,6 +16,7 @@ the *code* map. The research plan is [`plan.md`](plan.md).
 ```
 repo/
 ├── plan.md                        topic, references, meeting notes
+├── next_steps/                    dated memos: where the results stand, literature, remedies, plan
 ├── README.md                      quick start
 ├── ARCHITECTURE.md                this file
 │
@@ -67,6 +68,7 @@ repo/
 ├── cluster/                       LRZ SLURM job scripts
 │   ├── setup_env.sh               one-time venv setup on a login node
 │   ├── s1_array.sbatch            Figure 5, 64-task array on serial_std
+│   ├── submit_nsweep.sh           n-sweep at p = 10, 20: one array per (loss, penalty, n)
 │   └── m0.sbatch                  Figure 3, single serial job
 │
 ├── R/                             solver backends + metric reference

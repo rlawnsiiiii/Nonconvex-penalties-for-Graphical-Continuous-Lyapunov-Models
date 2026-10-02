@@ -241,6 +241,87 @@ head -3 logs/s1_<jobid>_0.out         # host, shard, and the python actually use
 - **64 shards** — datasets are assigned stride-wise (`tasks[i::64]`), so every shard gets a mix of
   $p$ values and they finish at roughly the same time. No straggler shard of pure $p=50$.
 
+### 2.6 The n-sweep: $p = 10, 20$ at growing $n$, every loss and penalty
+
+Figure 5's data-generating process at $p \in \{10, 20\}$ (4 $k$ × 4 $C$ × 25 reps = 800 datasets)
+for every loss (direct, log-likelihood, Frobenius), penalty (lasso, MCP, SCAD) and sample size
+($n = 10^3, 10^4, 10^5, \infty$): 36 cells, one array each, in
+`runs/nsweep_p10-20/<loss>_<penalty>_n<n>/`. `--n-obs inf` feeds the population covariance.
+$M^*$ and $C$ are drawn before the data, so all 36 cells see the same 800 drift matrices and every
+comparison, across penalties, losses or $n$, is paired (`test_drift_and_volatility_do_not_depend_on_n`).
+
+`cluster/submit_nsweep.sh` does the bookkeeping: it writes each cell's shard count into its folder
+(`n_shards`, which `s1_array.sbatch` reads), never submits a cell twice, and resubmits only the
+missing shards when asked:
+
+```bash
+cd ~/repo && git pull
+bash cluster/submit_nsweep.sh --dry-run            # the 36 sbatch commands; submits nothing
+bash cluster/submit_nsweep.sh --n 1000             # wave 1: 9 arrays, 336 tasks
+bash cluster/submit_nsweep.sh --status             # complete / k of N shards written / not started
+```
+
+**Wave 1 ($n = 1000$) is a check before the rest go in.**
+
+- *Same numbers as before.* Its cells repeat datasets that already exist: `direct_lasso_n1000` is
+  $p = 10, 20$, reps < 25 of the full lasso run, `direct_{MCP,SCAD}_n1000` is the S1b pilot, and the
+  `loglik` / `frobenius` cells at $p = 10$, reps < 10 are the S2 pilot. The paired differences
+  should be zero (nonconvex fits may differ in the last digits across machines):
+  ```bash
+  python simulations/compare_runs.py --baseline runs/s1_dettling_reproduction \
+      --run runs/nsweep_p10-20/direct_lasso_n1000 --reps 25 --p 10 20
+  ```
+- *The real cost.* Shard counts and limits below are estimates;
+  `sacct -M serial -j <jobid> --format=JobID,Elapsed,State` gives the longest shard per cell. If a
+  loss needs more time or more shards, edit `shards_for` / `time_for` at the top of the script
+  before the next wave (a cell already submitted keeps the shard count it recorded).
+
+Then the remaining three sample sizes:
+
+```bash
+bash cluster/submit_nsweep.sh --n 1e4 1e5 inf      # 27 arrays, 1,008 tasks
+```
+
+If `sbatch` refuses with a per-user limit (e.g. `QOSMaxSubmitJobPerUserLimit`), submit one $n$ at a
+time; a refused cell records nothing, so rerunning the same command continues where it stopped.
+Once a cell's jobs have ended, `--status` shows shards that were never written (TIMEOUT, node
+failure: check `sacct`), and `--fill` resubmits exactly those:
+
+```bash
+bash cluster/submit_nsweep.sh --fill               # add --time 48:00:00 after a TIMEOUT
+```
+
+| loss | shards | `--time` | CPU-h per cell: lasso / MCP / SCAD |
+|---|---|---|---|
+| direct | 16 | 6 h | 1.4 / ≈ 6 / ≈ 7 |
+| log-likelihood | 32 | 24 h | ≈ 45 / ≈ 6 / ≈ 7 |
+| Frobenius | 64 | 48 h | ≈ 150 / ≈ 90 / ≈ 110 |
+
+About 420 CPU-h per wave and 1,700 for all four, four fifths of it on the Frobenius loss. The
+direct-loss figures are measured (the $p = 10, 20$ shards of the S1 and S1b runs); the covariance
+losses are measured at $p = 10$ (simulations/S2_penalties_losses.md §4) and scaled ~10× for
+$p = 20$. One $p = 20$ dataset ($k = 2$, `C_ID`) took 4.5 CPU-min for the log-likelihood lasso
+and 9 for the Frobenius lasso on the M2, 5–8× their $p = 10$ means, so the table errs on the
+high side; wave 1 replaces it with measured numbers. Wall-clock depends on how many tasks LRZ runs at once: at 64,
+a wave takes about 7 h plus the long tail.
+
+**Aggregate and compare** (§3, §4; the shards of all 36 cells are about 90 MB):
+
+```bash
+for d in runs/nsweep_p10-20/*/; do python simulations/aggregate_s1.py --in-dir "$d/s1_shards"; done
+scp -r $USER@cool.hpc.lrz.de:~/repo/runs/nsweep_p10-20 runs/
+# each penalty against the lasso on the same loss and n
+for d in runs/nsweep_p10-20/*_{MCP,SCAD}_n*; do
+  pen=$(basename "$d" | cut -d_ -f2)
+  python simulations/compare_runs.py --baseline "${d/_${pen}_/_lasso_}" --run "$d" \
+      --reps 25 --p 10 20 --csv "$d/paired_vs_lasso.csv"
+done
+# skeleton vs. orientation at the best-F1 point (reads the shards)
+python simulations/diagnostics/orientation.py --shards \
+    lasso=runs/nsweep_p10-20/direct_lasso_ninf MCP=runs/nsweep_p10-20/direct_MCP_ninf \
+    SCAD=runs/nsweep_p10-20/direct_SCAD_ninf --reps 25 --p 10 20
+```
+
 ---
 
 ## 3. Aggregating
