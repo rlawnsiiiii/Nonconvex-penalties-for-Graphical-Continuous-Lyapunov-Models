@@ -484,7 +484,7 @@ discussed the same day (new results, checked against `files/s1_nsweep_p10.csv`) 
    - paired comparisons per (loss, $n$);
    - orientation breakdown and skeleton metrics;
    - write it up as a new section of `simulations/S2_penalties_losses.md`.
-3. **Reversal search into the repository:**
+3. **Reversal search into the repository** (planned in `simulations/S3b_reversal_search.md`):
    - the solver, with tests (Example 2 at $n=\infty$ is turned into $M^*$; the objective never
      increases) and documentation;
    - then the fair comparison, with $\lambda$ chosen by BIC: lasso + BIC reversal search, MCP + the
