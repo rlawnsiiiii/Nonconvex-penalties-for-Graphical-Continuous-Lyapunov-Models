@@ -16,6 +16,8 @@ __pycache__/
 # are small and worth keeping; the raw shards are large and exactly
 # reproducible from the config stored inside them.
 runs/**/s1_shards/
+# per-lambda patterns of diagnostic refits (S3a): same reasoning
+runs/**/raw/
 runs/local/
 
 # generated figures and cluster logs

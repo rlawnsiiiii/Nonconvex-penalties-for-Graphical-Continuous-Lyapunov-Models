@@ -237,7 +237,9 @@ head -3 logs/s1_<jobid>_0.out         # host, shard, and the python actually use
 - **`--mem=2G`** — one worker peaks near 70 MB even at $p=50$; the solver is matrix-free, so
   nothing scales with $p^2$. 2G is generous.
 - **`--time=06:00:00`** — the slowest shard should finish well inside 2 h. The margin covers the
-  long tail (a few $p=50$ datasets take ~200 s) and a busy node. `serial_std` allows up to 48 h.
+  long tail (a few $p=50$ datasets take ~200 s) and a busy node. `serial_std` caps the time: on
+  2 October 2026 it refused 48 h and accepted 24 h; `sinfo -M serial -p serial_std -o "%P %l"`
+  shows the current cap.
 - **64 shards** — datasets are assigned stride-wise (`tasks[i::64]`), so every shard gets a mix of
   $p$ values and they finish at roughly the same time. No straggler shard of pure $p=50$.
 
@@ -257,45 +259,55 @@ missing shards when asked:
 ```bash
 cd ~/repo && git pull
 bash cluster/submit_nsweep.sh --dry-run            # the 36 sbatch commands; submits nothing
-bash cluster/submit_nsweep.sh --n 1000             # wave 1: 9 arrays, 336 tasks
 bash cluster/submit_nsweep.sh --status             # complete / k of N shards written / not started
 ```
 
-**Wave 1 ($n = 1000$) is a check before the rest go in.**
+The direct loss at $n = 1000$ needs no rerun: those datasets are $p = 10, 20$, reps < 25 of the
+full lasso run (`runs/s1_dettling_reproduction`) and of the S1b pilot (MCP, SCAD), so its three
+cells stay "not started". The order used on 2 October:
 
-- *Same numbers as before.* Its cells repeat datasets that already exist: `direct_lasso_n1000` is
-  $p = 10, 20$, reps < 25 of the full lasso run, `direct_{MCP,SCAD}_n1000` is the S1b pilot, and the
-  `loglik` / `frobenius` cells at $p = 10$, reps < 10 are the S2 pilot. The paired differences
-  should be zero (nonconvex fits may differ in the last digits across machines):
-  ```bash
-  python simulations/compare_runs.py --baseline runs/s1_dettling_reproduction \
-      --run runs/nsweep_p10-20/direct_lasso_n1000 --reps 25 --p 10 20
-  ```
-- *The real cost.* Shard counts and limits below are estimates;
-  `sacct -M serial -j <jobid> --format=JobID,Elapsed,State` gives the longest shard per cell. If a
-  loss needs more time or more shards, edit `shards_for` / `time_for` at the top of the script
-  before the next wave (a cell already submitted keeps the shard count it recorded).
+1. **Canary: the direct loss at $n = \infty$** (48 tasks, under an hour), a cheap first run of the
+   new code path (`--n-obs`, `n_shards`, the array override) that produces new results:
+   ```bash
+   bash cluster/submit_nsweep.sh --n inf --loss direct
+   ```
+   When `--status` shows its three cells complete and `logs/*.err` are empty, aggregate them and
+   compare $p = 10$, `C_ID` and `C_Random_Diag` with the local pilot of that day
+   (`next_steps/021026/files/s1_nsweep_p10.csv`); they must agree exactly.
+2. **Everything else in one go** (1,248 tasks):
+   ```bash
+   bash cluster/submit_nsweep.sh --n 1e4 1e5 inf                    # skips the canary cells
+   bash cluster/submit_nsweep.sh --n 1000 --loss loglik frobenius
+   ```
+   The covariance-loss cells at $n = 1000$, $p = 10$, reps < 10 repeat the S2 pilot
+   (`runs/s2_pilot_p10`) and should agree with it.
 
-Then the remaining three sample sizes:
+The shard counts and limits below are estimates; `sacct -M serial -X -u $USER -S now-2days
+--format=JobName%10,JobID%18,State,Elapsed` shows how long each shard took. If a loss needs more
+time or more shards, edit `shards_for` / `time_for` at the top of the script before submitting more
+of it (a cell already submitted keeps the shard count it recorded).
 
-```bash
-bash cluster/submit_nsweep.sh --n 1e4 1e5 inf      # 27 arrays, 1,008 tasks
-```
+**LRZ limits (measured 2 October 2026).** At most 96 of a user's tasks run at once; further ones
+wait as `PD (QOSMaxCpuPerUserLimit)` and start by themselves. About 200 tasks may be queued or
+running; beyond that `sbatch` refuses with `AssocMaxSubmitJobLimit`. At the default shard counts
+the sweep is far more tasks than that, so give the cells not yet submitted fewer, longer tasks
+with `--shards`, for example 4 (direct), 8 (log-likelihood) and 16 (Frobenius), and submit them in rounds as the queue
+empties.
 
-If `sbatch` refuses with a per-user limit (e.g. `QOSMaxSubmitJobPerUserLimit`), submit one $n$ at a
+If `sbatch` refuses with a per-user limit, submit fewer cells at a
 time; a refused cell records nothing, so rerunning the same command continues where it stopped.
 Once a cell's jobs have ended, `--status` shows shards that were never written (TIMEOUT, node
 failure: check `sacct`), and `--fill` resubmits exactly those:
 
 ```bash
-bash cluster/submit_nsweep.sh --fill               # add --time 48:00:00 after a TIMEOUT
+bash cluster/submit_nsweep.sh --fill               # after a TIMEOUT add --time, up to the partition's cap
 ```
 
 | loss | shards | `--time` | CPU-h per cell: lasso / MCP / SCAD |
 |---|---|---|---|
 | direct | 16 | 6 h | 1.4 / ≈ 6 / ≈ 7 |
 | log-likelihood | 32 | 24 h | ≈ 45 / ≈ 6 / ≈ 7 |
-| Frobenius | 64 | 48 h | ≈ 150 / ≈ 90 / ≈ 110 |
+| Frobenius | 64 | 24 h | ≈ 150 / ≈ 90 / ≈ 110 |
 
 About 420 CPU-h per wave and 1,700 for all four, four fifths of it on the Frobenius loss. The
 direct-loss figures are measured (the $p = 10, 20$ shards of the S1 and S1b runs); the covariance

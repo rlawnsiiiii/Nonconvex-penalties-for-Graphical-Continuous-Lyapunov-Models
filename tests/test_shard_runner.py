@@ -136,3 +136,38 @@ def test_submit_script_submits_once_and_fills_missing_shards(tmp_path):
     finally:
         if not logs_existed and (ROOT / "logs").is_dir() and not any((ROOT / "logs").iterdir()):
             (ROOT / "logs").rmdir()
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_submit_script_shards_override_applies_to_new_cells_only(tmp_path):
+    """--shards sets the array and the recorded shard count of a new cell; a cell
+    submitted before keeps its own count under --fill."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    log = tmp_path / "sbatch.log"
+    (bindir / "sbatch").write_text(f'#!/bin/bash\necho "$*" >> "{log}"\n')
+    (bindir / "sbatch").chmod(0o755)
+    root = tmp_path / "nsweep"
+    env = {**os.environ, "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}", "NSWEEP_ROOT": str(root)}
+
+    def submit(*extra):
+        res = subprocess.run(["bash", str(SUBMIT), "--n", "1e4", "--loss", "frobenius",
+                              "--penalty", "lasso", *extra],
+                             capture_output=True, text=True, env=env, cwd=ROOT)
+        return res, log.read_text().splitlines() if log.exists() else []
+
+    logs_existed = (ROOT / "logs").exists()
+    try:
+        res, calls = submit("--shards", "16", "--time", "24:00:00")
+        assert res.returncode == 0, res.stderr
+        assert "--array=0-15" in calls[0] and "--time=24:00:00" in calls[0]
+        run = root / "frobenius_lasso_n1e4"
+        assert (run / "n_shards").read_text().strip() == "16"
+        res, calls = submit("--fill", "--shards", "4")              # keeps 16: shards 0..15 missing
+        assert "--array=" + ",".join(str(i) for i in range(16)) in calls[1]
+        assert (run / "n_shards").read_text().strip() == "16"
+        res, _ = submit("--shards", "0")
+        assert res.returncode == 2 and "positive integer" in res.stderr
+    finally:
+        if not logs_existed and (ROOT / "logs").is_dir() and not any((ROOT / "logs").iterdir()):
+            (ROOT / "logs").rmdir()

@@ -17,9 +17,11 @@
 #     bash cluster/submit_nsweep.sh --fill             # resubmit missing shards, only
 #                                                      # once that cell's jobs have ended
 # --n, --loss and --penalty select a subset (one or more values each); --time
-# HH:MM:SS overrides the per-loss limit, e.g. with --fill after a TIMEOUT.  A cell
-# that has been submitted (its folder holds n_shards) is never submitted again
-# except by --fill.  docs/REPRODUCTION.md Section 2.6.
+# HH:MM:SS overrides the per-loss limit, e.g. with --fill after a TIMEOUT; --shards N
+# overrides the per-loss shard count of cells not yet submitted (fewer, longer tasks
+# when the per-user job limit, AssocMaxSubmitJobLimit, bites).  A cell that has been
+# submitted (its folder holds n_shards) is never submitted again except by --fill,
+# and keeps its shard count.  docs/REPRODUCTION.md Section 2.6.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -31,13 +33,15 @@ DRY=0
 FILL=0
 STATUS=0
 TIME=""
+SHARDS=""
 
-# Shards and wall-time limit per loss.  Sized from the p = 10 costs in
+# Shards and wall-time limit per loss.  serial_std caps the time: on 2 Oct 2026 it
+# refused 48 h and accepted 24 h (sinfo -M serial -p serial_std -o "%P %l").  Sized from the p = 10 costs in
 # simulations/S2_penalties_losses.md Section 4 with p = 20 taken as ~10x (one
 # measured p = 20 dataset: 5-8x), so the limits are generous; the n = 1000 wave
 # measures the real cost (sacct) before the other waves go in.
 shards_for() { case "$1" in direct) echo 16 ;; loglik) echo 32 ;; frobenius) echo 64 ;; esac; }
-time_for()   { case "$1" in direct) echo 06:00:00 ;; loglik) echo 24:00:00 ;; frobenius) echo 48:00:00 ;; esac; }
+time_for()   { case "$1" in direct) echo 06:00:00 ;; loglik) echo 24:00:00 ;; frobenius) echo 24:00:00 ;; esac; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -45,6 +49,9 @@ while [ $# -gt 0 ]; do
     --fill) FILL=1; shift ;;
     --status) STATUS=1; shift ;;
     --time) TIME=${2:?--time needs HH:MM:SS}; shift 2 ;;
+    --shards)
+      SHARDS=${2:?--shards needs a number}; shift 2
+      [[ "$SHARDS" =~ ^[1-9][0-9]*$ ]] || { echo "--shards needs a positive integer" >&2; exit 2; } ;;
     --n|--loss|--penalty)
       opt=$1; shift; vals=()
       while [ $# -gt 0 ] && [[ "$1" != --* ]]; do vals+=("$1"); shift; done
@@ -54,15 +61,15 @@ while [ $# -gt 0 ]; do
         --loss) LOSSES=("${vals[@]}") ;;
         --penalty) PENALTIES=("${vals[@]}") ;;
       esac ;;
-    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
 
 for n in "${NS[@]}"; do
   for loss in "${LOSSES[@]}"; do
-    shards=$(shards_for "$loss")
-    [ -n "$shards" ] || { echo "unknown loss: $loss" >&2; exit 2; }
+    [ -n "$(shards_for "$loss")" ] || { echo "unknown loss: $loss" >&2; exit 2; }
+    shards=${SHARDS:-$(shards_for "$loss")}
     for pen in "${PENALTIES[@]}"; do
       run="$ROOT/${loss}_${pen}_n${n}"
       if [ -f "$run/n_shards" ]; then
