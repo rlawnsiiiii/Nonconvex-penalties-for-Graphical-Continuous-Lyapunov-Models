@@ -471,8 +471,13 @@ discussed the same day (new results, checked against `files/s1_nsweep_p10.csv`) 
   `loglik_{lasso,MCP}_n1e4` (5641062, 5641072) were submitted. `loglik_SCAD_n1e4` was refused with
   `AssocMaxSubmitJobLimit` and nothing was recorded. Running tasks: exactly 96; the rest wait with
   `QOSMaxCpuPerUserLimit`. The Frobenius cells at $n = 1000$ are not in the queue.
-- Response: a `--shards` option (not yet committed); the remaining cells go in, with fewer shards,
+- Response: a `--shards` option (committed as "fix slurm batch"); the remaining cells go in, with fewer shards,
   in two rounds (block 3).
+- Round B, `--n 1e4 1e5 inf --loss frobenius --shards 16`: 7 of 9 cells submitted (jobs
+  5641425–5641431, i.e. all three penalties at $10^4$ and $10^5$ plus `frobenius_lasso_ninf`).
+  `frobenius_MCP_ninf` was refused (`AssocMaxSubmitJobLimit`) and `frobenius_SCAD_ninf` was not
+  attempted. To do: rerun the same command once
+  `squeue -M serial -u $USER -h -r | wc -l` is below about 150; it submits only those two cells.
 
 ---
 
