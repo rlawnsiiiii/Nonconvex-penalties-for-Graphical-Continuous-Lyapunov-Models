@@ -1,0 +1,65 @@
+#!/bin/bash
+# A stand-in for SLURM's sbatch, for rehearsing the campaign on a laptop.
+#
+# cluster/submit_campaign.sh calls
+#     sbatch --array=SPEC --time=T -J NAME cluster/campaign_array.sbatch <runner.py> <run dir> [args...]
+# This script does not run anything.  For every array task it writes a small
+# script <run dir>/logs/shard_<i>.sh holding the python command that
+# cluster/campaign_array.sbatch would run for that task, and appends the script's
+# path to the file named by $LOCAL_TASKS.  Run them afterwards with as many
+# processes as the machine has cores to spare (paths must not contain spaces):
+#
+#     export LOCAL_TASKS=/tmp/tasks.txt CAMPAIGN_ROOT=runs/local/campaign_rehearsal
+#     export LOCAL_EXTRA="--p 10 --reps 1"          # shrink every cell (optional)
+#     PATH="$PWD/cluster/local:$PATH" bash cluster/submit_campaign.sh --wave 1 --n 1000
+#     xargs -P 6 -n 1 sh < "$LOCAL_TASKS"
+#     bash cluster/submit_campaign.sh --wave 1 --n 1000 --status
+#     python simulations/diagnostics/campaign.py --root "$CAMPAIGN_ROOT"
+#
+# $LOCAL_EXTRA is appended to the runner's arguments; the runners take the last
+# value of a repeated option, so "--p 10 --reps 1" overrides the cell's own grid.
+# $LOCAL_PYTHON is the interpreter (default: .venv/bin/python if present, else python3).
+set -euo pipefail
+: "${LOCAL_TASKS:?set LOCAL_TASKS to the file the task commands are appended to}"
+
+array=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --array=*) array=${1#--array=}; shift ;;
+    --time=*) shift ;;
+    -J) shift 2 ;;
+    -*) echo "local sbatch: unsupported option $1" >&2; exit 2 ;;
+    *) break ;;
+  esac
+done
+[ -n "$array" ] || { echo "local sbatch: --array is required" >&2; exit 2; }
+batch=${1:?batch script}; runner=${2:?runner}; run=${3:?run directory}
+shift 3
+[ -f "$batch" ] && [ -f "$runner" ] || { echo "local sbatch: no such file: $batch or $runner" >&2; exit 2; }
+n_shards=$(cat "$run/n_shards")
+python=${LOCAL_PYTHON:-}
+if [ -z "$python" ]; then
+  if [ -x .venv/bin/python ]; then python=.venv/bin/python; else python=python3; fi
+fi
+
+# SPEC is "a-b" or a comma-separated list of indices (what --fill produces)
+indices=()
+IFS=',' read -r -a parts <<< "$array"
+for part in "${parts[@]}"; do
+  if [[ "$part" == *-* ]]; then
+    for ((i = ${part%-*}; i <= ${part#*-}; i++)); do indices+=("$i"); done
+  else
+    indices+=("$part")
+  fi
+done
+
+mkdir -p "$run/shards" "$run/logs"
+for i in "${indices[@]}"; do
+  task="$run/logs/shard_$i.sh"
+  {
+    echo "export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1"
+    echo "exec $python $runner --shard $i --n-shards $n_shards --out-dir $run/shards $* ${LOCAL_EXTRA:-} > $run/logs/shard_$i.log 2>&1"
+  } > "$task"
+  echo "$task" >> "$LOCAL_TASKS"
+done
+echo "Submitted batch job (local stand-in): ${#indices[@]} tasks for $run"
