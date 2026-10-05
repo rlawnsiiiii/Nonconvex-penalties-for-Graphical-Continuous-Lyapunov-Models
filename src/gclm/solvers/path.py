@@ -2,6 +2,11 @@
 entry points :func:`lasso_path` (direct loss), :func:`covloss_path` (Varando's
 losses) and :func:`fit_path` (either, by name).
 
+Three more ways to compute a path for the direct loss, all of which start from
+the lasso instead of the empty graph (next_steps/051026/cluster_campaign_051026.md):
+``lasso_path(..., direction="up")`` (MCP / SCAD dense -> sparse), :func:`lla_path`
+(MCP / SCAD by local linear approximation) and :func:`adaptive_lasso_path`.
+
 For the direct loss, interchangeable backends minimise
 
     argmin_M  0.5 * ||M Sigma + Sigma M' + C||_F^2 + lam * sum(W * |M|)      (1.4)
@@ -57,8 +62,9 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from gclm.objective import covariance as cov
-from gclm.objective.direct import diagonal_fit, lambda_max
-from gclm.objective.penalties import CONVENTIONS, canonical, penalty_scale, penalty_weights, resolve_gamma
+from gclm.objective.direct import diagonal_fit, direct_grad, lambda_max
+from gclm.objective.penalties import (CONVENTIONS, canonical, lla_weights, penalty_scale,
+                                      penalty_weights, resolve_gamma)
 from gclm.solvers.backends import _R_BACKENDS, _pyproximal_path, _r_path, _skglm_path
 from gclm.solvers.coordinate import solve_design
 from gclm.solvers.covariance import solve as solve_covariance
@@ -110,9 +116,29 @@ def lasso_path(
     penalize_diagonal: bool = False,
     solver: str = "fista",
     zero_tol: float = 1e-12,
+    direction: str = "down",
     **solver_kwargs,
 ) -> LassoPath:
-    """Fit the whole path, warm-starting from the sparse end downwards.
+    """Fit the whole path by continuation: each lambda is solved starting from
+    the solution at the neighbouring lambda (a "warm start").
+
+    ``direction="down"`` (default): sparse -> dense.  Start at ``lambda_max``,
+    where the solution is the diagonal fit (the empty graph), and decrease
+    lambda.  This is the standard order (glmnet, ncvreg) and the one used in
+    every thesis run before October 2026.
+
+    ``direction="up"`` (MCP / SCAD, ``solver="fista"`` only): dense -> sparse.
+    Start from the *lasso* solution at the smallest lambda -- dense, with both
+    directions of an uncertain edge still present -- and increase lambda, each
+    MCP / SCAD problem warm-started from the previous one.  Edges are then
+    removed one by one from a fit that has seen all of them, instead of being
+    added one by one to a fit that has seen none.
+
+    For the lasso the two orders give the same path (the problem is convex), and
+    ``"up"`` simply returns the ``"down"`` path.  For MCP / SCAD they reach
+    different stationary points of the same objective: the estimator is the
+    objective *plus* the order.  See next_steps/051026/cluster_campaign_051026.md
+    and next_steps/051026/orientation_lock_in.md for why the order matters here.
 
     ``zero_tol``: entries with ``|M_ij| < zero_tol`` are snapped to exactly zero.
 
@@ -195,6 +221,37 @@ def lasso_path(
         solver_kwargs.pop("gamma")
         solver_kwargs["_cache"] = {}
 
+    if direction not in ("down", "up"):
+        raise ValueError("direction must be 'down' or 'up'")
+    if direction == "up" and penalty != "lasso":
+        # ---- MCP / SCAD, dense -> sparse -------------------------------------
+        if solver != "fista":
+            raise ValueError("direction='up' is implemented for solver='fista' only")
+        # 1. The dense start: the LASSO solution at the smallest lambda.  The lasso
+        #    is convex, so this start is well defined; it is computed by the usual
+        #    sparse -> dense lasso path on the same grid (not snapped: zero_tol=0).
+        lasso_kwargs = {k: v for k, v in solver_kwargs.items()
+                        if k not in ("penalty", "gamma", "convention")}
+        dense = lasso_path(sigma, c, lambdas=lambdas, penalize_diagonal=penalize_diagonal,
+                           solver="fista", zero_tol=0.0, **lasso_kwargs)
+        # 2. Walk the grid from the smallest lambda to the largest.  `fit` is
+        #    solve_fista with penalty=MCP/SCAD (the monotone APG of proxgrad.py);
+        #    `warm` carries the previous solution into the next problem.
+        order = np.argsort(lambdas, kind="stable")
+        warm = dense.estimates[order[0]]
+        up: list[np.ndarray | None] = [None] * len(lambdas)
+        for i in order:
+            lam = lambdas[i]
+            if lam_max is not None and not penalize_diagonal and lam >= lam_max:
+                # 3. At lambda_max the path ends at the diagonal fit, as the
+                #    standard path does (it is a stationary point there).
+                warm = diagonal_fit(sigma, c)
+            else:
+                warm = fit(sigma, c, lam, weights=weights, m_init=warm, **solver_kwargs)
+            up[i] = warm.copy()
+        return LassoPath(lambdas=lambdas, estimates=_snap(up, zero_tol))
+
+    # ---- sparse -> dense (every penalty; and the lasso in either "direction") ----
     estimates: list[np.ndarray] = []
     warm = None
     for lam in lambdas[::-1]:
@@ -205,6 +262,153 @@ def lasso_path(
         estimates.append(warm.copy())
     estimates.reverse()
     return LassoPath(lambdas=lambdas, estimates=_snap(estimates, zero_tol))
+
+
+def lla_path(
+    sigma: np.ndarray,
+    c: np.ndarray,
+    lambdas: np.ndarray | None = None,
+    n_lambda: int = 100,
+    ratio: float = 1e-4,
+    penalty: str = "MCP",
+    gamma: float | None = None,
+    steps: int = 2,
+    tol: float = 1e-10,
+    max_iter: int = 50_000,
+    zero_tol: float = 1e-12,
+    lasso: LassoPath | None = None,
+) -> LassoPath:
+    """MCP / SCAD by local linear approximation (LLA), started from the lasso.
+
+    At every lambda the start is the *lasso* solution at that same lambda.  Each
+    step then solves a weighted lasso whose weights are the slopes of the penalty
+    at the current estimate (:func:`gclm.objective.penalties.lla_weights`):
+
+        w_ij = P'_lam(|M_ij|) / lam           1 at zero, 0 beyond gamma * lam
+        M   <- argmin 0.5 ||M Sigma + Sigma M' + C||_F^2 + lam * sum_ij w_ij |M_ij|
+
+    (Zou & Li 2008).  ``steps=2`` is the two-step estimator of Fan, Xue & Zou
+    (2014): from a lasso start the first step reaches the oracle estimator with
+    high probability and the second confirms it, under conditions that do not
+    include irrepresentability.  The loop stops early at a fixed point, and a
+    fixed point is a stationary point of the MCP / SCAD objective.
+
+    Unlike the warm-started paths of :func:`lasso_path`, nothing is carried from
+    one lambda to the next: every step is a convex problem started from the lasso
+    solution at that lambda -- there is no "which direction entered first".
+    Textbook convention, diagonal unpenalised.
+
+    One caveat at the dense end.  The design has rank ``p (p + 1) / 2``, so when
+    more entries than that have weight 0 (the diagonal plus every entry beyond
+    ``gamma * lam``) the weighted lasso has flat directions and its minimiser is not
+    unique.  The estimate is then the minimiser that FISTA reaches from the lasso
+    solution.  This concerns small lambdas only (tests/test_lla_adaptive.py).
+
+    ``lasso``: a precomputed lasso path on the same grid (optional; saves time).
+    The grid defaults to the lasso's.  Estimates in increasing-lambda order.
+    """
+    penalty = canonical(penalty)
+    gamma = resolve_gamma(penalty, gamma)
+    if penalty == "lasso":
+        raise ValueError("lla_path is for MCP / SCAD; for the lasso use lasso_path")
+    if steps < 1:
+        raise ValueError("steps must be at least 1")
+    p = sigma.shape[0]
+    off = penalty_weights(p)
+    if lasso is None:
+        lasso = lasso_path(sigma, c, lambdas=lambdas, n_lambda=n_lambda, ratio=ratio,
+                           tol=tol, max_iter=max_iter, zero_tol=0.0)
+    lambdas = np.asarray(lasso.lambdas, dtype=float)
+    lam_max = lambda_max(sigma, c)
+
+    estimates: list[np.ndarray] = []
+    for lam, m in zip(lambdas, lasso.estimates):
+        m = np.array(m, dtype=float)
+        if lam < lam_max:          # at lam_max the start is diagonal and every weight is 1
+            for _ in range(steps):
+                w = off * lla_weights(m, lam, penalty, gamma)
+                m_new = solve_fista(sigma, c, lam, weights=w, m_init=m, tol=tol, max_iter=max_iter)
+                fixed = np.array_equal(m_new != 0, m != 0) and np.max(np.abs(m_new - m)) < 10 * tol
+                m = m_new
+                if fixed:
+                    break
+        estimates.append(m)
+    return LassoPath(lambdas=lambdas, estimates=_snap(estimates, zero_tol))
+
+
+@dataclass
+class AdaptiveLassoPath(LassoPath):
+    """:class:`LassoPath` plus what defines the adaptive lasso: the pilot estimate
+    and the weights built from it (``inf`` = entry excluded)."""
+
+    weights: np.ndarray = field(default_factory=lambda: np.zeros((0, 0)))
+    pilot: np.ndarray = field(default_factory=lambda: np.zeros((0, 0)))
+
+
+def adaptive_lasso_path(
+    sigma: np.ndarray,
+    c: np.ndarray,
+    lambdas: np.ndarray | None = None,
+    n_lambda: int = 100,
+    ratio: float = 1e-4,
+    power: float = 1.0,
+    pilot: np.ndarray | None = None,
+    tol: float = 1e-10,
+    max_iter: int = 50_000,
+    zero_tol: float = 1e-12,
+) -> AdaptiveLassoPath:
+    """Adaptive lasso (Zou 2006) with weights from the dense end of the lasso path.
+
+    Pilot ``M0``: the lasso solution at the smallest lambda of the lasso's own
+    grid (``ratio * lambda_max``), which is close to the minimum-l1 exact solution
+    of the Lyapunov equation and keeps both directions of an uncertain edge.
+
+        w_ij = 1 / |M0_ij|^power    scaled so that the smallest weight is 1,
+                                    inf where M0_ij = 0 (that entry is excluded)
+        M(lam) = argmin 0.5 ||M Sigma + Sigma M' + C||_F^2 + lam * sum_ij w_ij |M_ij|
+
+    Large pilot entries are penalised little, small ones heavily: the same
+    "start dense, then prune" idea as MCP / SCAD run dense -> sparse, but with a
+    convex second step, so the path does not depend on warm starts.
+
+    The grid is the adaptive problem's own: 100 log-spaced values up to
+    ``lam_max = max_ij |grad_ij(M_diag)| / w_ij``, the smallest lambda at which the
+    solution is diagonal.  Diagonal unpenalised.  Increasing-lambda order.
+    """
+    p = sigma.shape[0]
+    off = ~np.eye(p, dtype=bool)
+    if pilot is None:
+        pilot = lasso_path(sigma, c, n_lambda=n_lambda, ratio=ratio, tol=tol, max_iter=max_iter,
+                           zero_tol=zero_tol).estimates[0]
+    pilot = np.array(pilot, dtype=float)
+    size = np.abs(pilot)
+    kept = off & (size > 0)
+    weights = np.where(off, np.inf, 0.0)
+    m_diag = diagonal_fit(sigma, c)
+    if not kept.any():             # nothing to select from: the path is the diagonal fit
+        lambdas = lambda_grid(1.0, n_lambda, ratio) if lambdas is None else np.asarray(lambdas, float)
+        return AdaptiveLassoPath(lambdas=lambdas, estimates=[m_diag.copy() for _ in lambdas],
+                                 weights=weights, pilot=pilot)
+    weights[kept] = size[kept] ** (-power)
+    weights[kept] /= weights[kept].min()
+
+    grad = np.abs(direct_grad(m_diag, sigma, c))
+    lam_max = float(np.max(grad[kept] / weights[kept]))
+    if lambdas is None:
+        lambdas = lambda_grid(lam_max, n_lambda=n_lambda, ratio=ratio)
+    lambdas = np.asarray(lambdas, dtype=float)
+
+    estimates: list[np.ndarray | None] = [None] * len(lambdas)
+    warm = m_diag
+    for i in np.argsort(-lambdas, kind="stable"):
+        lam = lambdas[i]
+        if lam >= lam_max:
+            warm = m_diag
+        else:
+            warm = solve_fista(sigma, c, lam, weights=weights, m_init=warm, tol=tol, max_iter=max_iter)
+        estimates[i] = warm.copy()
+    return AdaptiveLassoPath(lambdas=lambdas, estimates=_snap(estimates, zero_tol),
+                             weights=weights, pilot=pilot)
 
 
 DIRECTIONS = ("up", "down")

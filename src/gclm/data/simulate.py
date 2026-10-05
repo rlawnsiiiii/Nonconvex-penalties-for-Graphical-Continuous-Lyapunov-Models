@@ -95,12 +95,17 @@ def draw_instance(
     rng: np.random.Generator,
     metzler: bool = False,
     standardize: bool = False,
+    return_scale: bool = False,
 ):
     """One replicate: ``(M_true, C_true, Sigma_true, Sigma_hat)``.
 
     Edge probability is ``d = k / p``.  ``standardize=True`` reproduces Varando's
     ``simulate.R`` (which feeds the empirical *correlation* matrix); this leaves the
     support of the drift matrix unchanged.
+
+    ``return_scale=True`` appends the standard deviations ``s`` the data were divided
+    by (ones if ``standardize=False``).  They are what :func:`estimation_volatility`
+    needs: standardizing the data changes the volatility matrix of the model, see there.
     """
     m_true = sample_drift(p, k / p, rng, metzler=metzler)
     c_true = sample_volatility(p, c_choice, rng)
@@ -109,7 +114,44 @@ def draw_instance(
         sigma_hat = sigma_true
     else:
         sigma_hat = sample_covariance(sample_data(int(n), sigma_true, rng))
+    s = np.ones(p)
     if standardize:
         s = np.sqrt(np.diag(sigma_hat))
         sigma_hat = sigma_hat / np.outer(s, s)
+    if return_scale:
+        return m_true, c_true, sigma_true, sigma_hat, s
     return m_true, c_true, sigma_true, sigma_hat
+
+
+C_SCALES = ("identity", "variance")
+
+
+def estimation_volatility(scale: np.ndarray, c_scale: str = "identity") -> np.ndarray:
+    """The volatility matrix ``C`` handed to the estimator.
+
+    Standardizing the data is a change of variables ``X -> D^{-1} X`` with
+    ``D = diag(s)``.  It maps the Lyapunov equation ``M Sigma + Sigma M' + C = 0`` to
+
+        (D^{-1} M D) R + R (D^{-1} M D)' + D^{-1} C D^{-1} = 0,     R = D^{-1} Sigma D^{-1},
+
+    so the drift matrix keeps its support, but the volatility matrix of the standardized
+    data is ``D^{-1} C D^{-1}``, not ``C``.
+
+    ``"identity"``  ``2 I`` whatever the scale of the input -- the setting of every run so
+                    far, and the one that reproduces Dettling's Figure 5.  On standardized
+                    data it fits a model the data do not follow, even when the data were
+                    generated with ``C = 2 I``.
+    ``"variance"``  ``2 diag(1 / s_i^2)``: the model "C = 2 I on the measurement scale",
+                    written on the correlation scale.  Identical to ``"identity"`` when the
+                    data are not standardized (``s = 1``).  This is the "rescaled C" of
+                    next_steps/051026/cluster_campaign_051026.md (Section 2.2): exact when
+                    the data were generated with ``C = 2 I`` (Dettling's ``C_ID``), only
+                    partly right for his three random choices of ``C``, and a device for
+                    simulations, not a recipe for real data.
+    """
+    if c_scale not in C_SCALES:
+        raise ValueError(f"unknown c_scale {c_scale!r}; expected one of {C_SCALES}")
+    scale = np.asarray(scale, dtype=float)
+    if c_scale == "identity":
+        return 2.0 * np.eye(scale.shape[0])
+    return np.diag(2.0 / scale ** 2)

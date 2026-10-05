@@ -24,8 +24,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from gclm.config import S1Config, parse_n_obs
-from gclm.data.simulate import CChoice, draw_instance
-from gclm.solvers.path import covloss_path, lasso_path
+from gclm.data.simulate import C_SCALES, CChoice, draw_instance, estimation_volatility
+from gclm.solvers.path import adaptive_lasso_path, covloss_path, lasso_path, lla_path
 from gclm.metrics import evaluate_path
 
 FIELDS = ["p", "k", "c_choice", "rep", "max_acc", "max_f1", "auc", "aupr", "seconds"]
@@ -38,17 +38,26 @@ def run_one(task):
     # independent, reproducible stream per task -- order and parallelism agnostic
     rng = np.random.default_rng([cfg.seed, p, k, list(CChoice).index(c_choice), rep])
     t0 = time.perf_counter()
-    m_true, _, _, sigma_hat = draw_instance(
+    m_true, _, _, sigma_hat, scale = draw_instance(
         p, k, cfg.n_obs, c_choice, rng,
-        metzler=cfg.metzler, standardize=cfg.standardize,
+        metzler=cfg.metzler, standardize=cfg.standardize, return_scale=True,
     )
-    c_est = 2.0 * np.eye(p)                       # always C = 2 I for estimation
-    if cfg.loss == "direct":
+    # C = 2 I for estimation by default; --c-scale variance rescales it with the data
+    c_est = estimation_volatility(scale, cfg.c_scale)
+    if cfg.loss == "direct" and cfg.method == "lla":
+        # MCP / SCAD by local linear approximation from the lasso (gclm.solvers.path.lla_path)
+        path = lla_path(sigma_hat, c_est, n_lambda=cfg.n_lambda, ratio=cfg.lambda_ratio,
+                        penalty=cfg.penalty, gamma=cfg.gamma, tol=cfg.tol)
+    elif cfg.loss == "direct" and cfg.method == "adaptive":
+        path = adaptive_lasso_path(sigma_hat, c_est, n_lambda=cfg.n_lambda,
+                                   ratio=cfg.lambda_ratio, tol=cfg.tol)
+    elif cfg.loss == "direct":
         path = lasso_path(
             sigma_hat, c_est,
             n_lambda=cfg.n_lambda, ratio=cfg.lambda_ratio,
             penalize_diagonal=cfg.penalize_diagonal, solver=cfg.solver, tol=cfg.tol,
             penalty=cfg.penalty, gamma=cfg.gamma, convention=cfg.convention,
+            direction=cfg.direction,
         )
     else:
         path = covloss_path(
@@ -102,9 +111,24 @@ def main() -> None:
                     help="direct: Dettling's loss (default). loglik / frobenius: "
                          "Varando's losses on Sigma(M); --solver is then ignored.")
     ap.add_argument("--direction", default=base.direction, choices=["down", "up"],
-                    help="path order for the covariance losses")
+                    help="path order: for the covariance losses, and for MCP/SCAD on the "
+                         "direct loss (up = dense to sparse, from the lasso solution)")
+    ap.add_argument("--c-scale", default=base.c_scale, choices=list(C_SCALES),
+                    help="volatility used for estimation: identity (2 I, default) or "
+                         "variance (2 diag(1/s_i^2), the rescaled C: 'C = 2 I on the "
+                         "measurement scale')")
+    ap.add_argument("--method", default=base.method, choices=["path", "lla", "adaptive"],
+                    help="direct loss: path (warm-started continuation, default), lla "
+                         "(MCP/SCAD by local linear approximation from the lasso) or "
+                         "adaptive (adaptive lasso; leave --penalty at lasso)")
     ap.add_argument("--out", type=Path, default=Path("runs/local/s1.csv"))
     args = ap.parse_args()
+    if args.method == "lla" and args.penalty == "lasso":
+        ap.error("--method lla needs --penalty MCP or SCAD")
+    if args.method == "adaptive" and args.penalty != "lasso":
+        ap.error("--method adaptive is the adaptive lasso: leave --penalty at lasso")
+    if args.method != "path" and (args.loss != "direct" or args.solver != "fista"):
+        ap.error("--method lla / adaptive are implemented for the direct loss with the fista solver")
 
     cfg = S1Config(
         p_values=tuple(args.p), k_values=tuple(args.k),
@@ -115,6 +139,7 @@ def main() -> None:
         standardize=args.standardize, tol=args.tol,
         solver=args.solver, penalty=args.penalty, gamma=args.gamma,
         convention=args.convention, loss=args.loss, direction=args.direction,
+        c_scale=args.c_scale, method=args.method,
     )
 
     tasks = [(p, k, c, r, cfg)

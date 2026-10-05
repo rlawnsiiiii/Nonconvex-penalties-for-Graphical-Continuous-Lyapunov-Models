@@ -303,21 +303,21 @@ failure: check `sacct`), and `--fill` resubmits exactly those:
 bash cluster/submit_nsweep.sh --fill               # after a TIMEOUT add --time, up to the partition's cap
 ```
 
-| loss | shards | `--time` | CPU-h per cell: lasso / MCP / SCAD |
-|---|---|---|---|
-| direct | 16 | 6 h | 1.4 / ≈ 6 / ≈ 7 |
-| log-likelihood | 32 | 24 h | ≈ 45 / ≈ 6 / ≈ 7 |
-| Frobenius | 64 | 24 h | ≈ 150 / ≈ 90 / ≈ 110 |
+| loss | shards (default) | `--time` | CPU-h per cell: lasso / MCP / SCAD (measured) | longest shard |
+|---|---|---|---|---|
+| direct | 16 | 6 h | 1.4 / 6.2 / 8.4 | 2.3 h (4 shards) |
+| log-likelihood | 32 | 24 h | 24 / 6.8 / 6.8 | 3.5 h (8 shards) |
+| Frobenius | 64 | 24 h | 52 / 37 / 37 | 4.9 h (16 shards) |
 
-About 420 CPU-h per wave and 1,700 for all four, four fifths of it on the Frobenius loss. The
-direct-loss figures are measured (the $p = 10, 20$ shards of the S1 and S1b runs); the covariance
-losses are measured at $p = 10$ (simulations/S2_penalties_losses.md §4) and scaled ~10× for
-$p = 20$. One $p = 20$ dataset ($k = 2$, `C_ID`) took 4.5 CPU-min for the log-likelihood lasso
-and 9 for the Frobenius lasso on the M2, 5–8× their $p = 10$ means, so the table errs on the
-high side; wave 1 replaces it with measured numbers. Wall-clock depends on how many tasks LRZ runs at once: at 64,
-a wave takes about 7 h plus the long tail.
+Measured on the run of 2–3 October 2026 (simulations/S2b_nsweep.md §4): 180 CPU-h per sample size
+and 720 for all four, 70 % of it on the Frobenius loss. The sample size does not change the cost.
+With `--shards 4 / 8 / 16` (direct / log-likelihood / Frobenius) no task ran longer than 5 h, so
+those counts fit the 24 h limit with a wide margin and keep a whole sweep under the per-user job
+limit. Wall-clock depends on how many tasks LRZ runs at once (96 on that run).
 
-**Aggregate and compare** (§3, §4; the shards of all 36 cells are about 90 MB):
+**Aggregate and compare** (§3, §4; all 36 cells with their shards are about 120 MB). The analysis
+across cells is `simulations/diagnostics/nsweep.py` and `plot_nsweep.py`; results in
+simulations/S2b_nsweep.md.
 
 ```bash
 for d in runs/nsweep_p10-20/*/; do python simulations/aggregate_s1.py --in-dir "$d/s1_shards"; done
@@ -332,6 +332,62 @@ done
 python simulations/diagnostics/orientation.py --shards \
     lasso=runs/nsweep_p10-20/direct_lasso_ninf MCP=runs/nsweep_p10-20/direct_MCP_ninf \
     SCAD=runs/nsweep_p10-20/direct_SCAD_ninf --reps 25 --p 10 20
+```
+
+### 2.7 The campaign: every estimator with $C = 2I$ and with the rescaled $C$
+
+The plan, the reasons and the code map are in
+[`../next_steps/051026/cluster_campaign_051026.md`](../next_steps/051026/cluster_campaign_051026.md);
+the estimators are defined in [`DENSE_START.md`](DENSE_START.md) and [`SEARCH.md`](SEARCH.md).
+Same graphs as the n-sweep (same seeds), so everything is paired with `runs/nsweep_p10-20` too.
+
+| wave | cells per $n$ | tasks per $n$ | what |
+|---|---|---|---|
+| 1 | 16 | 128 | direct loss, $p = 10, 20$: lasso, MCP / SCAD (standard, dense → sparse, LLA), adaptive lasso; each with $C = 2I$ (`C2I`) and the rescaled $C$ (`Cresc`); path, BIC-selected graph, graph after the BIC search |
+| 2 | 3 | 20 | search without a penalty and search started from the truth: $p = 10$ (`C2I`, `Cresc`), $p = 20$ (`Cresc`) |
+| 3 | 8 | 56 | log-likelihood loss, $p = 10$: lasso and MCP in both path orders, `C2I` and `Cresc`; path and BIC-selected graph |
+
+`cluster/submit_campaign.sh` does the bookkeeping exactly as `submit_nsweep.sh` does (one
+submission per cell, `--status`, `--fill`); a cell is a folder
+`runs/campaign/<cell>_n<n>/` with its shards in `shards/`. `cluster/campaign_array.sbatch` is the
+job script; its first argument is the runner (`simulations/run_s1_shard.py` or
+`simulations/run_search_shard.py`).
+
+```bash
+cd ~/repo && git pull
+bash cluster/submit_campaign.sh --wave 1 --list          # the cells: name, job tag, shards, time, arguments
+bash cluster/submit_campaign.sh --wave 1 --dry-run       # the sbatch commands; submits nothing
+bash cluster/submit_campaign.sh --wave 1 --n 1000        # one sample size: 128 tasks
+bash cluster/submit_campaign.sh --wave 1 --status        # complete / k of N shards written / not started
+bash cluster/submit_campaign.sh --wave 1 --fill          # resubmit missing shards, once the jobs have ended
+bash cluster/submit_campaign.sh --wave 1 --only MCP-up --n inf    # a subset of cells
+```
+
+LRZ accepts about 200 queued or running tasks per user and runs 96 at a time. When `sbatch`
+refuses a cell, the script records nothing for it and stops; the same command, run again later,
+continues there. Check the room with `squeue -M serial -u $USER -h -r | wc -l`.
+
+Back on the laptop:
+
+```bash
+scp -r $USER@cool.hpc.lrz.de:~/repo/runs/campaign runs/
+python simulations/diagnostics/campaign.py --check-baseline
+```
+
+writes `campaign_per_dataset.csv`, `campaign_means.csv` and `campaign_paired.csv` into
+`runs/campaign/`, and compares the three cells that repeat the n-sweep (direct loss, `C2I`,
+standard paths) with `runs/nsweep_p10-20` graph by graph.
+
+**A rehearsal without a cluster.** `cluster/local/sbatch` is a stand-in for `sbatch` that turns
+every array task into a small shell script instead of submitting it:
+
+```bash
+export LOCAL_TASKS=/tmp/tasks.txt CAMPAIGN_ROOT=runs/local/campaign_rehearsal
+export LOCAL_EXTRA="--p 10 --reps 1"                      # 16 graphs per cell instead of 800
+PATH="$PWD/cluster/local:$PATH" bash cluster/submit_campaign.sh --wave 1 --n 1000 --shards 1
+xargs -P 6 -n 1 sh < "$LOCAL_TASKS"                       # run them, six at a time
+bash cluster/submit_campaign.sh --wave 1 --n 1000 --status
+python simulations/diagnostics/campaign.py --root "$CAMPAIGN_ROOT"
 ```
 
 ---

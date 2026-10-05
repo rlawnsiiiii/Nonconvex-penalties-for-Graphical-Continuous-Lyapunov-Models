@@ -145,6 +145,21 @@ def derivative(m, lam, weights, penalty="lasso", gamma=None, scale=None) -> np.n
     return np.where(m != 0, w * np.sign(m) * slope, 0.0)
 
 
+def lla_weights(m, lam, penalty, gamma=None) -> np.ndarray:
+    """``P'_lam(|M_ij|) / lam``, in ``[0, 1]``: the weights of the weighted lasso that
+    one step of the local linear approximation of MCP / SCAD solves at ``M``
+    (Zou & Li 2008).  1 at a zero entry, 0 beyond ``gamma * lam``, where the penalty
+    is flat.  Textbook convention; the caller masks the unpenalised diagonal.
+    """
+    penalty = canonical(penalty)
+    g = resolve_gamma(penalty, gamma)
+    if penalty == "lasso":
+        raise ValueError("the lasso is its own linear approximation; lla_weights is for MCP / SCAD")
+    if not lam > 0:
+        raise ValueError("lam must be positive")
+    return _scalar_slope(np.abs(np.asarray(m, dtype=float)), lam, penalty, g) / lam
+
+
 def prox(z, t, lam, weights, penalty="lasso", gamma=None, scale=None) -> np.ndarray:
     """Elementwise ``argmin_x 0.5 (x - z)^2 + t * w P_ij(x)``.
 

@@ -64,10 +64,23 @@ class S1Config:
     # implied covariance Sigma(M) (src/gclm/objective/covariance.py, its own solvers;
     # `solver` is then ignored).  docs/LIKELIHOOD.md.
     loss: str = "direct"            # "direct" | "loglik" | "frobenius"
-    # Path order for the covariance losses, which are nonconvex: "down" walks
-    # from lambda_max to the dense end (as the direct loss does), "up" is
-    # Varando's order from the dense fit.  Ignored for loss="direct".
+    # Path order.  "down" walks from lambda_max to the dense end.  "up" walks from
+    # the dense end to lambda_max: for the covariance losses from the dense fit
+    # (Varando's order), for the direct loss with MCP/SCAD from the lasso solution
+    # at the smallest lambda.  Irrelevant for the direct lasso (convex).
     direction: str = "down"
+    # The volatility matrix used for estimation: "identity" (2 I, Dettling's
+    # pipeline, every run before the campaign of October 2026) or "variance"
+    # (2 diag(1 / s_i^2) with s_i the standard deviations the data were divided by:
+    # the model "C = 2 I on the measurement scale", the "rescaled C" --
+    # gclm.data.simulate.estimation_volatility).
+    c_scale: str = "identity"
+    # How the path is computed (direct loss).  "path": warm-started continuation
+    # in the order given by `direction` (gclm.solvers.path.lasso_path).  "lla":
+    # MCP / SCAD by two local-linear-approximation steps from the lasso solution at
+    # each lambda (lla_path).  "adaptive": adaptive lasso with weights from the dense
+    # end of the lasso path (adaptive_lasso_path; `penalty` must be "lasso").
+    method: str = "path"
     penalty: str = "lasso"          # "lasso" | "MCP" | "SCAD"  (docs/NONCONVEX.md)
     gamma: float | None = None      # concavity; None -> 3 (MCP) / 3.7 (SCAD)
     # How MCP/SCAD are applied -- irrelevant for the lasso.  "textbook": P(M_ij)

@@ -38,21 +38,32 @@ repo/
 │   │   ├── coordinate.py          coordinate descent on the explicit design (reference)
 │   │   ├── backends.py            glmnet / ncvreg (R), skglm / pyproximal (Python), λ conversions
 │   │   ├── covariance.py          APG (the estimator) / proximal (reference) / Newton (experiment only)
-│   │   └── path.py                λ grid, warm-started paths: lasso_path, covloss_path, fit_path
+│   │   ├── path.py                λ grid, warm-started paths: lasso_path (both orders), covloss_path,
+│   │   │                          fit_path; lla_path, adaptive_lasso_path   (docs/DENSE_START.md)
+│   │   └── search.py              refit + BIC of a support, greedy add / delete / reverse search,
+│   │                              BIC along a path                          (docs/SEARCH.md)
 │   ├── metrics.py                 Definitions G.4/G.5, ROC/PR curves
 │   ├── rbridge.py                 subprocess/JSON bridge to R; R stays optional
 │   └── config.py                  S1Config / M0Config — every knob in one place
 │
 ├── simulations/
+│   ├── VERDICTS.md                one page: what the studies have established so far
 │   ├── S1_reproduction.md         spec, configs, findings (§8), status (§9)
 │   ├── run_m0.py                  ▶ Figure 3   — minutes
 │   ├── run_s1.py                  ▶ Figure 5   — local, multiprocessing
-│   ├── run_s1_shard.py            ▶ Figure 5   — one cluster shard -> rich .npz
+│   ├── run_s1_shard.py            ▶ Figure 5   — one cluster shard -> rich .npz; with --select also
+│   │                              the BIC-selected graph and the graph after the BIC search
+│   ├── run_search_shard.py        ▶ search without a penalty / from the truth — one cluster shard
 │   ├── aggregate_s1.py            shards -> s1_per_dataset / _summary / _curves
 │   ├── plot_figures.py            CSVs -> figures  (LOCAL ONLY, never on the cluster)
 │   ├── plot_penalties.py          overlay several runs: penalties / losses vs. p  (LOCAL)
 │   ├── S2_penalties_losses.md     S1b + S2: MCP/SCAD on the direct loss, and all three
 │   │                              penalties on Varando's losses — setup, pilot results
+│   ├── S2b_nsweep.md              the same cells at n = 10^3 ... inf, p = 10, 20 (cluster run)
+│   ├── S3a_bidirectional_edges.md which penalties keep both directions of a pair
+│   ├── S3b_reversal_search.md     greedy BIC search with add / delete / reverse moves
+│   ├── diagnostics/               analysis scripts behind those write-ups (numbers + figures):
+│   │                              orientation, bidirectional, search_study, nsweep, campaign, plot_*
 │   └── results/                   committed run outputs backing §8
 │
 ├── docs/
@@ -60,6 +71,8 @@ repo/
 │   ├── NONCONVEX.md               MCP / SCAD: definitions, conventions, algorithm, tests
 │   ├── LIKELIHOOD.md              Varando's losses: gradient, Hessian, Newton solver, the
 │   │                              flat valley, multiple stationary points, gclm validation
+│   ├── SEARCH.md                  scoring a support by BIC, the greedy search
+│   ├── DENSE_START.md             the rescaled C; MCP / SCAD dense → sparse and by LLA; adaptive lasso
 │   └── REPRODUCTION.md            cluster recipe: what runs where, what comes back
 │
 ├── runs/                          one folder per run: shards (gitignored), CSVs, figures
@@ -69,6 +82,9 @@ repo/
 │   ├── setup_env.sh               one-time venv setup on a login node
 │   ├── s1_array.sbatch            Figure 5, 64-task array on serial_std
 │   ├── submit_nsweep.sh           n-sweep at p = 10, 20: one array per (loss, penalty, n)
+│   ├── submit_campaign.sh         campaign of October 2026: the cells of each wave, one array per cell
+│   ├── campaign_array.sbatch      one campaign cell (any runner) as a job array
+│   ├── local/sbatch               stand-in for sbatch: rehearse a wave on a laptop
 │   └── m0.sbatch                  Figure 3, single serial job
 │
 ├── R/                             solver backends + metric reference
@@ -393,6 +409,10 @@ R installation.
 | I want to… | file | notes |
 |---|---|---|
 | run MCP / SCAD | — | `--penalty MCP\|SCAD` (fista); `--solver skglm` (textbook MCP); `--solver ncvreg --convention ncvreg` |
+| run MCP / SCAD from a lasso start | `solvers/path.py` | `--direction up` (dense → sparse path), `--method lla` (local linear approximation), `--method adaptive` (adaptive lasso); docs/DENSE_START.md |
+| change the volatility matrix used in the fit | `data/simulate.py:estimation_volatility` | `--c-scale identity` ($2I$) or `variance` (the rescaled $C$) |
+| select a graph without knowing the truth | `solvers/search.py` | `run_s1_shard.py --select bic\|search`; docs/SEARCH.md |
+| add or change a cell of the cluster campaign | `cluster/submit_campaign.sh:cells` | one line per cell: name, job tag, runner, shards, time, arguments |
 | change a penalty or add one | `objective/penalties.py` | value, derivative, prox, stationarity; both solver families are generic in the penalty |
 | choose a solver | `--solver`, or `S1Config.solver` | `fista` (default) \| `ncvreg` \| `skglm` \| `glmnet` \| `pyproximal` \| `design` |
 | change the p/k grid, tolerance, or a convention flag | `config.py` | every knob is here, not scattered in the drivers |
@@ -419,5 +439,11 @@ R installation.
 | `test_encoding.py` | the worked example in `R/ENCODING.md`: design matrix, λ conversions, fitted estimate | 2 of 9 |
 | `test_lasso.py` | KKT optimality, **all four backends agree**, λ_max, rank deficiency, glmnet path truncation, MCP/SCAD plumbing, **Figure 3 population values** | 9 of 33 |
 | `test_covloss.py` | `objective/covariance.py` + `solvers/covariance.py` — Varando's losses: Schur Lyapunov solves, gradient and Hessian vs finite differences, Prop. 3.1, the two path ends, λ_max, both solvers reach stationary points, scaling identity, MCP→lasso limit, **gclm package** (objective scale, fixed points, same-basin agreement), paths | 6 of 63 |
+| `test_search.py` | `solvers/search.py`: refits, BIC, neighbourhood, the greedy search on Example 2 | 0 of 12 |
+| `test_direction_cscale.py` | the rescaled $C$ (exact at $n=\infty$ for `C_ID`), MCP dense → sparse (stationary, differs from the standard path, default unchanged) | 0 of 5 |
+| `test_lla_adaptive.py` | `lla_path`, `adaptive_lasso_path`: weights, optimality of every weighted lasso, agreement with coordinate descent, fixed points of LLA are stationary for MCP / SCAD, no dependence on the grid | 0 of 16 |
+| `test_shard_runner.py`, `test_campaign_runner.py`, `test_search_shard.py` | the cluster runners end to end: sample sizes, pairing across $n$, default output unchanged, selection fields consistent, unimplemented combinations refused | 0 of 32 |
+| `test_campaign_submit.py` | `cluster/submit_campaign.sh` against a stub `sbatch`: cells of each wave, every cell accepted by its runner, one submission per cell, `--status`, `--fill`, a refused cell | 0 of 7 |
+| `test_nsweep_analysis.py`, `test_campaign_analysis.py`, `test_bidirectional.py` | the analysis scripts: paired statistics, metrics from stored counts, loaders | 0 of 15 |
 
-Run `pytest` for all 274, `pytest -m "not r"` to skip the R bridge.
+Run `pytest` for all 366, `pytest -m "not r"` to skip the R bridge (343 tests).

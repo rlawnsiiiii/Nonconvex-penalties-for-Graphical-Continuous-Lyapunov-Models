@@ -6,10 +6,11 @@ directions A, D, E and F of [`next_steps_051026.md`](next_steps_051026.md) into 
 campaign that includes the side experiments: adaptive lasso, search, log-likelihood loss,
 larger $p$. The verdicts so far are in [`../../simulations/VERDICTS.md`](../../simulations/VERDICTS.md).*
 
-**Status: a proposal. No library code is changed and nothing is submitted until Joon confirms.**
-The new numbers in §2 and the cost estimates in §3 come from small laptop checks made to answer
-the questions, about an hour of wall-clock time in all. Their scripts and outputs are in
-[`files/`](files/) and listed in §8.
+**Status (5 October, evening): confirmed by Joon. The code for waves 1 – 3 is written and tested;
+nothing has been submitted yet. §4 says where everything is implemented, §5 gives the commands
+for the cluster.** §1 – §3 are the plan as proposed in the afternoon; where the implementation
+differs, the text says so. The new numbers in §2 and the cost estimates in §3 come from small
+laptop checks; their scripts and outputs are in [`files/`](files/) and listed in §8.
 
 ---
 
@@ -39,8 +40,8 @@ the questions, about an hour of wall-clock time in all. Their scripts and output
    Controls and extensions: LLA, adaptive lasso, BIC and search, log-likelihood loss, larger $p$.
    Four waves, 1,150 to 1,550 CPU-h in total (the baseline was 720). Wave 1 answers the main
    question: 600 CPU-h, about 6 hours of computing on LRZ.
-7. **Before anything is submitted** I need about half a day for the code of wave 1 (§4), and
-   **your go** (§7).
+7. **The code is written** (§4 says where each piece is), a first look on the laptop at the other
+   three settings of the true $C$ is in §3.7, and **the commands for the cluster are in §5**.
 
 ---
 
@@ -396,9 +397,9 @@ the truth?".
 
 | wave | question | cells | CPU-h (estimate) | code needed |
 |---|---|---|---|---|
-| **1** | the 2 × 2, LLA, the adaptive lasso, BIC and search; direct loss, $p = 10, 20$, $n = 10^3, 10^4, \infty$ | 16 × 3 = 48 | 600 | the patch; LLA; adaptive lasso; selection inside the runner; submit script |
-| **2** | search without any penalty (Améndola et al. 2020), and the search started from the true graph as a ceiling; $n = 10^3, 10^4, \infty$ | 6 | 170 | a sharded version of the S3b driver |
-| **3** | the log-likelihood loss at $p = 10$: the 2 × 2 for MCP, with the lasso in both orders; $n = 10^3, 10^4, \infty$ | 8 × 3 = 24 | 180; $p = 20$ at one $n$: + 340 | none beyond wave 1 |
+| **1** | the 2 × 2, LLA, the adaptive lasso, BIC and search; direct loss, $p = 10, 20$, $n = 10^3, 10^4, \infty$ | 16 × 3 = 48 (128 tasks per $n$) | 600 | the patch; LLA; adaptive lasso; selection inside the runner; submit script |
+| **2** | search without any penalty (Améndola et al. 2020), and the search started from the true graph as a ceiling; $n = 10^3, 10^4, \infty$ | 3 × 3 = 9 (20 tasks per $n$) | 170 | a sharded version of the S3b driver |
+| **3** | the log-likelihood loss at $p = 10$: the 2 × 2 for MCP, with the lasso in both orders; $n = 10^3, 10^4, \infty$ | 8 × 3 = 24 (56 tasks per $n$) | 180; $p = 20$ at one $n$: + 340 | none beyond wave 1 |
 | **4** | larger $p$ (15, 25, 30, 40, 50) at $n = 10^3$, the setting of Figure 5 | chosen after wave 1 | 200 – 600 | none |
 | later | a diagonal $C$ that is estimated; a DGP in which direction is identifiable | | | a new solver feature |
 
@@ -419,8 +420,10 @@ wave 3), plus waiting in the queue.
   dense → sparse path costs 2 to 5 standard paths. Estimated: LLA about three lasso paths, the
   adaptive lasso about two. BIC and search: about 3.5 per cell (15 – 40 s per graph at $p = 20$,
   measured in S3b). Together about 200 CPU-h per sample size, a quarter of it the search.
-- **Submission.** 4 tasks per cell: 64 tasks per sample size, 192 for all three. That is at
-  LRZ's limit of about 200 queued tasks, so two rounds (two sample sizes, then the third).
+- **Submission.** 4 tasks per cell for the cheap paths (lasso, LLA, adaptive lasso), 8 for the
+  standard MCP / SCAD paths and 16 for the dense → sparse paths, which cost most: 128 tasks per
+  sample size, each of 1 to 3 hours. One sample size per round keeps each round under LRZ's
+  limit of about 200 queued tasks.
 
 **Wave 2** *(the fourth method of S3b, at scale)*
 
@@ -431,7 +434,8 @@ wave 3), plus waiting in the queue.
   (`next_steps_051026.md` §2).
 - **Scope.** $p = 10$ with both choices of $C$; $p = 20$ with the rescaled $C$ only, because it is
   expensive there (200 – 560 s per graph, measured) and S3b already showed that with $C = 2I$ the
-  search does not help.
+  search does not help. Three cells per sample size: `search_p10_C2I`, `search_p10_Cresc`,
+  `search_p20_Cresc`.
 
 **Wave 3** *(the other loss)*
 
@@ -508,72 +512,395 @@ wave 3), plus waiting in the queue.
 - **If nothing survives outside `C_ID`,** $C$ is the bottleneck, and estimating $C$ moves from
   "later" to "next".
 
+### 3.7 A first look on the laptop (5 October, evening)
+
+While the code was being written, the laptop ran the replication of 3 October on the three
+settings where the true $C$ is not $2I$: 20 graphs per setting, $p = 10$, the repository's solvers
+(`files/replicate_other_c.csv`, `files/summarize_other_c.py`). It is the question of wave 1 in
+small. $n = 10^3$ and $10^4$ finished; $n = \infty$ did not for the denser graphs and is left to
+the cluster.
+
+`max_f1`: lasso → MCP dense → sparse, both fitted with the same $C$. In brackets: $z$ of the
+paired difference. The `C_ID` rows are the 40 graphs of 3 October.
+
+| true $C$ | fitted with | $n = 10^3$ | $10^4$ |
+|---|---|---|---|
+| `C_ID` (40) | $C = 2I$ | 0.622 → 0.625 (+0.2) | 0.664 → 0.675 (+0.6) |
+| `C_ID` (40) | rescaled $C$ | 0.637 → 0.662 (+1.2) | 0.673 → 0.747 (+4.2) |
+| `C_Random_Min_Diag` (20) | $C = 2I$ | 0.602 → 0.637 (+1.4) | 0.678 → 0.712 (+1.6) |
+| `C_Random_Min_Diag` (20) | rescaled $C$ | 0.598 → 0.637 (+2.0) | 0.672 → 0.744 (+3.1) |
+| `C_Random_Diag` (20) | $C = 2I$ | 0.589 → 0.594 (+0.1) | 0.631 → 0.676 (+1.8) |
+| `C_Random_Diag` (20) | rescaled $C$ | 0.559 → 0.621 (+2.9) | 0.608 → 0.701 (+2.8) |
+| `C_Random_Full` (20) | $C = 2I$ | 0.500 → 0.455 (−4.0) | 0.505 → 0.465 (−3.2) |
+| `C_Random_Full` (20) | rescaled $C$ | 0.525 → 0.500 (−1.6) | 0.536 → 0.518 (−1.0) |
+
+**Reading, with 20 graphs per setting in mind:**
+
+- **The gain is there when the true $C$ is diagonal,** also when it is not $2I$: +0.04 to +0.09
+  with the rescaled $C$ in both random diagonal settings, as large as for `C_ID`. Expectation 2
+  of §3.5 was too cautious about `C_Random_Diag`.
+- **It is not there when the true $C$ is not diagonal** (`C_Random_Full`): MCP dense → sparse is
+  0.02 to 0.05 below the lasso.
+- **SCAD dense → sparse** gives the same picture (rescaled $C$: +0.04 / +0.09 for
+  `C_Random_Min_Diag`, +0.05 / +0.08 for `C_Random_Diag`, −0.00 / −0.01 for `C_Random_Full`).
+- **The standard MCP path loses in every setting** with either $C$ (−0.05 to −0.15).
+- **After BIC and the search the picture is less clear** at these sample sizes: +0.02 to +0.06 at
+  $n = 10^3$ and −0.01 to +0.03 at $10^4$ for the diagonal settings, −0.01 to −0.02 for
+  `C_Random_Full`. Most of these are within noise for 20 graphs.
+
+So the first look agrees with the plan: the claim seems to extend to a wrong but diagonal $C$,
+and to stop at a non-diagonal one. Wave 1 has 200 graphs per setting and $p$ instead of 20.
+
 ---
 
-## 4. Code to write before anything is submitted
+## 4. Where the code is
 
-All with tests, defaults unchanged, nothing committed by me.
+*Written on 5 October after the go. Everything below has tests, and the defaults of the library
+are unchanged. Line numbers are those of that day.*
 
-1. **The patch of the independent study** into `src/` and the two runners: `--c-scale variance`
-   (the rescaled $C$) and `--direction up` for MCP / SCAD on the direct loss. It applies cleanly
-   (`git apply --check`) and brings its own tests.
-2. **LLA and the adaptive lasso** as path functions next to `lasso_path`. Tests: both equal the
-   lasso when all weights are 1; every solution satisfies the optimality conditions of its
-   weighted problem; an LLA path that has converged is a stationary point of the MCP / SCAD
-   objective; the adaptive lasso never selects an entry that its first step excluded.
-3. **Selection inside the shard runner** (items 2 – 4 of §3.3), switched on by an option, so that
-   the old output is reproduced bit by bit without it. Tests on a small grid.
-4. **The submit script** for the campaign: one command per wave, with `--dry-run`, `--status` and
-   `--fill` as in `submit_nsweep.sh`. Tested against the stub `sbatch`.
-5. **The wave 2 runner:** the `random` command of `search_study.py`, cut into shards.
-6. **The analysis** (`nsweep.py` extended by the two new factors, figures) and the write-up
-   `simulations/S4_campaign.md`. This can be written while the cluster runs.
-7. **The command sheet** in `docs/REPRODUCTION.md`, as for the n-sweep.
+### 4.1 The map
 
-Items 1 – 4 and 7 are needed for wave 1: about half a day. Item 5 for wave 2: about two hours.
+| what | where | function or place | switched on by |
+|---|---|---|---|
+| **the rescaled $C$** | `src/gclm/data/simulate.py:129` | `estimation_volatility`; the scales $s_i$ come from `draw_instance(..., return_scale=True)` (line 90) | `--c-scale variance` |
+| lasso; MCP / SCAD on the **standard path** (sparse → dense) | `src/gclm/solvers/path.py:110` | `lasso_path`; the loop from line 254 | default |
+| MCP / SCAD **dense → sparse** | `src/gclm/solvers/path.py:226` | `lasso_path`, the block `if direction == "up" and penalty != "lasso":` | `--direction up` |
+| MCP / SCAD **by LLA** | `src/gclm/solvers/path.py:267` | `lla_path`; its weights: `lla_weights`, `src/gclm/objective/penalties.py:148` | `--method lla` |
+| **adaptive lasso** | `src/gclm/solvers/path.py:348` | `adaptive_lasso_path` | `--method adaptive` |
+| the solver under all of them | `src/gclm/solvers/proxgrad.py:22` | `solve_fista`: FISTA for the lasso with any weights; for MCP / SCAD it hands over to `_solve_mapg` (line 79) | |
+| log-likelihood paths in both orders | `src/gclm/solvers/path.py:426` | `covloss_path(direction=...)`; the dense start is `dense_fit`, `src/gclm/objective/covariance.py:130` | `--loss loglik --direction up` |
+| **BIC along a path** | `src/gclm/solvers/search.py:282` | `bic_along_path`; refit `DirectRefit` (line 50), score `bic` (127), cache `Scorer` (167) | `--select bic` |
+| **BIC search** (add / delete / reverse) | `src/gclm/solvers/search.py:216` | `greedy_search`; the moves: `neighbours` (187) | `--select search` |
+| what one cell computes and stores | `simulations/run_s1_shard.py:175` | `run_one` (the path) and `select_graph` (line 134: BIC and search) | |
+| **search without a penalty**, and from the truth | `simulations/run_search_shard.py:71` | `run_one`; it uses `multistart_search` and `random_support` (`search.py:270`, `257`) | wave 2 |
+| the cells of each wave | `cluster/submit_campaign.sh:63` | `cells()`: one line per cell | `--wave` |
+| one cell as a SLURM job array | `cluster/campaign_array.sbatch` | | |
+| a rehearsal without a cluster | `cluster/local/sbatch` | a stand-in for `sbatch` | |
+| tables from the shards | `simulations/diagnostics/campaign.py` | `load` (138), `means_table` (178), `paired_table` (194), `check_baseline` (251) | |
+| the settings | `src/gclm/config.py` | `S1Config.direction` (71), `.c_scale` (77), `.method` (83) | |
 
-## 5. What you will do on the cluster
+The definitions with formulas, and what each test checks, are in
+[`docs/DENSE_START.md`](../../docs/DENSE_START.md) (the new estimators) and
+[`docs/SEARCH.md`](../../docs/SEARCH.md) (BIC and search). The cluster procedure is also in
+[`docs/REPRODUCTION.md`](../../docs/REPRODUCTION.md) §2.7.
 
-The exact commands come with the code, as on 2 October. In outline:
+### 4.2 The main pieces, with the code (abridged)
 
-```bash
-# laptop: review, commit and push the new code.  The cluster also needs files that are
-# untracked today (git status): src/gclm/solvers/search.py, tests/test_search.py,
-# simulations/diagnostics/search_study.py
-# LRZ:
-ssh ge47xod3@cool.hpc.lrz.de
-cd ~/repo && git pull
-bash cluster/submit_campaign.sh --wave 1 --dry-run        # prints what would be submitted
-bash cluster/submit_campaign.sh --wave 1 --n 1000 1e4     # 128 tasks
-bash cluster/submit_campaign.sh --wave 1 --n inf          # once the first round is running
-bash cluster/submit_campaign.sh --status
+**The rescaled $C$** (`src/gclm/data/simulate.py:129`). `scale` holds the standard deviations the
+data were divided by:
+
+```python
+def estimation_volatility(scale, c_scale="identity"):
+    if c_scale == "identity":
+        return 2.0 * np.eye(scale.shape[0])      # C = 2I: Dettling's pipeline
+    return np.diag(2.0 / scale ** 2)             # C = 2 diag(1/s_i^2): the rescaled C
 ```
 
-Waves 2 and 3 do not depend on the results of wave 1 and can be submitted as soon as the queue
-has room. Wave 4 waits for the analysis of wave 1.
+**MCP / SCAD dense → sparse** (`src/gclm/solvers/path.py:226`, inside `lasso_path`). `fit` is
+`solve_fista` with `penalty="MCP"` or `"SCAD"`; `warm` carries each solution into the next problem:
+
+```python
+if direction == "up" and penalty != "lasso":
+    # 1. the dense start: the LASSO solution at the smallest lambda
+    dense = lasso_path(sigma, c, lambdas=lambdas, solver="fista", zero_tol=0.0, ...)
+    # 2. walk the grid from the smallest lambda to the largest
+    order = np.argsort(lambdas)
+    warm = dense.estimates[order[0]]
+    for i in order:
+        lam = lambdas[i]
+        if lam >= lam_max:
+            warm = diagonal_fit(sigma, c)        # 3. the path ends at the empty graph
+        else:
+            warm = fit(sigma, c, lam, weights=weights, m_init=warm, **solver_kwargs)
+        up[i] = warm.copy()
+```
+
+The standard path is the loop right below it (line 254): the same call to `fit`, but over
+`lambdas[::-1]`, from $\lambda_{\max}$ downwards, starting from nothing. That is the whole
+difference between the two estimators.
+
+**MCP / SCAD by LLA** (`src/gclm/solvers/path.py:267`, `lla_path`). For every $\lambda$, starting
+from the lasso solution `m` at that $\lambda$:
+
+```python
+for _ in range(steps):                                   # steps = 2
+    w = off * lla_weights(m, lam, penalty, gamma)        # P'(|m|) / lam: 1 at zero, 0 beyond gamma*lam
+    m_new = solve_fista(sigma, c, lam, weights=w, m_init=m, tol=tol)   # a weighted LASSO: convex
+    fixed = np.array_equal(m_new != 0, m != 0) and np.max(np.abs(m_new - m)) < 10 * tol
+    m = m_new
+    if fixed:
+        break
+```
+
+**Adaptive lasso** (`src/gclm/solvers/path.py:348`, `adaptive_lasso_path`). `pilot` is the lasso
+solution at the smallest $\lambda$:
+
+```python
+size = np.abs(pilot)
+kept = off & (size > 0)
+weights = np.where(off, np.inf, 0.0)             # inf: excluded; 0: the diagonal, unpenalised
+weights[kept] = size[kept] ** (-power)           # power = 1: weight 1 / |pilot entry|
+weights[kept] /= weights[kept].min()             # the largest pilot entry gets weight 1
+...
+warm = solve_fista(sigma, c, lam, weights=weights, m_init=warm, tol=tol)   # along its own grid
+```
+
+**BIC and search in a cell** (`simulations/run_s1_shard.py:134`, `select_graph`). `supports` are
+the supports of the path, `c_est` the same $C$ the path was fitted with:
+
+```python
+scorer = Scorer(sigma_hat, c_est, n_obs, "direct")       # least-squares refit + Gaussian BIC, cached
+ib, scores = bic_along_path(sigma_hat, c_est, n_obs, supports, scorer=scorer)   # ib: the BIC-selected lambda
+...
+res = greedy_search(sigma_hat, c_est, n_obs, supports[ib], scorer=scorer,       # start: the BIC-selected graph
+                    max_steps=p * (p - 1))                                       # a guard; it stops by itself
+```
+
+**Which function a cell calls** (`simulations/run_s1_shard.py:175`, `run_one`):
+
+| cell name contains | runner arguments | library call |
+|---|---|---|
+| `lasso` | `--penalty lasso` | `lasso_path(...)` |
+| `MCP`, `SCAD` | `--penalty MCP` | `lasso_path(..., penalty="MCP")` |
+| `MCP-up`, `SCAD-up` | `--penalty MCP --direction up` | `lasso_path(..., penalty="MCP", direction="up")` |
+| `MCP-lla`, `SCAD-lla` | `--penalty MCP --method lla` | `lla_path(..., penalty="MCP")` |
+| `adaptive` | `--method adaptive` | `adaptive_lasso_path(...)` |
+| `loglik_...` | `--loss loglik [--direction up]` | `covloss_path(..., "loglik", direction=...)` |
+| `..._C2I`, `..._Cresc` | `--c-scale identity`, `variance` | `estimation_volatility(scale, ...)` |
+
+`bash cluster/submit_campaign.sh --wave 1 --list` prints the full table of cells with their
+arguments.
+
+### 4.3 What a shard file contains
+
+One `.npz` per array task, one entry per graph.
+
+| fields | content |
+|---|---|
+| `p`, `k`, `c_choice`, `rep` | the graph; `c_choice` indexes `c_choice_names` |
+| `lambdas`, `lambda_max` | the grid (for the adaptive lasso: its own) |
+| `conf_offdiag` | tp, fp, tn, fn at each of the 100 $\lambda$: everything behind `max_f1`, `auc`, `aupr` |
+| `m_true_i/j/v` | the true drift matrix, sparse |
+| `supports_packed`, `scale` | the support at every $\lambda$ (packed bits) and the standard deviations $s_i$ |
+| `bic_index`, `bic_scores`, `bic_conf`, `bic_orient` | the BIC-selected $\lambda$, the BIC of all 100 supports, the counts of the selected graph and its orientation breakdown |
+| `m_search_support`, `m_search_i/j/v`, `search_conf`, `search_orient`, `search_score`, `search_moves` | the graph after the BIC search: support, unpenalised refit, counts, BIC, number of add / delete / reverse moves |
+| `config_json`, `provenance_json` | every setting of the run; host, versions, time |
+
+The orientation breakdown has the order `ORIENT` of `run_s1_shard.py`: correct, reversed, hedged
+(both directions kept for a single true edge), both, half (for a true 2-cycle), missed single,
+missed double, false-positive single, false-positive double. Wave 2 files have the same kind of
+fields under `pure_*` and `truth_*`.
+
+```python
+import sys
+import numpy as np
+sys.path.insert(0, "simulations")
+from run_s1_shard import ORIENT, unpack_supports
+
+d = np.load("runs/campaign/direct_MCP-up_Cresc_n1000/shards/shard_0000_of_0016.npz", allow_pickle=True)
+i = 0                                                    # the first graph of this shard
+p, n_lambda = int(d["p"][i]), len(d["lambdas"][i])
+supports = unpack_supports(d["supports_packed"][i], n_lambda, p)   # (100, p, p) booleans
+bic_graph = supports[d["bic_index"][i]]                  # [j, i] true: the edge i -> j is selected
+searched = unpack_supports(d["m_search_support"][i], 1, p)[0]
+print(dict(zip(ORIENT, d["search_orient"][i])))
+```
+
+### 4.4 Tests
+
+| file | tests | what they establish |
+|---|---|---|
+| `tests/test_direction_cscale.py` | 5 | the rescaled $C$ makes the true graph fit exactly at $n = \infty$ and $2I$ does not; the dense → sparse path is stationary at every $\lambda$ and differs from the standard one; defaults unchanged |
+| `tests/test_lla_adaptive.py` | 16 | the LLA weights; every weighted lasso satisfies its optimality conditions and agrees with a second solver; a fixed point of LLA is stationary for MCP / SCAD; LLA at one $\lambda$ does not depend on the grid; adaptive weights, excluded entries, equality with the lasso for equal weights |
+| `tests/test_campaign_runner.py` | 12 | the runner end to end: default output unchanged; supports, BIC and search fields consistent with each other and with the truth; unimplemented combinations refused |
+| `tests/test_search_shard.py` | 3 | the wave 2 runner: stored scores are the BIC of the stored graphs; random starts depend on the graph only; at $n = \infty$ with the right $C$ the search stays at the truth |
+| `tests/test_campaign_submit.py` | 7 | the submit script against a stub `sbatch`: the cells of each wave, every cell accepted by its runner, one submission per cell, `--status`, `--fill`, a refused cell |
+| `tests/test_campaign_analysis.py` | 4 | the tables: metrics from stored counts equal the library's; loader and paired differences on a tiny campaign |
+
+```bash
+uv run --with pytest python -m pytest -q -m "not r"        # laptop: the whole suite without R
+```
+
+### 4.5 What was checked before submitting
+
+1. **The defaults are unchanged.** Without the new options the runner writes exactly the fields
+   it wrote before (`test_default_output_is_what_it_was_before_the_campaign_options`). On 54
+   graphs taken from the cluster shards of the n-sweep (`direct_lasso_n1000`, `direct_MCP_n1000`,
+   `direct_SCAD_ninf`; $p = 10$ and $20$) the changed code reproduces the stored counts at all 100
+   $\lambda$: lasso 18 of 18, MCP 18 of 18, SCAD 16 of 18. On the SCAD graphs it is identical to
+   the laptop run of 2 October made with the old code (10 of 10), so the two differences are the
+   known dependence of nonconvex paths on the machine (S2b §2), not a change in the code.
+2. **A rehearsal of the whole chain.** All cells of waves 1 and 3 and the $p = 10$ cells of wave 2
+   (26 cells) ran on the laptop the way they will run on LRZ: `submit_campaign.sh` → a stand-in
+   for `sbatch` (`cluster/local/sbatch`) → the runners → `--status` → `campaign.py`. Reduced to
+   $p = 10$ and one replicate: 16 graphs per cell, $n = 1000$. Every cell completed and the tables
+   came out. Minutes per cell on the laptop:
+
+   | 16 graphs, $p = 10$ | $C = 2I$ | rescaled $C$ |
+   |---|---|---|
+   | direct: lasso / adaptive lasso | 0.6 / 0.7 | 0.6 / 0.7 |
+   | direct: MCP / SCAD, standard path | 2.3 / 3.3 | 2.0 / 2.9 |
+   | direct: MCP / SCAD, dense → sparse | 5.8 / 6.7 | 4.9 / 6.1 |
+   | direct: MCP / SCAD by LLA | 1.4 / 1.3 | 1.2 / 1.2 |
+   | search without a penalty, and from the truth | 1.8 | 1.9 |
+   | log-likelihood: lasso, sparse → dense / dense → sparse | 8.2 / 9.1 | 22.7 / 23.8 |
+   | log-likelihood: MCP, sparse → dense / dense → sparse | 1.3 / 4.3 | 14.8 / 16.9 |
+
+   The direct-loss cells include BIC and the search. The log-likelihood loss is three times
+   slower with the rescaled $C$ for the lasso and more than ten times for the standard MCP path;
+   the shard counts of wave 3 allow for it.
+3. **Four heavy cells at $p = 20$,** two graphs each, through the runners: SCAD dense → sparse
+   with BIC and search took 87 and 334 s per graph, MCP by LLA 15 and 304 s, the adaptive lasso 13
+   and 106 s, the search without a penalty 304 s. The slow graph is the same one each time: its
+   lasso path is slow, its BIC-selected graph is dense, and the search then needs about a hundred
+   deletions (90 to 120 s). The shard counts are sized for this: about 1 to 3 hours per task, with
+   a limit of 12 hours.
+4. **The tests:** 342 pass on the laptop (320 without R, 22 with R); 24 are skipped because
+   optional packages are not installed.
+
+---
+
+## 5. What you run
+
+*The same commands as a stand-alone sheet, block by block with what to expect and a submission
+log to fill in: [`cluster_commands_051026.md`](cluster_commands_051026.md).*
+
+Copy from top to bottom. What each block does, and what to expect, is below the sheet.
+
+```bash
+# ---- 1. laptop: commit and push the code (the cluster gets it with git pull)
+git add .gitignore README.md ARCHITECTURE.md docs src cluster tests \
+        simulations/run_s1.py simulations/run_s1_shard.py simulations/run_search_shard.py \
+        simulations/diagnostics
+git status --short | grep -v '^??'          # what is staged; no shards, no runs/
+git commit -m "campaign: rescaled C, dense-to-sparse, LLA, adaptive lasso, BIC selection and search on the cluster"
+git push
+
+# ---- 2. LRZ: every login
+ssh -Y ge47xod3@cool.hpc.lrz.de
+cd ~/repo
+module load python
+source ~/venvs/gclm/bin/activate
+
+# ---- 3. LRZ: update and check (about 3 minutes)
+git pull
+python -m pytest -q tests/test_campaign_runner.py tests/test_campaign_submit.py \
+    tests/test_search_shard.py tests/test_lla_adaptive.py tests/test_direction_cscale.py
+bash cluster/submit_campaign.sh --wave 1 --list
+bash cluster/submit_campaign.sh --wave 1 --dry-run | tail -2
+
+# ---- 4. LRZ: a canary of 4 small tasks, to see that the new job script starts
+bash cluster/submit_campaign.sh --wave 2 --n 1000 --only p10
+squeue -M serial -u $USER
+tail -n 4 logs/camp_*.out                   # after 2 to 3 minutes: see below
+cat logs/camp_*.err
+
+# ---- 5. LRZ: the first round (128 + 56 tasks)
+bash cluster/submit_campaign.sh --wave 1 --n 1000
+bash cluster/submit_campaign.sh --wave 2
+
+# ---- 6. LRZ: the next rounds, each once the queue has room
+squeue -M serial -u $USER -h -r | wc -l     # tasks queued or running right now
+bash cluster/submit_campaign.sh --wave 1 --n 1e4       # 128 tasks: needs the count below about 70
+bash cluster/submit_campaign.sh --wave 1 --n inf       # 128 tasks: again below about 70
+bash cluster/submit_campaign.sh --wave 3               # 168 tasks: below about 30
+
+# ---- 7. LRZ: watch
+bash cluster/submit_campaign.sh --wave 1 --status
+bash cluster/submit_campaign.sh --wave 2 --status
+bash cluster/submit_campaign.sh --wave 3 --status
+sacct -M serial -X -u $USER -S now-2days --format=JobName%10,JobID%18,State,Elapsed | grep -v COMPLETED
+less logs/camp_<jobid>_<task>.err
+
+# ---- 8. LRZ: repair, only after every job of that wave has ended
+bash cluster/submit_campaign.sh --wave 1 --fill
+bash cluster/submit_campaign.sh --wave 1 --fill --time 24:00:00       # after a TIMEOUT
+
+# ---- 9. laptop, from the repository root: bring it home and look
+scp -r ge47xod3@cool.hpc.lrz.de:~/repo/runs/campaign runs/
+python simulations/diagnostics/campaign.py --check-baseline
+```
+
+**What each block does, and what to expect**
+
+1. **Commit and push.** You commit; I have not. The `git add` line stages 30 files: the library,
+   the runners, the cluster scripts, the tests and the documentation.
+   - It leaves out `runs/` and `next_steps/` (this note included), which you may want to commit
+     separately.
+   - `src/gclm/solvers/search.py` and its tests have been untracked since S3b. The cluster needs
+     them, and `git add src tests` picks them up.
+   - What you staged earlier (the independent study's README, figures and tables) goes into the
+     same commit unless you unstage it first.
+2. **Every login.** `sbatch` needs nothing activated. `python` needs the module and the venv.
+3. **Update and check.**
+   - If `git pull` is refused because of local edits on LRZ: `git stash && git pull && git stash pop`.
+   - The tests should end with `43 passed`. They run the runners on tiny problems and the submit
+     script against a stand-in for `sbatch`; nothing is submitted.
+   - `--list` prints the 16 cells of wave 1. The dry run should end with
+     `would submit 384 tasks in 48 cells`.
+4. **The canary.** `cluster/campaign_array.sbatch` is new, so four small tasks go first: the search
+   without a penalty at $p = 10$ (two cells, two tasks each, 20 to 40 minutes per task).
+   - After two or three minutes each `.out` file should show a line `python=...`, a line
+     `host=... runner=simulations/run_search_shard.py ...`, a line `shard 0/2: 200 datasets [...]`,
+     and soon after a first progress line `10/200 ...`.
+   - The `.err` files should be empty. If a task has failed, send me its `.err`.
+   - These four tasks are part of wave 2; they are not thrown away.
+5. **The first round.** Wave 1 at $n = 1000$ (16 cells, 128 tasks) and the rest of wave 2 (7 cells,
+   56 tasks). With the canary that is 188 tasks, just under LRZ's limit of about 200. If the
+   second command is refused part of the way, run it again once some tasks have finished.
+6. **The next rounds.** LRZ runs 96 of your tasks at a time and accepts about 200 in the queue.
+   - Each command needs room for all its tasks; the comment gives the queue count below which
+     it fits.
+   - If `sbatch` refuses a cell (`AssocMaxSubmitJobLimit`), the script stops and says how many
+     tasks went in. Nothing is recorded for the refused cell. Run the same command again later; it
+     skips what is already submitted.
+   - Wave 3 can also go in pieces: `--wave 3 --n 1000`, then `--n 1e4`, then `--n inf` (56 tasks
+     each).
+7. **Watch.** `--status` prints one line per cell: `complete`, `submitted (k/N shards written)` or
+   `not started`. `sacct ... | grep -v COMPLETED` lists jobs that failed or ran out of time.
+8. **Repair.** `--fill` resubmits exactly the missing shards. Use it only when `squeue` shows no
+   job of that wave any more; otherwise shards that are still running are submitted twice.
+9. **Bring it home.** About 350 MB with all three waves. `campaign.py` writes the tables into
+   `runs/campaign/` and, with `--check-baseline`, compares the three cells that repeat the n-sweep
+   with `runs/nsweep_p10-20` graph by graph. The lasso must agree exactly; MCP and SCAD may differ
+   on a handful of graphs (S2b §2).
+
+**How long.** Per task 1 to 3 hours for waves 1 and 2, up to a few hours for wave 3.
+
+| round | tasks | CPU-h (estimate) | at 96 cores |
+|---|---|---|---|
+| wave 1, one sample size | 128 | 200 | 2 to 4 hours |
+| wave 2, all three sample sizes | 60 | 170 | 2 to 4 hours |
+| wave 3, all three sample sizes | 168 | 180 – 300 | 2 to 4 hours |
+
+So the first results (wave 1 at $n = 1000$) are back a few hours after block 5, and everything
+within about a day if the rounds follow each other.
+
+---
 
 ## 6. Order of work until the 10 – 11 October meeting
 
 | when | what |
 |---|---|
-| after your go | code for wave 1 (§4, items 1 – 4, 7); a local run of one small cell end to end. Meanwhile the laptop runs the 3 October replication on the three other settings of the true $C$ (20 graphs each, about an hour), as a first look before the cluster results |
-| then | you submit wave 1; I write the wave 2 runner and the analysis |
-| wave 1 back | analysis and figures for the 2 × 2; decide the estimators for wave 4 |
-| in parallel | waves 2 and 3 on the cluster |
+| done on 5 October | the code for waves 1 – 3 with tests; the rehearsal of every cell on the laptop (§4.5); the first look at the other settings of the true $C$ (§3.7) |
+| now | you: commit, push, and blocks 2 – 5 of §5 |
+| while wave 1 runs | I: the figures for the campaign and the skeleton of the write-up `simulations/S4_campaign.md` |
+| wave 1 back | the analysis of the 2 × 2; choose the estimators for wave 4 (larger $p$) |
 | last | wave 4; the two-page summary for the meeting |
 
-## 7. What I need from you
+## 7. Decided on 5 October
 
-1. **Go ahead with waves 1 – 3 as described?** Wave 4 after wave 1. If time gets short before
-   the meeting, wave 4 matters more for the thesis than wave 3.
-2. **May the patch go into `src/`?** Defaults stay as they are; the three baseline cells of wave 1
-   check that nothing changed.
-3. **Wave 3 without SCAD and at $p = 10$ first?** The log-likelihood loss is the expensive one.
-   Wave 1 covers both penalties on the direct loss, and in every result so far SCAD sits between
-   the lasso and MCP. SCAD and $p = 20$ can be added once wave 3 shows a pattern worth completing.
-4. **Three sample sizes** ($10^3$, $10^4$, $\infty$) in all waves? In the baseline $10^5$ and
-   $\infty$ were nearly the same.
-5. **The estimated $C$:** after the meeting, unless wave 1 shows that $C$ is the bottleneck?
+You confirmed the plan as written, so I took the option I had recommended at each open point. Say
+so if you want one of them changed; each is a one-line change in `cluster/submit_campaign.sh`.
+
+1. **Waves 1 – 3 go ahead;** wave 4 (larger $p$) after wave 1.
+2. **The patch of the independent study is in `src/`,** without its `.gitignore` line, which
+   pointed at a folder that does not exist here. Defaults are unchanged (§4.5).
+3. **Wave 3 has the lasso and MCP at $p = 10$.** SCAD and $p = 20$ can be added once it shows a
+   pattern worth completing.
+4. **Three sample sizes** ($10^3$, $10^4$, $\infty$) in every wave. `--n 1e5` adds the fourth.
+5. **The estimated $C$** stays for after the meeting, unless wave 1 shows that $C$ is the
+   bottleneck.
 
 ## 8. Scripts of this note
 
@@ -586,3 +913,4 @@ All in [`files/`](files/); run them from the repository root. None of them chang
 | `estimate_c_check.py`, `estimate_c_check.R` | Varando & Hansen's package with four treatments of $C$ (§2.4); needs R with `gclm`; `--markdown` prints the tables of §2.4 | `estimate_c_check.csv` | 30 min |
 | `loglik_order_check.py` | the repository's log-likelihood lasso in both path orders (§2.5) | `loglik_order_check.csv` | 25 min |
 | `time_direct_up.py`, `time_loglik_up.py` | timing pilots for waves 1 and 3 (§3.4) | `time_direct_up.txt`, `time_loglik_up.txt` | 15 min, 1 h |
+| `summarize_other_c.py` | the first look at the other settings of the true $C$ (§3.7); the run itself is `../031026/files/replicate_dense_to_sparse.py --c C_Random_Diag C_Random_Min_Diag C_Random_Full --reps 5` | `replicate_other_c.csv` | 80 min, stopped before $n = \infty$ finished |

@@ -329,6 +329,10 @@ edge, not a penalty with less bias.
 
 ### 3.6 What this changes about the next steps
 
+*Update, 4 October 2026: the same cells at $n = 10^4, 10^5, \infty$ and at $p = 20$ for all three
+losses are in [`S2b_nsweep.md`](S2b_nsweep.md). The picture of this section holds at every sample
+size, and the gaps grow with $n$.*
+
 1. **Hold the large-$p$ runs of the current cells.** The pilot settles $\gamma = 3$ / $3.7$ at
    $p = 10, 20$; scaling to $p = 50$ (230–280 CPU-h per direct-loss cell) would measure the same
    thing more precisely.

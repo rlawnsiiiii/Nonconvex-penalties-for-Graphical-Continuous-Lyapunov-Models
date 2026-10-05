@@ -7,7 +7,55 @@ Example 2 (`../next_steps/021026/next_steps_021026.md` §3) showed that the MCP 
 truth at large $n$, and that a reversal search on that objective reaches it while the continuation
 path does not.*
 
-**Status: plan, nothing implemented yet.**
+**Status (3 October 2026): implemented and validated; phases 1–2 complete for the direct loss (the $p = 20$ run on Dettling's pipeline was stopped early). Phase 3, the covariance losses on random graphs, was not run. The follow-up is planned in `next_steps/031026/next_steps_031026.md`.**
+
+## Summary (morning of 3 October)
+
+![Overview](../runs/s3b_search/figures/overview_f1_vs_plain_lasso.png)
+
+*Figure 1. Directed $F_1$ minus plain lasso at its BIC-selected $\lambda$ (paired means; direct loss,
+BIC) for every setting run; the number of graphs is in brackets. Grey: Dettling's oracle-tuned
+lasso. Right of the line is better than plain lasso. The last row was stopped early and covers
+sparse graphs only (§9.4).*
+
+1. **The four methods** (lasso / MCP / SCAD + greedy BIC search, and the pure greedy search of
+   Améndola et al. 2020) are implemented, tested and validated. The exhaustive check on Example 2
+   shows that greedy reaches the global BIC optimum from every penalty start (§9.0).
+2. **On Dettling's Figure 5 pipeline** (standardised input, $C = 2I$ assumed), no search improves on
+   the plain lasso at its BIC $\lambda$, and all stay below Dettling's oracle-tuned lasso (§9.2).
+   - The reason is the score, not the search: on that pipeline the likelihood is misspecified, and
+     BIC prefers wrong graphs in about 70 % of cases.
+3. **On the raw scale** the search clearly helps (§9.3). Most where the model is exactly right
+   (`C_ID`, true $C = 2I$): +0.14 to +0.27 over plain lasso, well above Dettling's oracle lasso.
+   Less, but still positive, with random $C$, where $C = 2I$ is also misspecified.
+   - **Lasso + search** gains +0.07 / +0.10 / +0.06 $F_1$ at $n = 10^3$ / $10^4$ / $\infty$ over plain
+     lasso at its BIC $\lambda$, and reaches or beats Dettling's *oracle-tuned* lasso with a
+     data-driven $\lambda$.
+   - The **pure search** matches it at large $n$ and is weaker at $n = 10^3$.
+   - **MCP and SCAD starts** are as good as the lasso start at $n = 10^3$, and worse at larger $n$,
+     where their frozen reversals survive the search.
+4. **On Example 2 at $n = 10^5$** every penalty-started search recovers the 5-cycle exactly (9 of 10
+   datasets, on all three losses), which the lasso never does. At $n = 10^4$, BIC prefers a wrong
+   orientation and the search makes $F_1$ worse. The pure search is the weakest method: random
+   restarts get stuck in the reversed cycle (§9.1).
+5. **Nonconvexity:**
+   - **As an initialiser** (MCP/SCAD paths), it brings nothing over the lasso and is sometimes
+     worse.
+   - **As a score**, the edge-counting BIC is what fixes orientation; the MCP-objective ablation
+     helps less.
+
+   This supports the 2 October framing: nonconvexity helps as the score of a discrete search, not
+   as a penalty on a continuation path.
+
+6. **At $p = 20$ (§9.4)** lasso + search matches Dettling's oracle-tuned lasso on his pipeline for
+   sparse graphs ($k = 1, 2$: +0.07 to +0.09 over BIC-tuned lasso) and does nothing for dense ones
+   at $n = 10^3$. On the raw scale ($n = 10^4$, all $k$) every search gains +0.16 to +0.21.
+7. **Combined with the independent study** (`next_steps/031026/next_steps_031026.md`): the
+   standardised pipeline needs the rescaled $C = 2\,\mathrm{diag}(1/s_{ii}^2)$, and MCP/SCAD should
+   be run dense → sparse. Both change the conclusions about the penalties.
+
+All runs of this study have ended. The $p = 20$ run on Dettling's pipeline was stopped early
+(§9.4); everything else is complete.
 
 ---
 
@@ -69,15 +117,42 @@ Cost control for the covariance losses, where a refit is iterative:
 Phase 0 (§7) measures whether this screen loses anything, by running the direct arm with and without
 it.
 
-**Starting points.** Each run starts from the support of one estimate:
+**The four methods compared** (added 3 October at Joon's suggestion):
 
-| start | what it tests |
-|---|---|
-| lasso path at its BIC-selected $\lambda$ | the realistic, data-driven version |
-| MCP path at its BIC-selected $\lambda$ | does nonconvexity help as an initialiser? |
-| SCAD path at its BIC-selected $\lambda$ | the same |
-| each path at its best-F1 $\lambda$ | oracle start; links to S1–S3a |
-| the empty graph | the pure search, no penalty at all |
+| method | start of the search | what it tests |
+|---|---|---|
+| **pure greedy BIC search**, as in Améndola, Dettling, Drton, Onori & Wu (2020), §5 | random starting graphs plus the empty graph; the best-scoring result is reported | no penalty at all: the paper's method adapted to GCLMs |
+| **lasso + search** | the lasso path's support at its BIC-selected $\lambda$ | the convex penalty as an initialiser |
+| **MCP + search** | the MCP path's support at its BIC-selected $\lambda$ | does nonconvexity help as an initialiser? |
+| **SCAD + search** | the SCAD path's support at its BIC-selected $\lambda$ | the same |
+
+References next to the four, not competitors:
+- each path at its BIC-selected $\lambda$ *without* search;
+- each path at its best-F1 $\lambda$ (oracle), with and without search;
+- the search started from the true graph (oracle, as in the paper's Table 1).
+
+**Adapting the paper's search to GCLMs:**
+- **Same:** the neighbourhood (add, remove, reverse one edge), best-improvement hill climbing, random
+  restarts with the best score kept, the standard BIC penalty $\tfrac12(p+k)\log n$ (in the
+  $-2\ell$ scale used here: $(p+k)\log n$).
+- **Graphs:**
+  - The paper works with *simple mixed* graphs: at most one edge per pair, bidirected edges for
+    latent confounding, a linear SEM.
+  - A GCLM is a *directed* graph that may contain 2-cycles, with $C$ known.
+  - So 2-cycles are allowed by default, and the paper's restriction to simple graphs is a switch
+    for a sensitivity run.
+- **Increased penalty:** the paper's $\log(p^{2k}3^k)$ counts simple mixed graphs with $k$ edges.
+  The analogue for directed graphs is $\log\binom{p(p-1)}{k}$, i.e. eBIC (Chen & Chen 2008) with
+  $\gamma_e = 1$ in the $-2\ell$ scale. Reported next to the standard BIC.
+- **Random starts:** the paper draws 300 graphs uniformly. That is affordable here at $p = 5$ but
+  not at $p = 20$.
+  - Restart counts: 50 (Example 2), 10 ($p = 10$), 5 ($p = 20$).
+  - Starting density: each restart draws its edge probability uniformly from $[0, 0.3]$, then a
+    random graph with that density.
+  - Every method's compute (score evaluations, time) is reported, so the comparison can also be
+    read at equal cost.
+- **Maximum likelihood:** the paper uses block coordinate descent (its reference [6]). Here: the
+  refits of §2.
 
 The BIC-selected $\lambda$ comes from refitting the support at each of the 100 $\lambda$'s of the
 path and scoring it with the BIC above.
@@ -93,10 +168,11 @@ can lower it.
 | | Example 2 | random graphs (Figure 5 generator) |
 |---|---|---|
 | graphs | path $G_1$; 5-cycle $G_2$ with $m_{15} = 0.65$ and with $m_{15}$ random | $p = 10, 20$; $k = 1..4$; four $C$ choices; reps 0–9, the 640 graphs of S3a |
+| random restarts (pure search) | 50 | 10 ($p = 10$), 5 ($p = 20$) |
 | $n$ | $10^3, 10^4, 10^5, \infty$ | $10^3, 10^4, \infty$ |
 | scale | raw ($C = 2I$ exactly right) | standardised (the Figure 5 pipeline); raw as the correctly specified control at $10^4$ and $\infty$ |
 | losses | direct, log-likelihood, Frobenius | direct; then log-likelihood and Frobenius (§7) |
-| starts | all five of §2 | all five |
+| methods | the four of §2 plus the references | the same |
 | reps | 100 per $n$ (as M0) | 10 per $(k, C)$, i.e. 160 graphs per $(p, n)$ |
 
 The datasets are the existing ones (same seeds), so everything is paired with S1, S1b, S2, S3a and
@@ -119,7 +195,7 @@ for those cells the starting supports are already available.
 | | contrast | answers |
 |---|---|---|
 | C1 | start + search vs. the same start without search | question 1 |
-| C2 | after the search: lasso vs. MCP vs. SCAD vs. empty start | question 2 |
+| C2 | the four methods: pure greedy BIC search vs. lasso / MCP / SCAD + search, also at equal compute | question 2 |
 | C3 | BIC search vs. penalised-objective search (MCP, SCAD; direct loss) | question 3 |
 | C4 | direct vs. log-likelihood vs. Frobenius, after the search | the loss |
 | C5 | everything against $n$, and Example 2 against random graphs | question 4 |
@@ -129,6 +205,9 @@ for those cells the starting supports are already available.
 
 - **H1.** The search improves directed $F_1$ over the path estimates at their BIC-selected
   $\lambda$, mostly by turning reversed edges and hedges into correct ones.
+- **H2a.** The penalty-started searches beat the pure search at equal compute, because the paths
+  start them near the right skeleton. With many restarts the pure search should catch up at small $p$
+  (Example 2), less so at $p = 20$.
 - **H2.** Starting from the lasso is at least as good as starting from MCP: the true direction is
   already inside the lasso's hedges (S3a). If H2 holds, the gain comes from the search and the
   edge-counting score, not from a nonconvex penalty. If MCP starts win, nonconvexity is useful as an
@@ -199,4 +278,282 @@ for those cells the starting supports are already available.
 
 ## 9. Results
 
-*(to be filled in phase by phase)*
+### 9.0 Implementation and validation (phase 0)
+
+**Code:**
+- `src/gclm/solvers/search.py`: refits, BIC, neighbourhood, greedy and multistart search, BIC
+  along a path.
+- `docs/SEARCH.md`: the method.
+- `tests/test_search.py`: 12 tests, all passing.
+- `simulations/diagnostics/search_study.py`: `validate`, `example2`, `random`, `summarize`.
+- `simulations/diagnostics/plot_search.py`.
+- Outputs in `runs/s3b_search/`. Each result row stores the selected graph's edge list, so any
+  estimate can be drawn.
+
+**Two deviations from the plan, both measured:**
+- **Covariance-loss refits inside the search** use tolerance $10^{-8}$ and at most 3 000 APG
+  iterations, instead of $10^{-9}$ and 50 000.
+  - On Example 2 ($n = 10^4$, three random starts) the final scores and graphs were identical to 4
+    decimals, and the search was 5–30× faster. With the strict settings, one log-likelihood search
+    took 487 s, because some refits on flat supports crawled to the iteration cap.
+  - The unit tests keep the strict settings.
+- **The run sizes are smaller than planned,** to fit the night:
+  - Example 2: 10 datasets per $n$.
+  - Restarts of the pure search: 20 on the direct loss and 10 on the covariance losses (Example 2);
+    10 at $p = 10$ and 5 at $p = 20$.
+  - At $p = 20$: BIC only, without the oracle-start searches.
+
+**Exhaustive check** (`runs/s3b_search/validate_direct/validate.json`). Example 2's 5-cycle, direct
+loss: every support with up to 7 edges, i.e. 137 980 refits per dataset.
+
+| dataset | global BIC optimum | greedy from the lasso / MCP / SCAD start | from the empty graph | from 10 random graphs |
+|---|---|---|---|---|
+| $n = \infty$ | **the truth** | reaches it | does not | 4 of 10 |
+| $n = 10^4$, rep 0 | a 5-edge graph with the true skeleton and 3 edges flipped (BIC 8 below the truth's) | reaches it | reaches it | 7 of 10 |
+| $n = 10^4$, rep 1 | the same kind (BIC 1.5 below the truth's) | reaches it | reaches it | 7 of 10 |
+
+- **The greedy search optimises well** from the penalty starts.
+- **In the population the BIC optimum is the truth.** Example 2 is identified at $n = \infty$.
+- **At $n = 10^4$ BIC prefers a wrong orientation of the right skeleton,** with the log-likelihood
+  refit too: the same graph and score as with the direct refit. The orientation of the 5-cycle is
+  barely determined by the likelihood at that $n$. The difference is 1.5–8 BIC units, and the
+  reversed cycle is just as close.
+- **From the empty graph, at $n = \infty$,** the greedy search builds the whole cycle in the wrong
+  direction on the direct and Frobenius losses, and then stops. The log-likelihood search gets it
+  right. This is the "first direction is a coin flip" problem of S3a, now inside the greedy search,
+  and the reason the paper uses many random restarts.
+
+### 9.1 Example 2 (phase 1)
+
+10 datasets per $n$ (the M0 data), all three losses, BIC (eBIC gives the same graphs here)
+(`runs/s3b_search/example2_rows.csv`, `example2_summary.csv`). Directed $F_1$ / share recovered
+exactly. At $n = \infty$ the two fixed graphs are one dataset each.
+
+| graph, $n$ | plain lasso (BIC $\lambda$) | plain MCP (BIC $\lambda$) | **lasso / MCP / SCAD + search** | **pure search** | objective search (MCP / SCAD) | search from the truth |
+|---|---|---|---|---|---|---|
+| path (irrepresentable), $10^3$ | 0.56–0.61 / 0 | 0.57–0.64 / 0 | 0.38–0.42 / 0.0 | 0.33–0.40 / 0.0 | 0.25 / 0.25 | 0.38–0.43 / 0.0 |
+| path (irrepresentable), $10^4$ | 0.98 / 0.8 | 1.00 / 1.0 | 0.68 / 0.1 | 0.45 / 0.0 | 0.72 / 0.73 | 0.68 / 0.1 |
+| path, $10^5$ | 1.00 / 1.0 | 1.00 / 1.0 | 0.97 / 0.9 | 0.70 / 0.6 | 0.92 / 0.97 | 0.97 / 0.9 |
+| path, $\infty$ | 1.00 / 1.0 | 1.00 / 1.0 | 1.00 / 1.0 | 1.00 / 1.0 | 1.00 / 1.00 | 1.00 / 1.0 |
+| 5-cycle, $m_{15} = 0.65$, $10^3$ | 0.53–0.54 / 0 | 0.50–0.54 / 0 | 0.39–0.42 / 0.0 | 0.32–0.36 / 0.0 | 0.32 / 0.30 | 0.39–0.42 / 0.0 |
+| 5-cycle, $m_{15} = 0.65$, $10^4$ | 0.76–0.79 / 0 | 0.73–0.80 / 0 | 0.68 / 0.0 | 0.56 / 0.0 | 0.68 / 0.71 | 0.68 / 0.0 |
+| 5-cycle, $10^5$ | 0.74–0.78 / 0 | 0.76–0.79 / 0 | **0.98 / 0.9** | 0.76 / 0.6 | 0.87 / 0.87 | 0.98 / 0.9 |
+| 5-cycle, $\infty$ | 0.62–0.67 / 0 | 0.67–0.73 / 0 | **1.00 / 1.0** | 1.00 / 1.0 | 1.00 / 1.00 | 1.00 / 1.0 |
+| 5-cycle, random $m_{15}$, $10^3$ | 0.52–0.61 / 0 | 0.55–0.64 / 0 | 0.43–0.49 / 0.0 | 0.33–0.36 / 0.0 | 0.32 / 0.46 | 0.43–0.49 / 0.0 |
+| 5-cycle, random $m_{15}$, $10^4$ | 0.71–0.80 / 0 | 0.74–0.80 / 0 | 0.58 / 0.1 | 0.54 / 0.1 | 0.69 / 0.62 | 0.62 / 0.1 |
+| 5-cycle, random $m_{15}$, $10^5$ | 0.76–0.77 / 0 | 0.77 / 0 | **0.89–0.91 / 0.7** | 0.72 / 0.5 | 0.80 / 0.84 | 0.94 / 0.8 |
+| 5-cycle, random $m_{15}$, $\infty$ (10 datasets) | 0.62–0.67 / 0 | 0.67–0.71 / 0 | **1.00 / 1.0** | 1.00 / 1.0 | 1.00 / 1.00 | 1.00 / 1.0 |
+
+Ranges are over the three losses for the plain paths. The searches give the same graphs on every
+loss: they share the BIC score and only refit differently.
+
+![Example 2: exact recovery](../runs/s3b_search/figures/example2_exact_direct_bic.png)
+
+*Figure 2. Example 2, share of datasets recovered exactly, direct loss. Series with identical
+values are drawn side by side: the three penalty-started searches coincide. The plain paths
+(hollow markers) never recover the 5-cycle; the searches do from $n = 10^5$ on.*
+
+![Example 2: directed F1](../runs/s3b_search/figures/example2_f1_direct_bic.png)
+
+*Figure 3. Example 2, mean directed $F_1$, direct loss. At $n = 10^3$ and $10^4$ every search is
+below the plain paths. The same figures for the other two losses are
+`example2_{exact,f1}_{loglik,frobenius}_bic.png`.*
+
+![Example 2 at n = 1e5](../runs/s3b_search/figures/example2_graphs_cycle_fixed_0_100000p0_direct_bic.png)
+
+*Figure 4. One dataset of the 5-cycle at $n = 10^5$. The plain lasso has 1→5 instead of 5→1 plus
+one false edge. The three penalty-started searches return exactly the truth. The pure search ends
+on the reversed cycle.*
+
+![Example 2 at n = 1e4](../runs/s3b_search/figures/example2_graphs_cycle_fixed_0_10000p0_direct_bic.png)
+
+*Figure 5. The same graph at $n = 10^4$. Every search ends on the right skeleton with three edges
+reversed: that graph has the lower BIC at this sample size (§9.0).*
+
+**Reading:**
+- **At $n = 10^5$ the search does what the lasso cannot.** The 5-cycle, Dettling's
+  irrepresentability counterexample, is recovered exactly in 9 of 10 datasets from every penalty
+  start, on every loss. The plain paths never recover it (Figures 2 and 4).
+- **At $n = \infty$ every search recovers every graph exactly,** including the pure search and the
+  objective search. With an exact covariance the BIC optimum is the truth and all starts reach it.
+- **At $n = 10^3$ and $10^4$ the search makes things worse, even on the path graph,** where the lasso works.
+  BIC prefers a re-orientation of the right skeleton (§9.0), and even the search started from the
+  truth walks there. With five nodes, $n = 10^4$ is not enough for the likelihood to settle
+  orientation.
+- **The pure search is the weakest method throughout.** At $n = 10^5$ its best restart is often
+  the *reversed* cycle ($F_1$ 0.20 in Figure 4). Twenty random restarts get locked into the wrong
+  orientation basin: the S3a coin flip, now inside the search. The penalty paths provide starts in
+  the right basin.
+- **The penalty that starts the search does not matter on Example 2:** lasso, MCP and SCAD all
+  converge to the same graphs.
+- **The objective ablation** (reversal moves on the MCP/SCAD objective, §2) helps at $n = 10^5$
+  (0.80–0.87), but less than the BIC search. The edge-counting BIC score matters, not only the
+  reversal moves.
+
+### 9.2 Random graphs, direct loss, $p = 10$ (phase 2a: Dettling's standardised pipeline)
+
+160 graphs per $n$, all paired (`runs/s3b_search/random_direct_p10_rows.csv`, `…_summary.csv`).
+Directed $F_1$, and its paired difference to plain lasso at its BIC-selected $\lambda$:
+
+| method | $n = 10^3$ | $n = 10^4$ | $n = \infty$ |
+|---|---|---|---|
+| plain lasso, BIC $\lambda$ (no search) | 0.504 | 0.569 | 0.539 |
+| plain lasso, oracle best-F1 $\lambda$ (Dettling's `max_f1`) | 0.580 (+0.08) | 0.622 (+0.05) | 0.630 (+0.09) |
+| plain MCP / SCAD, BIC $\lambda$ | 0.419 / 0.436 | 0.439 / 0.455 | 0.399 / 0.415 |
+| **lasso + search** | 0.489 (−0.02) | 0.571 (±0.00) | 0.547 (+0.01) |
+| **MCP + search** | 0.438 (−0.07) | 0.456 (−0.11) | 0.412 (−0.13) |
+| **SCAD + search** | 0.443 (−0.06) | 0.472 (−0.10) | 0.428 (−0.11) |
+| **pure greedy search** | 0.478 (−0.03) | 0.507 (−0.06) | 0.499 (−0.04) |
+| search from the true graph (oracle) | 0.679 (+0.18) | 0.768 (+0.20) | 0.771 (+0.23) |
+
+eBIC changes these by at most 0.01. With $z$ up to ±25 on 160 paired graphs, all differences beyond
+0.02 are clear.
+
+![Random graphs, Dettling's pipeline](../runs/s3b_search/figures/random_direct_p10_f1_direct_bic.png)
+
+*Figure 6. Random graphs at $p = 10$ on Dettling's pipeline, mean directed $F_1$. Hollow markers:
+the paths at their BIC $\lambda$. Filled: after the search. No search rises above the plain lasso
+(hollow blue); the oracle-tuned lasso (grey) and the search from the truth (black) are references.*
+
+**Reading:**
+- **On Dettling's pipeline the search does not improve on the plain lasso.** None of the four
+  methods beats plain lasso at its BIC $\lambda$ by more than 0.01, and all stay 0.05–0.09 below
+  Dettling's oracle-tuned lasso.
+- **The MCP and SCAD starts stay worse after the search.** The search does not undo their reversed
+  edges: 3.8–6.3 per graph, against 3.0 for lasso + search.
+- **The pure search sits between them.**
+- **The problem is the score, not the optimiser.** In 67–75 % of the graphs, a data-driven search
+  ends with a *lower* BIC than the search started from the truth, while having much lower $F_1$.
+  The truth-started search reaches the lower score in only 12–30 %. The best optimiser by score is
+  the pure search, which finds the lowest BIC in 50–80 % of the graphs, yet has lower $F_1$ than
+  lasso + search.
+- **On this pipeline, BIC prefers wrong graphs.** The suspected reason is that the pipeline
+  standardises $\hat\Sigma$ but assumes $C = 2I$. On the correlation scale the true volatility is
+  $2D^{-1}$, so even at $n = \infty$ the true graph does not fit exactly, and the likelihood is free
+  to prefer other graphs.
+
+  **Check:** the same comparison on the raw scale, where $C = 2I$ is correct (§9.3).
+
+### 9.3 Raw scale, $p = 10$ (the correctly specified control)
+
+The same 160 graphs per $n$, but $\hat\Sigma$ is the raw covariance, so $C = 2I$ is the true
+volatility and the Gaussian likelihood in the BIC is correctly specified
+(`runs/s3b_search/random_direct_p10_raw_rows.csv`). Directed $F_1$, and its paired difference to
+plain lasso at its BIC-selected $\lambda$:
+
+| method | $n = 10^3$ | $n = 10^4$ | $n = \infty$ |
+|---|---|---|---|
+| plain lasso, BIC $\lambda$ (no search) | 0.476 | 0.514 | 0.518 |
+| plain lasso, oracle best-F1 $\lambda$ (Dettling's `max_f1`) | 0.533 (+0.06) | 0.564 (+0.05) | 0.590 (+0.07) |
+| plain MCP / SCAD, BIC $\lambda$ | 0.468 / 0.477 | 0.488 / 0.508 | 0.468 / 0.490 |
+| **lasso + search** | **0.549 (+0.07, $z$ 7.6)** | **0.611 (+0.10, $z$ 9.4)** | **0.579 (+0.06, $z$ 6.6)** |
+| **MCP + search** | 0.543 (+0.07) | 0.577 (+0.06) | 0.510 (−0.01) |
+| **SCAD + search** | 0.547 (+0.07) | 0.586 (+0.07) | 0.533 (+0.02) |
+| **pure greedy search** | 0.514 (+0.04) | 0.581 (+0.07) | 0.584 (+0.07) |
+| search from the true graph (oracle) | 0.705 (+0.23) | 0.803 (+0.29) | 0.829 (+0.31) |
+
+![Random graphs, raw scale](../runs/s3b_search/figures/random_direct_p10_raw_f1_direct_bic.png)
+
+*Figure 7. The same graphs on the raw scale. Now every search (filled) lies above its starting
+path (hollow), and lasso + search reaches the oracle-tuned lasso (grey).*
+
+**Correction (3 October, morning).** "Raw scale" is correctly specified only for `C_ID`, where the
+true $C$ is $2I$. In the three random-$C$ settings the fit's $C = 2I$ is wrong on the raw scale as
+well, only less so than after standardising. Split by $C$ (lasso + search minus plain lasso at its
+BIC $\lambda$; Dettling's oracle lasso in brackets):
+
+| | $p = 10$, $n = 10^3$ | $p = 10$, $n = 10^4$ | $p = 10$, $n = \infty$ | $p = 20$, $n = 10^4$ |
+|---|---|---|---|---|
+| raw, `C_ID`: $C = 2I$ is the truth | +0.08 (+0.07) | **+0.15** (+0.04) | **+0.14** (+0.06); pure search +0.17 | **+0.27** (+0.03) |
+| raw, random $C$ | +0.07 (+0.05) | +0.08 (+0.05) | +0.04 (+0.08) | +0.17 (+0.04) |
+| Dettling's standardised pipeline (every $C$) | −0.00 to −0.02 (+0.07) | ±0.00 (+0.04 to +0.06) | +0.01 (+0.08 to +0.10) | +0.06 to +0.09 (+0.05 to +0.08) |
+
+**The better the assumed $C$ matches the truth, the more the BIC search gains.** With the model
+exactly right, it beats Dettling's oracle-tuned lasso by 0.1–0.25.
+
+**Reading:**
+- **On the correctly specified scale the search clearly helps.**
+  - Lasso + search improves the data-driven lasso by 0.06–0.10 and **reaches Dettling's oracle-tuned
+    lasso** (+0.016 at $n = 10^3$, +0.046 at $10^4$, −0.010 at $\infty$), with $\lambda$ chosen
+    from the data.
+  - The pure search does as well at large $n$ (+0.07), but worse at $n = 10^3$ (+0.04), where its
+    random restarts miss.
+  - At $n = 10^3$ the three penalty starts are equivalent (+0.07 each).
+  - So the null result of §9.2 comes from the misspecified standardised pipeline, not from the
+    search.
+- **The penalty that starts the search matters.**
+  - The lasso start is the best of the three, consistent with S3a: its hedges contain the true
+    direction.
+  - MCP and SCAD starts gain from the search at $n = 10^4$ (+0.06, +0.07), but they stay below the
+    lasso start, and at $n = \infty$ the search barely helps them.
+  - In the paired orientation counts, MCP + search keeps 4.7 reversed edges per graph at
+    $n = \infty$, against 3.3 for lasso + search. The search does not undo all of MCP's frozen
+    reversals.
+- **Much is still left on the table.** The search started from the truth reaches $F_1$ 0.80–0.83.
+  - At $n = \infty$ the truth-started search ends with a lower BIC than every data-driven search in
+    45 of 104 graphs (§9.0 counting). In those, greedy from the data-driven starts stops in a worse
+    local optimum, and better optimisation (more restarts, tabu, larger moves) would pay.
+  - In the others the BIC optimum itself is not the truth, typically because BIC drops weak edges:
+    the edge weights are $N(0,1)$, and many are small.
+- **Visual check (Figure 8).** On one graph ($k = 2$, `C_ID`, rep 0, $n = 10^4$; 20 true edges),
+  the plain lasso keeps 10 false edges and 8 wrong directions ($F_1$ 0.54). Every search prunes
+  this to 2–3 false edges and 3–6 wrong directions ($F_1$ 0.56–0.67).
+
+![Example graph, raw scale](../runs/s3b_search/figures/random_direct_p10_raw_graphs_2_C_ID_0_10000_bic.png)
+
+*Figure 8. One random graph on the raw scale ($p = 10$, $k = 2$, `C_ID`, rep 0, $n = 10^4$): the
+truth, the plain lasso at its BIC $\lambda$, and the four methods. The same graph on Dettling's
+pipeline is `random_direct_p10_graphs_2_C_ID_0_10000_bic.png`.*
+
+### 9.4 Random graphs, direct loss, $p = 20$ (phase 2b)
+
+BIC only, no oracle-start searches, 5 random restarts for the pure search
+(`random_direct_p20_rows.csv`: Dettling's pipeline; `random_direct_p20_raw_n10000_rows.csv` and
+`random_direct_p20_raw_ninf_rows.csv`: raw scale, 3 reps, i.e. 48 graphs per $n$). Directed $F_1$, and its paired difference to plain lasso at its BIC
+$\lambda$:
+
+| method | Dettling's pipeline, $n = 10^3$ (160) | Dettling's pipeline, $n = 10^4$ (first 64 graphs, sparse only; see the correction) | raw scale, $n = 10^4$ (48) |
+|---|---|---|---|
+| plain lasso, BIC $\lambda$ | 0.483 | 0.570 | 0.441 |
+| plain lasso, oracle best-F1 $\lambda$ (Dettling) | 0.538 (+0.06) | 0.635 (+0.06) | 0.479 (+0.04) |
+| **lasso + search** | 0.524 (+0.04) | **0.653 (+0.08)** | **0.636 (+0.20, $z$ 11)** |
+| **MCP + search** | 0.433 (−0.05) | 0.466 (−0.10) | 0.603 (+0.16) |
+| **SCAD + search** | 0.471 (−0.01) | 0.512 (−0.06) | 0.620 (+0.18) |
+| **pure greedy search** | 0.474 (−0.01) | 0.566 (±0.00) | **0.646 (+0.21)** |
+| search from the truth (oracle) | 0.656 (+0.17) | 0.731 (+0.16) | 0.770 (+0.33) |
+
+**Correction (3 October).** The run on Dettling's pipeline was stopped after 259 of 480 graphs. It
+is complete at $n = 10^3$, but at $n = 10^4$ it covers only the sparse graphs: $k = 1, 2$ (80
+graphs) and 19 graphs of $k = 3$. The "$n = 10^4$" column above is therefore a sparse-graph result
+and overstates the average gain. Split by density (lasso + search minus plain lasso at its BIC
+$\lambda$; Dettling's oracle lasso in brackets):
+
+| Dettling's pipeline, $p = 20$ | $k = 1, 2$ | $k = 3, 4$ |
+|---|---|---|
+| $n = 10^3$ (80 + 80 graphs) | +0.085, $z$ 7.2 (+0.072) | −0.004 (+0.038) |
+| $n = 10^4$ (80 + 19 graphs) | +0.074, $z$ 8.3 (+0.076) | +0.062 on 19 graphs of $k = 3$ only (+0.021) |
+
+So on Dettling's pipeline the lasso-started search pays on sparse graphs, where it matches the
+oracle-tuned lasso, and does nothing on dense ones at $n = 10^3$. $n = \infty$ was not run.
+
+![p = 20, raw scale](../runs/s3b_search/figures/random_direct_p20_raw_f1_direct_bic.png)
+
+*Figure 9. $p = 20$ on the raw scale (48 graphs per $n$). The lasso start and the pure search keep
+their gain at $n = \infty$; the MCP and SCAD starts lose most of theirs. There is no such figure for
+Dettling's pipeline at $p = 20$, because only $n = 10^3$ was run in full.*
+
+**Reading:**
+- **At $p = 20$ the search helps even on Dettling's misspecified pipeline,** for the lasso start
+  only: +0.04 at $n = 10^3$, and +0.08 at $10^4$, which beats the oracle-tuned lasso. The MCP and
+  SCAD starts lose.
+  - The lasso's paths at $p = 20$ hold many more hedges (10–12 per graph). The search turns them
+    into single correct directions: lasso + search keeps 1.8–3.7 hedges. MCP and SCAD reach the
+    search with their reversals already frozen: 5–8 reversed edges after the search, against 2–6
+    for lasso + search.
+- **On the raw scale the gains are large:** +0.16 to +0.21 for all four methods, all well above the
+  oracle-tuned lasso. The pure search is best here (with 5 restarts), lasso + search a close second.
+- **Raw scale at $n = \infty$** (48 graphs, `random_direct_p20_raw_ninf_rows.csv`): plain lasso at
+  its BIC $\lambda$ 0.433 and at the oracle $\lambda$ 0.524; lasso + search 0.590 (+0.16, $z$ 6.5);
+  pure search 0.630 (+0.20); MCP + search 0.444 (+0.01) and SCAD + search 0.486 (+0.05); search from
+  the truth 0.734. The lasso start and the pure search keep their gains. The MCP and SCAD starts
+  lose theirs, as at $p = 10$.

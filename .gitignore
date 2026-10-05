@@ -23,3 +23,6 @@ runs/local/
 # generated figures and cluster logs
 /figures/
 logs/
+
+# shards of the campaign cells (cluster/submit_campaign.sh): same reasoning
+runs/**/shards/
