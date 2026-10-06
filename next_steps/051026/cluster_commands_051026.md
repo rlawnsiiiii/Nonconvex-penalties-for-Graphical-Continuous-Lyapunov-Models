@@ -185,4 +185,5 @@ python simulations/diagnostics/campaign.py --check-baseline
 
 | when | command | result |
 |---|---|---|
-| | | |
+| 051026| bash cluster/submit_campaign.sh --wave 1 --n 1000, bash cluster/submit_campaign.sh --wave 2| |
+| 061026| bash cluster/submit_campaign.sh --wave 1 --n 1e4| |
