@@ -11,6 +11,7 @@ Work through the blocks from top to bottom; what to expect is written under each
 | 1 | direct loss, $p = 10, 20$: lasso; MCP / SCAD (standard, dense → sparse, LLA); adaptive lasso; each with $C = 2I$ and the rescaled $C$; path, BIC-selected graph, graph after the BIC search | 16 | 128 |
 | 2 | search without a penalty, and search started from the true graph | 3 | 20 |
 | 3 | log-likelihood loss, $p = 10$: lasso and MCP, both path orders, both $C$ | 8 | 56 |
+| 4 | larger $p$ for the thesis figure: $p = 15, 25, 30, 40, 50$ at $n = 1000$; lasso, MCP, SCAD (standard), MCP / SCAD dense → sparse, adaptive lasso; both $C$; BIC but no search | 12 per $p$ | 112 ($p \le 30$), 224 ($p = 40, 50$) |
 
 Sample sizes: $n = 1000$, $10^4$, $\infty$. LRZ runs 96 of your tasks at a time and accepts about
 200 queued or running.
@@ -165,6 +166,35 @@ python simulations/diagnostics/campaign.py --check-baseline
   SCAD may differ on a handful of graphs.
 - Then tell me, and I do the analysis.
 
+## 10. LRZ: wave 4 (larger $p$), one $p$ at a time
+
+Wave 4 varies $p$ instead of $n$ ($n = 1000$ throughout), so it takes `--p` and ignores `--n`.
+Cells are named `direct_<estimator>_<C>_p<p>_n1000`.
+
+```bash
+bash cluster/submit_campaign.sh --wave 4 --list              # the 60 cells
+squeue -M serial -u $USER -h -r | wc -l                      # room: 200 minus this
+bash cluster/submit_campaign.sh --wave 4 --p 15              # 112 tasks, short
+bash cluster/submit_campaign.sh --wave 4 --p 25              # 112 tasks
+bash cluster/submit_campaign.sh --wave 4 --p 30              # 112 tasks, 24 h limit
+bash cluster/submit_campaign.sh --wave 4 --p 40              # 224 tasks: needs an almost empty queue
+bash cluster/submit_campaign.sh --wave 4 --p 50              # 224 tasks
+bash cluster/submit_campaign.sh --wave 4 --status
+bash cluster/submit_campaign.sh --wave 4 --fill --time 24:00:00   # after the jobs of a p have ended
+```
+
+- Submit the next $p$ whenever the queue count allows it (each command needs room for all its
+  tasks; if `sbatch` refuses part of the way, rerun the same command later).
+- $p = 40$ and $50$ are the expensive ones: one $p = 50$ graph takes 30 s (lasso, adaptive
+  lasso) to 5 to 15 minutes (MCP / SCAD, standard or dense → sparse). Their cells have twice
+  the shards and 24 h; a task then runs half an hour to about three hours. About 700 CPU-h for
+  all five $p$: expect a day.
+- On the laptop afterwards: the same `rsync` and `campaign.py` as in block 9; the tables then
+  show every $p$ from 10 to 50.
+- Optional, if cluster time is left: the population version for a subset,
+  `bash cluster/submit_campaign.sh --wave 4 --p 30 50 --n inf --only Cresc` (12 cells, about
+  150 CPU-h; cells `..._p30_ninf`).
+
 ---
 
 ## How long
@@ -174,6 +204,7 @@ python simulations/diagnostics/campaign.py --check-baseline
 | wave 1, one sample size | 128 | 200 | 2 to 4 hours |
 | wave 2, all three sample sizes | 60 | 170 | 2 to 4 hours |
 | wave 3, all three sample sizes | 168 | 180 – 300 | 2 to 4 hours |
+| wave 4, all five $p$ | 784 | about 700 | 8 hours, over a day with queueing |
 
 - Each task takes about 1 to 3 hours (limit 12 h; wave 3: 24 h).
 - The first results (wave 1 at $n = 1000$) are back a few hours after block 5.

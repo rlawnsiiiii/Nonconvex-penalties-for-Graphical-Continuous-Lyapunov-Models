@@ -463,14 +463,23 @@ wave 3), plus waiting in the queue.
 - **BIC** uses the same least-squares refit as for the direct loss, so that the selection rule is
   identical for all estimators and only the paths differ.
 
-**Wave 4** *(the thesis figure)*
+**Wave 4** *(the thesis figure; decided on 7 October from the finite-$n$ results of wave 1)*
 
-- **Why after wave 1.** With all 16 estimators the five larger values of $p$ cost about 1,400
-  CPU-h for one sample size; with a reduced list (lasso, standard MCP, and the two or three best
-  of wave 1) 200 to 600. Wave 1 shows which estimators are worth it.
-- **BIC but no search** at $p \ge 30$: one search would take many minutes per graph.
+- **Estimators:** lasso, MCP and SCAD on the standard path (the reference, which Figure 5 never
+  had beyond the lasso), MCP and SCAD dense → sparse, the adaptive lasso; each with $C = 2I$ and
+  the rescaled $C$. LLA is left out: it gains about half of dense → sparse and adds nothing to
+  the story. 12 cells per $p$, $p = 15, 25, 30, 40, 50$, $n = 1000$, 25 replicates (400 graphs
+  per cell); with wave 1's $p = 10, 20$ this gives Figure 5's whole axis.
+- **BIC but no search:** one search at $p \ge 30$ would take many minutes per graph. `ebic1_f1`
+  comes for free from the stored scores.
+- **Cost.** One $p = 50$ graph ($k = 1$; denser ones cost 2 to 3 times more), BIC selection
+  included: lasso 31 s, adaptive lasso 32 s, standard MCP 220 s, MCP dense → sparse 328 s. The
+  cells at $p = 40, 50$ have twice the shards and 24 h; a task then takes half an hour to about
+  three hours. About 700 CPU-h for the five sizes, $p = 50$ alone half of it; the population
+  version of a subset (`--n inf --only Cresc`, $p = 30, 50$) would add about 250.
 - **Open there:** at $p = 40, 50$ with $n = 1000$ there are more parameters than observations,
   and the dense start rests on a noisy fit. Whether dense → sparse still helps is not known.
+- `cluster/submit_campaign.sh --wave 4 --p <p>`; cells are named `..._p<p>_n1000`.
 
 **Later, not in this campaign**
 
@@ -875,6 +884,7 @@ python simulations/diagnostics/campaign.py --check-baseline
 | wave 1, one sample size | 128 | 200 | 2 to 4 hours |
 | wave 2, all three sample sizes | 60 | 170 | 2 to 4 hours |
 | wave 3, all three sample sizes | 168 | 180 – 300 | 2 to 4 hours |
+| wave 4, all five $p$ | 784 | about 700 | 8 hours, over a day with queueing |
 
 So the first results (wave 1 at $n = 1000$) are back a few hours after block 5, and everything
 within about a day if the rounds follow each other.

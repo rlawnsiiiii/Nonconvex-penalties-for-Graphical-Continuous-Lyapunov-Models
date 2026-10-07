@@ -53,6 +53,9 @@ def tiny_campaign(tmp_path_factory):
         "direct_MCP-up_Cresc_n1000": ("run_s1_shard.py", ["--select", "search", "--c-scale", "variance",
                                                           "--penalty", "MCP", "--direction", "up"]),
         "search_p5_Cresc_n1000": ("run_search_shard.py", ["--c-scale", "variance", "--restarts", "2"]),
+        # a wave 4 style name: the p in the folder name is a label, the rows carry the p
+        "direct_adaptive_Cresc_p5_n1000": ("run_s1_shard.py", ["--select", "bic", "--c-scale", "variance",
+                                                               "--method", "adaptive"]),
     }
     for name, (runner, extra) in cells.items():
         res = subprocess.run([sys.executable, str(ROOT / "simulations" / runner), *common, *extra,
@@ -70,8 +73,9 @@ def test_loader_reads_estimator_and_search_cells(tiny_campaign):
         by.setdefault((r["loss"], r["estimator"], r["c"], r["n"]), []).append(r)
     assert {k: len(v) for k, v in by.items()} == {
         ("direct", "lasso", "C2I", "1000"): 16, ("direct", "lasso", "Cresc", "1000"): 16,
-        ("direct", "MCP-up", "Cresc", "1000"): 16,
+        ("direct", "MCP-up", "Cresc", "1000"): 16, ("direct", "adaptive", "Cresc", "1000"): 16,
         ("direct", "search-pure", "Cresc", "1000"): 16, ("direct", "search-truth", "Cresc", "1000"): 16}
+    assert all(r["p"] == 5 and "p_label" not in r for r in by[("direct", "adaptive", "Cresc", "1000")])
     for r in by[("direct", "MCP-up", "Cresc", "1000")]:
         assert 0.0 <= r["bic_f1"] <= r["max_f1"] <= 1.0          # the best of the path bounds its BIC choice
         assert 0.0 <= r["search_f1"] <= 1.0 and r["p"] == 5
@@ -109,4 +113,4 @@ def test_command_line_writes_the_tables(tiny_campaign):
     assert res.returncode == 0, res.stderr
     for name in ("campaign_per_dataset.csv", "campaign_means.csv", "campaign_paired.csv"):
         assert (tiny_campaign / name).stat().st_size > 0
-    assert "MCP-up" in res.stdout and "80 rows from 4 cells" in res.stdout
+    assert "MCP-up" in res.stdout and "96 rows from 5 cells" in res.stdout

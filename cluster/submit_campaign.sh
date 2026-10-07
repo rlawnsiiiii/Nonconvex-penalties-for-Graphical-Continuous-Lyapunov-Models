@@ -19,18 +19,26 @@
 #   wave 3  log-likelihood loss, p = 10, 400 graphs per cell.  8 cells per n:
 #           lasso / MCP in both path orders (-up = dense -> sparse), C2I and Cresc.
 #           Path and BIC-selected graph.
+#   wave 4  larger p for the thesis figure: p = 15, 25, 30, 40, 50 at n = 1000
+#           (Figure 5's setting), 400 graphs per cell.  12 cells per p: lasso / MCP /
+#           SCAD (standard path), MCP-up / SCAD-up, adaptive, with C2I and Cresc.
+#           Path and BIC-selected graph, no search (too slow at this size).  Cells
+#           are named <...>_p<p>_n1000; --p selects the sizes.  --n is 1000 unless
+#           given (e.g. --n inf --only Cresc for the population version of a subset).
 #
 # From ~/repo on the login node (nothing needs to be activated first):
 #     bash cluster/submit_campaign.sh --wave 1 --list            # the cells of a wave
 #     bash cluster/submit_campaign.sh --wave 1 --dry-run         # print the sbatch calls
 #     bash cluster/submit_campaign.sh --wave 1 --n 1000          # submit one sample size
+#     bash cluster/submit_campaign.sh --wave 4 --p 15 25         # wave 4: one or more p
 #     bash cluster/submit_campaign.sh --wave 1 --status          # state of every cell
 #     bash cluster/submit_campaign.sh --wave 1 --fill            # resubmit missing shards,
 #                                                                # once the jobs have ended
-# Options: --n takes one or more of 1000 1e4 1e5 inf (default: 1000 1e4 inf).
-# --only PATTERN... restricts to cells whose name contains one of the patterns
-# (e.g. --only MCP-up, --only Cresc).  --time HH:MM:SS overrides the time limit
-# (e.g. with --fill after a TIMEOUT; the partition's cap is 24 h).  --shards N
+# Options: --n takes one or more of 1000 1e4 1e5 inf (default: 1000 1e4 inf; for
+# wave 4 the default is 1000 alone).  --p takes one or more of 15 25 30 40 50 (wave 4 only; default
+# all five).  --only PATTERN... restricts to cells whose name contains one of the
+# patterns (e.g. --only MCP-up, --only Cresc).  --time HH:MM:SS overrides the time
+# limit (e.g. with --fill after a TIMEOUT; the partition's cap is 24 h).  --shards N
 # overrides the shard count of cells not yet submitted.
 #
 # A cell that has been submitted (its folder holds n_shards) is never submitted
@@ -43,6 +51,8 @@ cd "$(dirname "$0")/.."
 ROOT=${CAMPAIGN_ROOT:-runs/campaign}         # override only for tests
 BATCH=cluster/campaign_array.sbatch
 NS=(1000 1e4 inf)
+NS_GIVEN=0
+PS=(15 25 30 40 50)
 WAVE=""
 ONLY=()
 DRY=0
@@ -59,7 +69,9 @@ SHARDS=""
 # rehearsal of Section 4.5).  In wave 1 the BIC search costs more per graph at
 # p = 20 than a lasso path, so even the cheap paths get 4 shards; the standard
 # MCP / SCAD paths get 8; a dense -> sparse path costs 2 to 5 standard paths,
-# hence 16.
+# hence 16.  Wave 4 scales the shards with p (a path costs about p^3: 36 s per
+# graph for the lasso at p = 50 against 6 s at p = 20) and allows 24 h from
+# p = 30 on.
 cells() {
   local c cs ci s1 s3 run=simulations/run_s1_shard.py
   case "$1" in
@@ -90,7 +102,24 @@ cells() {
         echo "loglik_MCP_${c}|3Ms${ci}|$run|4|24:00:00|$s3 --c-scale $cs --penalty MCP"
         echo "loglik_MCP-up_${c}|3Mu${ci}|$run|8|24:00:00|$s3 --c-scale $cs --penalty MCP --direction up"
       done ;;
-    *) echo "unknown wave: $1 (1, 2 or 3)" >&2; return 2 ;;
+    4)
+      local p
+      for p in "${PS[@]}"; do
+        s4="--p $p --reps 25 --select bic"
+        if [ "$p" -ge 40 ]; then sh=(8 16 16 32 32 8); t4=24:00:00
+        elif [ "$p" -ge 30 ]; then sh=(4 8 8 16 16 4); t4=24:00:00
+        else sh=(4 8 8 16 16 4); t4=12:00:00; fi
+        for c in C2I Cresc; do
+          if [ "$c" = C2I ]; then cs=identity; ci=i; else cs=variance; ci=r; fi
+          echo "direct_lasso_${c}_p${p}|4la${ci}${p}|$run|${sh[0]}|$t4|$s4 --c-scale $cs --penalty lasso"
+          echo "direct_MCP_${c}_p${p}|4Ms${ci}${p}|$run|${sh[1]}|$t4|$s4 --c-scale $cs --penalty MCP"
+          echo "direct_SCAD_${c}_p${p}|4Ss${ci}${p}|$run|${sh[2]}|$t4|$s4 --c-scale $cs --penalty SCAD"
+          echo "direct_MCP-up_${c}_p${p}|4Mu${ci}${p}|$run|${sh[3]}|$t4|$s4 --c-scale $cs --penalty MCP --direction up"
+          echo "direct_SCAD-up_${c}_p${p}|4Su${ci}${p}|$run|${sh[4]}|$t4|$s4 --c-scale $cs --penalty SCAD --direction up"
+          echo "direct_adaptive_${c}_p${p}|4ad${ci}${p}|$run|${sh[5]}|$t4|$s4 --c-scale $cs --method adaptive"
+        done
+      done ;;
+    *) echo "unknown wave: $1 (1, 2, 3 or 4)" >&2; return 2 ;;
   esac
 }
 
@@ -99,7 +128,7 @@ n_code() { case "$1" in 1000) echo 3 ;; 1e4) echo 4 ;; 1e5) echo 5 ;; inf) echo 
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --wave) WAVE=${2:?--wave needs 1, 2 or 3}; shift 2 ;;
+    --wave) WAVE=${2:?--wave needs 1, 2, 3 or 4}; shift 2 ;;
     --dry-run) DRY=1; shift ;;
     --fill) FILL=1; shift ;;
     --status) STATUS=1; shift ;;
@@ -108,19 +137,26 @@ while [ $# -gt 0 ]; do
     --shards)
       SHARDS=${2:?--shards needs a number}; shift 2
       [[ "$SHARDS" =~ ^[1-9][0-9]*$ ]] || { echo "--shards needs a positive integer" >&2; exit 2; } ;;
-    --n|--only)
+    --n|--p|--only)
       opt=$1; shift; vals=()
       while [ $# -gt 0 ] && [[ "$1" != --* ]]; do vals+=("$1"); shift; done
       [ ${#vals[@]} -gt 0 ] || { echo "$opt needs at least one value" >&2; exit 2; }
       case "$opt" in
-        --n) NS=("${vals[@]}") ;;
+        --n) NS=("${vals[@]}"); NS_GIVEN=1 ;;
+        --p) PS=("${vals[@]}") ;;
         --only) ONLY=("${vals[@]}") ;;
       esac ;;
-    -h|--help) sed -n '2,39p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,46p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
-[ -n "$WAVE" ] || { echo "--wave is required (1, 2 or 3); see --help" >&2; exit 2; }
+[ -n "$WAVE" ] || { echo "--wave is required (1, 2, 3 or 4); see --help" >&2; exit 2; }
+if [ "$WAVE" = 4 ]; then
+  [ "$NS_GIVEN" -eq 1 ] || NS=(1000)          # Figure 5's sample size unless --n says otherwise
+  for p in "${PS[@]}"; do
+    [[ "$p" =~ ^(15|25|30|40|50)$ ]] || { echo "unknown p for wave 4: $p (15, 25, 30, 40 or 50)" >&2; exit 2; }
+  done
+fi
 CELLS=$(cells "$WAVE") || exit 2
 for n in "${NS[@]}"; do
   [ "$(n_code "$n")" != x ] || { echo "unknown sample size: $n (1000, 1e4, 1e5 or inf)" >&2; exit 2; }

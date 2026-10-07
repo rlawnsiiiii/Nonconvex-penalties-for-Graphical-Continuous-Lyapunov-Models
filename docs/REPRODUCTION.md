@@ -346,6 +346,7 @@ Same graphs as the n-sweep (same seeds), so everything is paired with `runs/nswe
 | 1 | 16 | 128 | direct loss, $p = 10, 20$: lasso, MCP / SCAD (standard, dense → sparse, LLA), adaptive lasso; each with $C = 2I$ (`C2I`) and the rescaled $C$ (`Cresc`); path, BIC-selected graph, graph after the BIC search |
 | 2 | 3 | 20 | search without a penalty and search started from the truth: $p = 10$ (`C2I`, `Cresc`), $p = 20$ (`Cresc`) |
 | 3 | 8 | 56 | log-likelihood loss, $p = 10$: lasso and MCP in both path orders, `C2I` and `Cresc`; path and BIC-selected graph |
+| 4 | 12 per $p$ | 112 – 224 per $p$ | larger $p$ at $n = 1000$ ($p = 15, 25, 30, 40, 50$): lasso, MCP, SCAD, MCP / SCAD dense → sparse, adaptive lasso, `C2I` and `Cresc`; path and BIC-selected graph, no search. Selected with `--p`, not `--n`; cells `..._p<p>_n1000` |
 
 `cluster/submit_campaign.sh` does the bookkeeping exactly as `submit_nsweep.sh` does (one
 submission per cell, `--status`, `--fill`); a cell is a folder
@@ -361,6 +362,7 @@ bash cluster/submit_campaign.sh --wave 1 --n 1000        # one sample size: 128 
 bash cluster/submit_campaign.sh --wave 1 --status        # complete / k of N shards written / not started
 bash cluster/submit_campaign.sh --wave 1 --fill          # resubmit missing shards, once the jobs have ended
 bash cluster/submit_campaign.sh --wave 1 --only MCP-up --n inf    # a subset of cells
+bash cluster/submit_campaign.sh --wave 4 --p 15 25                 # wave 4: by p, n = 1000
 ```
 
 LRZ accepts about 200 queued or running tasks per user and runs 96 at a time. When `sbatch`

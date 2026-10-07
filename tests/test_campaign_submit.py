@@ -76,12 +76,18 @@ def test_waves_have_the_planned_cells(cluster):
     wave3 = listed(submit, 3)
     assert [c[0] for c in wave3] == [f"loglik_{e}_{c}" for c in ("C2I", "Cresc")
                                      for e in ("lasso", "lasso-up", "MCP", "MCP-up")]
-    for wave in (1, 2, 3):                                        # job names: unique, short enough
+    wave4 = listed(submit, 4)
+    assert len(wave4) == 60 and sum(c[2] for c in wave4) == 784
+    assert [c[0] for c in wave4][:6] == [f"direct_{e}_C2I_p15" for e in
+                                         ("lasso", "MCP", "SCAD", "MCP-up", "SCAD-up", "adaptive")]
+    assert all("--select bic" in " ".join(c[5]) and "--select search" not in " ".join(c[5]) for c in wave4)
+    assert all(c[3] == ("24:00:00" if int(c[0].rsplit("_p", 1)[1]) >= 30 else "12:00:00") for c in wave4)
+    for wave in (1, 2, 3, 4):                                     # job names: unique, short enough
         tags = [c[1] for c in listed(submit, wave)]
         assert len(set(tags)) == len(tags) and all(len(t) + 1 < 10 for t in tags)
 
 
-@pytest.mark.parametrize("wave", [1, 2, 3])
+@pytest.mark.parametrize("wave", [1, 2, 3, 4])
 def test_every_cell_is_accepted_by_its_runner(cluster, wave):
     """The arguments the submit script would pass parse with the runner's own
     command line and describe an implemented combination, with the C and the
@@ -91,7 +97,7 @@ def test_every_cell_is_accepted_by_its_runner(cluster, wave):
         module = {"run_s1_shard.py": run_s1_shard, "run_search_shard.py": run_search_shard}[runner]
         ns = module.build_parser().parse_args(
             ["--shard", "0", "--n-shards", "4", "--out-dir", "x", "--n-obs", "inf", *args])
-        assert ns.c_scale == ("variance" if name.endswith("Cresc") else "identity")
+        assert ns.c_scale == ("variance" if "_Cresc" in name else "identity")
         if module is run_s1_shard:
             cfg = run_s1_shard.config_from_args(ns)               # raises if not implemented
             assert cfg.loss == name.split("_")[0]
@@ -100,7 +106,8 @@ def test_every_cell_is_accepted_by_its_runner(cluster, wave):
             assert (cfg.method == "adaptive") == ("adaptive" in name)
             assert cfg.penalty == ("lasso" if "lasso" in name or "adaptive" in name
                                    else name.split("_")[1].split("-")[0])
-            assert cfg.n_rep == 25 and cfg.p_values == ((10, 20) if wave == 1 else (10,))
+            expected_p = (10, 20) if wave == 1 else (int(name.rsplit("_p", 1)[1]),) if wave == 4 else (10,)
+            assert cfg.n_rep == 25 and cfg.p_values == expected_p
 
 
 def test_submits_once_reports_status_and_fills_missing_shards(cluster):
@@ -147,6 +154,27 @@ def test_a_refused_cell_records_nothing_and_the_rerun_continues(cluster):
     assert res.returncode == 0 and len(calls) == 3
     assert "search_p20_Cresc_n1e4" in calls[2] and "run_search_shard.py" in calls[2]
     assert "submitted 16 tasks in 1 cells" in res.stdout
+
+
+def test_wave_4_runs_over_p_at_n_1000(cluster):
+    """Wave 4 cells are one per p; --p selects them, n is 1000 unless --n is given, and
+    the folder name carries the p and the sample size."""
+    submit, root, _ = cluster
+    res, calls = submit("--wave", "4", "--p", "25", "--only", "adaptive")
+    assert res.returncode == 0, res.stderr
+    assert len(calls) == 2 and "submitted 8 tasks in 2 cells" in res.stdout
+    assert (f"-J 4adi253 cluster/campaign_array.sbatch simulations/run_s1_shard.py "
+            f"{root / 'direct_adaptive_C2I_p25_n1000'} --p 25 --reps 25 --select bic "
+            f"--c-scale identity --method adaptive --n-obs 1000") in calls[0]
+    assert (root / "direct_adaptive_Cresc_p25_n1000" / "n_shards").read_text().strip() == "4"
+    res, calls = submit("--wave", "4", "--p", "25", "--n", "inf", "--only", "adaptive_Cresc")
+    assert res.returncode == 0 and len(calls) == 3
+    assert f"{root / 'direct_adaptive_Cresc_p25_ninf'} --p 25" in calls[2] and "--n-obs inf" in calls[2]
+    res, calls = submit("--wave", "4", "--p", "40", "--dry-run")
+    assert res.returncode == 0 and len(calls) == 3                # a dry run submits nothing
+    assert res.stdout.count("--time=24:00:00") == 12 and "would submit 224 tasks in 12 cells" in res.stdout
+    res, _ = submit("--wave", "4", "--p", "20")
+    assert res.returncode == 2 and "unknown p" in res.stderr
 
 
 def test_dry_run_and_argument_errors(cluster):

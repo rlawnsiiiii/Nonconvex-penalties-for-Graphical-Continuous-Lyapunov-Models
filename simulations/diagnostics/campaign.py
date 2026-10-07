@@ -52,7 +52,8 @@ from run_s1_shard import ORIENT, unpack_supports  # noqa: E402
 
 DEFAULT = ROOT / "runs" / "campaign"
 BASELINE = ROOT / "runs" / "nsweep_p10-20"
-CELL = re.compile(r"^(?P<loss>direct|loglik|frobenius)_(?P<estimator>[A-Za-z-]+)_(?P<c>C2I|Cresc)_n(?P<n>[0-9e]+|inf)$")
+#: <loss>_<estimator>_<C>_n<n>, or with _p<p> before _n<n> for the wave 4 cells (one p each)
+CELL = re.compile(r"^(?P<loss>direct|loglik|frobenius)_(?P<estimator>[A-Za-z-]+)_(?P<c>C2I|Cresc)(?:_p(?P<p_label>[0-9]+))?_n(?P<n>[0-9e]+|inf)$")
 SEARCH_CELL = re.compile(r"^search_p(?P<p>[0-9]+)_(?P<c>C2I|Cresc)_n(?P<n>[0-9e]+|inf)$")
 PATH_METRICS = ("max_f1", "aupr", "auc", "max_acc")
 #: Dettling's extended BIC (his eq. 6.2): BIC + 4 gamma |E| log p, for these gammas.  Computed
@@ -166,7 +167,8 @@ def load(root: Path) -> list[dict]:
     for folder in sorted(p for p in root.iterdir() if p.is_dir()):
         m, s = CELL.match(folder.name), SEARCH_CELL.match(folder.name)
         if m:
-            rows += load_estimator_cell(folder, {"cell": folder.name, **m.groupdict()})
+            meta = {k: v for k, v in m.groupdict().items() if k != "p_label"}
+            rows += load_estimator_cell(folder, {"cell": folder.name, **meta})
         elif s:
             rows += load_search_cell(folder, {"cell": folder.name, "loss": "direct",
                                               "c": s["c"], "n": s["n"]})
