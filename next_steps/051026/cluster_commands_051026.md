@@ -13,8 +13,83 @@ Work through the blocks from top to bottom; what to expect is written under each
 | 3 | log-likelihood loss, $p = 10$: lasso and MCP, both path orders, both $C$ | 8 | 56 |
 | 4 | larger $p$ for the thesis figure: $p = 15, 25, 30, 40, 50$ at $n = 1000$; lasso, MCP, SCAD (standard), MCP / SCAD dense → sparse, adaptive lasso; both $C$; BIC but no search | 12 per $p$ | 112 ($p \le 30$), 224 ($p = 40, 50$) |
 
+| 5 | three checks of the selection step: (a) the BIC with the maximised likelihood (`-ml` cells, $p = 10$); (b) 100 randomly drawn starting graphs for the pure search, sparse and uniform (`search100s`, `search100u`); (c) the extended BIC term inside the selection and the search (`-ebic` cells, $p = 10, 20$) and in the pure search (`searche1`) | 18 | 48 + 48 (+ 32) + 64 + 20 |
+
 Sample sizes: $n = 1000$, $10^4$, $\infty$. LRZ runs 96 of your tasks at a time and accepts about
 200 queued or running.
+
+---
+
+## 0. Where we are, and what to run now (7 October, evening)
+
+Waves 1 and 2 are complete, wave 3 is nearly complete, wave 4 has $p = 15, 25, 30$ submitted
+and $p = 40, 50$ not yet, wave 5 is implemented and not submitted. From here the queue is fed
+by a script (block 12), so these are all the commands until the results are in.
+
+**Laptop: commit and push the code of today**
+
+```bash
+cd ~/Desktop/MastersThesis/repo
+git status                                   # the changed files, plus the new ones below
+git add -A cluster simulations tests docs src README.md ARCHITECTURE.md next_steps/051026
+git commit -m "wave 5 (likelihood refit, 100 starting graphs, extended BIC in the search), queue feeder"
+git push
+```
+
+New files that must be in the commit: `cluster/feed_queue.sh`, `cluster/plan_071026.txt`,
+`simulations/diagnostics/restarts.py`, `simulations/diagnostics/plot_campaign.py`,
+`tests/test_restarts_analysis.py`, `tests/test_feed_queue.py`.
+
+**LRZ: pull and start the feeder** (two minutes, then nothing until the results)
+
+```bash
+ssh ge47xod3@cool.hpc.lrz.de
+cd ~/repo && git pull
+nohup bash cluster/feed_queue.sh cluster/plan_071026.txt > logs/feed.out 2>&1 &
+sleep 5 && tail -3 logs/feed_queue.log       # "feeding 11 lines ..." and the first decision
+```
+
+Optional checks before starting it, if you want to see what it will do: `cat cluster/plan_071026.txt`
+(the order: wave 4 at $p = 40, 50$, the wave 5 subset, the repairs) and, with the venv active
+(`source ~/venvs/gclm/bin/activate`), `python -m pytest tests/test_campaign_submit.py
+tests/test_feed_queue.py -q` (11 pass). The feeder itself needs no venv: it only calls `sbatch`,
+`squeue` and the submit script.
+
+- The feeder takes the first undone line of the plan every 10 minutes, submits it when the
+  queue has room for all of its tasks, and holds the `--fill` lines until no job of their wave is
+  queued or running. It survives your logout (`nohup`). Details and how to stop it: block 12.
+- Lines already submitted by hand (p = 30) are skipped: their dry run finds nothing to submit.
+- To change the order or drop a line later: `pkill -f feed_queue.sh`, edit
+  `cluster/plan_071026.txt`, start it again with the same `nohup` command.
+
+**LRZ: look in on it** (whenever you like, from any login)
+
+```bash
+tail -20 logs/feed_queue.log                 # what it submitted and why it is waiting
+pgrep -fl feed_queue.sh                      # still running?  (empty = finished or stopped)
+squeue -M serial -u $USER -h -r | wc -l      # queued or running tasks, of 200
+bash cluster/submit_campaign.sh --wave 4 --status
+bash cluster/submit_campaign.sh --wave 5 --status
+sacct -M serial -X -u $USER -S now-2days --format=JobName%10,JobID%18,State,Elapsed | grep -v COMPLETED
+```
+
+If `pgrep` shows nothing and the log does not end with "plan complete", the login node ended
+the process: start it again with the `nohup` line above; it continues where it was.
+
+**Laptop: bring the results home** (after each wave reports `complete`; block 9 has the details)
+
+```bash
+cd ~/Desktop/MastersThesis/repo
+rsync -av ge47xod3@cool.hpc.lrz.de:repo/runs/campaign/ runs/campaign/
+mkdir -p logs/lrz && rsync -av ge47xod3@cool.hpc.lrz.de:repo/logs/feed_queue.log logs/lrz/   # the feeder's log
+python simulations/diagnostics/campaign.py --check-baseline
+python3 simulations/diagnostics/plot_campaign.py       # Anaconda python3 (matplotlib)
+python simulations/diagnostics/restarts.py             # wave 5b: best of the first r starting graphs
+```
+
+Then tell me, and I update S4, the verdicts and the figures, and read `logs/lrz/feed_queue.log`
+for what was submitted when. Copy its `| ddmmyy | ... |` rows into the submission log at the end
+of this file.
 
 ---
 
@@ -155,9 +230,15 @@ finished):
 ```bash
 cd ~/Desktop/MastersThesis/repo
 rsync -av ge47xod3@cool.hpc.lrz.de:repo/runs/campaign/ runs/campaign/
+mkdir -p logs/lrz && rsync -av ge47xod3@cool.hpc.lrz.de:repo/logs/feed_queue.log logs/lrz/
 python simulations/diagnostics/campaign.py --check-baseline
 ```
 
+- The second `rsync` brings the queue feeder's log (block 12) to `logs/lrz/feed_queue.log` on the
+  laptop, so that what was submitted when can be checked here; `logs/` is gitignored. To also
+  have the SLURM output of every task (`camp_<jobid>_<task>.out` / `.err`, thousands of small
+  files, useful only when something failed):
+  `rsync -av ge47xod3@cool.hpc.lrz.de:repo/logs/ logs/lrz/`.
 - `rsync` copies only what is new, so run it as often as you like: once wave 1 is complete,
   again when waves 2 – 4 come in. Cells still in progress come along with the shards they have
   so far and show fewer graphs in the tables; the next `rsync` completes them.
@@ -198,7 +279,7 @@ bash cluster/submit_campaign.sh --wave 4 --fill --time 24:00:00   # after the jo
   `bash cluster/submit_campaign.sh --wave 4 --p 30 50 --n inf --only Cresc` (12 cells, about
   150 CPU-h; cells `..._p30_ninf`).
 
-## 11. LRZ: wave 5 (two checks of the selection step), when the queue has room
+## 11. LRZ: wave 5 (three checks of the selection step), by hand; block 12 does it automatically
 
 Wave 5a repeats the selection and the search of three estimators with the BIC proper (the maximised
 likelihood behind the score, `--refit loglik`); wave 5b runs the pure search from 100 randomly drawn
@@ -254,7 +335,8 @@ pkill -f feed_queue.sh                                       # stop it
 - A login-node session ends when you log out unless the job runs under `nohup` (as above),
   `screen` or `tmux`; with `nohup` it survives the logout.
 - The log contains one row per submission in the format of the submission log below; copy them
-  there.
+  there. `rsync` it to the laptop with the results (block 9):
+  `rsync -av ge47xod3@cool.hpc.lrz.de:repo/logs/feed_queue.log logs/lrz/`.
 - Expect the whole plan to take two to three days of queueing; `--status` of each wave still
   works at any time.
 
@@ -280,7 +362,8 @@ pkill -f feed_queue.sh                                       # stop it
 
 ## Submission log
 
-*Fill in as you go: date, command, what `sbatch` answered.*
+*Fill in as you go: date, command, what `sbatch` answered. From 7 October evening the feeder
+(block 12) writes these rows into `logs/feed_queue.log`; copy them here.*
 
 | when | command | result |
 |---|---|---|

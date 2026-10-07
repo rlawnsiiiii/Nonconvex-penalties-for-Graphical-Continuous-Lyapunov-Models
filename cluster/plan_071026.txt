@@ -1,0 +1,16 @@
+# Plan for cluster/feed_queue.sh, 7 October 2026: what is left of wave 4, then the
+# suggested subset of wave 5, then the repairs.  Lines already submitted are recognised
+# (their dry run submits nothing) and skipped.  Edit freely; order = priority.
+# --wave 4 --p 30   submitted by hand on 7 October (a line like this is harmless: its dry run finds nothing to submit)
+--wave 4 --p 40
+--wave 4 --p 50
+--wave 5 --n 1e4 --only -ml
+--wave 5 --only search100
+--wave 5 --n 1e4 --only lasso-ebic adaptive-ebic
+--wave 5 --only searche1_p10
+--wave 5 --n 1e4 --only MCP-up-ebic
+# repairs: each waits until no job of its wave is queued or running
+--wave 2 --fill --time 24:00:00
+--wave 3 --fill --time 24:00:00
+--wave 4 --fill --time 24:00:00
+--wave 5 --fill --time 24:00:00
