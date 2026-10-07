@@ -56,8 +56,9 @@ tests/test_feed_queue.py -q` (11 pass). The feeder itself needs no venv: it only
 `squeue` and the submit script.
 
 - The feeder takes the first undone line of the plan every 10 minutes, submits it when the
-  queue has room for all of its tasks, and holds the `--fill` lines until no job of their wave is
-  queued or running. It survives your logout (`nohup`). Details and how to stop it: block 12.
+  queue has room for all of its tasks (a line larger than the cap, such as wave 4 at $p = 40$,
+  goes in parts, cell by cell), and holds the `--fill` lines until no job of their wave is queued
+  or running. It survives your logout (`nohup`). Details and how to stop it: block 12.
 - Lines already submitted by hand (p = 30) are skipped: their dry run finds nothing to submit.
 - To change the order or drop a line later: `pkill -f feed_queue.sh`, edit
   `cluster/plan_071026.txt`, start it again with the same `nohup` command.
@@ -330,8 +331,12 @@ pgrep -fl feed_queue.sh                                      # is it still runni
 pkill -f feed_queue.sh                                       # stop it
 ```
 
-- It checks every 10 minutes (`INTERVAL=600`), submits only when the queue has room for the
-  whole line (`LIMIT=200` queued tasks), and gives up on a line after 5 attempts with a warning.
+- It checks every 10 minutes (`INTERVAL=600`) and submits a line when the queue has room for all
+  of its tasks (`LIMIT=200` queued tasks). A line larger than the cap, wave 4 at $p = 40$ or 50
+  with 224 tasks, can never fit at once, so it goes in parts: it is run whenever there is room for
+  its largest cell (32 tasks), the submit script submits cells until `sbatch` refuses one, and the
+  rest follows in later rounds. A line is given up on, with a warning, after 5 runs in which
+  `sbatch` accepted nothing.
 - A login-node session ends when you log out unless the job runs under `nohup` (as above),
   `screen` or `tmux`; with `nohup` it survives the logout.
 - The log contains one row per submission in the format of the submission log below; copy them
@@ -375,3 +380,4 @@ pkill -f feed_queue.sh                                       # stop it
 | 071026| bash cluster/submit_campaign.sh --wave 4 --p 15 | |
 | 071026| bash cluster/submit_campaign.sh --wave 4 --p 25 | |
 | 071026| bash cluster/submit_campaign.sh --wave 4 --p 30 | |
+| 071026| nohup bash cluster/feed_queue.sh cluster/plan_071026.txt > logs/feed.out 2>&1 & | |

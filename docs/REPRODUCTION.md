@@ -372,7 +372,8 @@ refuses a cell, the script records nothing for it and stops; the same command, r
 continues there. Check the room with `squeue -M serial -u $USER -h -r | wc -l`, or let
 `cluster/feed_queue.sh PLAN` do it: it runs the submit commands of a plan file (one argument list
 per line, e.g. `cluster/plan_071026.txt`) in order, each as soon as the queue has room for all of
-its tasks, holds a `--fill` line until no job of its wave is queued, and logs to
+its tasks (a line larger than the cap goes in parts, cell by cell, whenever its largest cell
+fits), holds a `--fill` line until no job of its wave is queued, and logs to
 `logs/feed_queue.log`; start it with `nohup ... &` on the login node.
 
 Back on the laptop:
