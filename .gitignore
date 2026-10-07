@@ -26,3 +26,4 @@ logs/
 
 # shards of the campaign cells (cluster/submit_campaign.sh): same reasoning
 runs/**/shards/
+/next_steps/051026/files/
