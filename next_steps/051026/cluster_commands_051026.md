@@ -154,11 +154,14 @@ finished):
 
 ```bash
 cd ~/Desktop/MastersThesis/repo
-scp -r ge47xod3@cool.hpc.lrz.de:~/repo/runs/campaign runs/
+rsync -av ge47xod3@cool.hpc.lrz.de:repo/runs/campaign/ runs/campaign/
 python simulations/diagnostics/campaign.py --check-baseline
 ```
 
-- About 350 MB with all three waves.
+- `rsync` copies only what is new, so run it as often as you like: once wave 1 is complete,
+  again when waves 2 – 4 come in. Cells still in progress come along with the shards they have
+  so far and show fewer graphs in the tables; the next `rsync` completes them.
+- About 350 MB for waves 1 – 3, roughly as much again for wave 4.
 - `campaign.py` prints the table of means and writes `campaign_per_dataset.csv`,
   `campaign_means.csv` and `campaign_paired.csv` into `runs/campaign/`.
 - `--check-baseline` compares the three cells that repeat the n-sweep (direct loss, $C = 2I$,
@@ -195,6 +198,39 @@ bash cluster/submit_campaign.sh --wave 4 --fill --time 24:00:00   # after the jo
   `bash cluster/submit_campaign.sh --wave 4 --p 30 50 --n inf --only Cresc` (12 cells, about
   150 CPU-h; cells `..._p30_ninf`).
 
+## 11. LRZ: wave 5 (two checks of the selection step), when the queue has room
+
+Wave 5a repeats the selection and the search of three estimators with the BIC proper (the maximised
+likelihood behind the score, `--refit loglik`); wave 5b runs the pure search from 100 randomly drawn
+starting graphs instead of 10 (sparse ones as in wave 2, and uniform ones); wave 5c runs the
+selection and the search with the extended BIC term ($\gamma = 0.5, 1$) next to the plain BIC on the
+same path, and the pure search with $\gamma = 1$. Cells `direct_<estimator>-ml_<C>_n<n>`,
+`search100s_p10_Cresc_n<n>`, `search100u_p10_Cresc_n<n>`, the optional `search30s_p20_Cresc_n<n>`,
+`direct_<estimator>-ebic_<C>_n<n>` and `searche1_p<p>_<C>_n<n>`. Nothing of this is submitted yet;
+the suggested first subset is the second, third, fourth and fifth command.
+
+```bash
+bash cluster/submit_campaign.sh --wave 5 --list                        # the 18 cells per n
+bash cluster/submit_campaign.sh --wave 5 --n 1e4 --only -ml            # 5a at one n: 48 tasks
+bash cluster/submit_campaign.sh --wave 5 --only search100              # 5b, p = 10, three n: 48 tasks
+bash cluster/submit_campaign.sh --wave 5 --n 1e4 --only lasso-ebic adaptive-ebic   # 5c, the cheap paths: 32 tasks
+bash cluster/submit_campaign.sh --wave 5 --only searche1_p10           # 5c pure search, p = 10, three n: 12 tasks
+bash cluster/submit_campaign.sh --wave 5 --n 1e4 --only MCP-up-ebic    # 5c, the expensive paths: 32 tasks
+bash cluster/submit_campaign.sh --wave 5 --n 1000 inf --only -ml       # the rest of 5a, if wanted: 96 tasks
+bash cluster/submit_campaign.sh --wave 5 --n 1e4 --only search30s      # optional, p = 20 restarts: 32 tasks, 24 h
+bash cluster/submit_campaign.sh --wave 5 --n 1e4 --only searche1_p20   # optional, p = 20 pure search: 16 tasks
+bash cluster/submit_campaign.sh --wave 5 --status
+bash cluster/submit_campaign.sh --wave 5 --fill --time 24:00:00        # after the jobs of the wave have ended
+```
+
+- A task of 5a takes 1 to 3 hours (100 graphs at 15 to 100 s each on the laptop); of 5b at $p = 10$
+  about an hour; of 5c as the matching wave 1 cell plus two more searches per graph, 2 to 4 hours.
+- On the laptop afterwards: the `rsync` of block 9, then `campaign.py` as before (the `-ml`
+  estimators appear as rows of their own next to the least-squares ones) and
+  `python simulations/diagnostics/restarts.py`, which prints the $F_1$ and the share of graphs at
+  the best score for the best of the first $r$ starting graphs, $r = 1 \dots 100$, and writes
+  `runs/campaign/campaign_restarts.csv`.
+
 ---
 
 ## How long
@@ -205,6 +241,11 @@ bash cluster/submit_campaign.sh --wave 4 --fill --time 24:00:00   # after the jo
 | wave 2, all three sample sizes | 60 | 170 | 2 to 4 hours |
 | wave 3, all three sample sizes | 168 | 180 – 300 | 2 to 4 hours |
 | wave 4, all five $p$ | 784 | about 700 | 8 hours, over a day with queueing |
+| wave 5a, one sample size | 48 | 90 – 180 | 1 to 3 hours |
+| wave 5b at $p = 10$, three sample sizes | 48 | about 45 | about an hour |
+| wave 5b at $p = 20$ (optional) | 32 | 50 – 100 | 2 to 3 hours |
+| wave 5c, paths with three scores, one sample size | 64 | about 190 | 2 to 4 hours |
+| wave 5c, pure search with $\gamma = 1$, three sample sizes | 60 | about 170 | 2 to 4 hours |
 
 - Each task takes about 1 to 3 hours (limit 12 h; wave 3: 24 h).
 - The first results (wave 1 at $n = 1000$) are back a few hours after block 5.
@@ -219,5 +260,8 @@ bash cluster/submit_campaign.sh --wave 4 --fill --time 24:00:00   # after the jo
 | 051026| bash cluster/submit_campaign.sh --wave 1 --n 1000, bash cluster/submit_campaign.sh --wave 2| |
 | 061026| bash cluster/submit_campaign.sh --wave 1 --n 1e4| |
 | 071026| bash cluster/submit_campaign.sh --wave 1 --n inf| |
-| 081026| bash cluster/submit_campaign.sh --wave 3| |
-| 081026| bash cluster/submit_campaign.sh --wave 2 --fill --time 24:00:00| |
+| 071026| bash cluster/submit_campaign.sh --wave 3| |
+| 071026| bash cluster/submit_campaign.sh --wave 2 --fill --time 24:00:00| |
+| 071026| bash cluster/submit_campaign.sh --wave 4 --p 15 | |
+| 071026| bash cluster/submit_campaign.sh --wave 4 --p 25 | |
+| 071026| bash cluster/submit_campaign.sh --wave 4 --p 30 | |
