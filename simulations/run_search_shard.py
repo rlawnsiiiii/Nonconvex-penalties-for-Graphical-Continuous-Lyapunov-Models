@@ -7,9 +7,12 @@ runner uses no path at all.  On the datasets of Figure 5 (same seeds, so every
 result is paired with the path-based ones) it records two things:
 
   pure    the greedy BIC search with add / delete / reverse moves, started from
-          the empty graph and from ``--restarts`` random graphs; the best-scoring
+          the empty graph and from ``--restarts`` randomly drawn graphs (``--starts``:
+          sparse ones, or uniform over all directed graphs); the best-scoring
           result is kept (Amendola, Dettling, Drton, Onori & Wu 2020, Section 5;
-          :func:`gclm.solvers.search.multistart_search`)
+          :func:`gclm.solvers.search.multistart_search`).  The graph and the BIC
+          every start ended at are stored too, so that "the best of the first r
+          starts" can be read off afterwards for any r (the restart study, wave 5)
   truth   the same search started from the TRUE graph.  Not an estimator: it is
           the ceiling for any search with this score.  If it leaves the truth, the
           score prefers another graph; if the other searches end somewhere worse
@@ -17,12 +20,16 @@ result is paired with the path-based ones) it records two things:
 
 The score is the Gaussian BIC of an unpenalised least-squares refit on the direct
 loss, under the volatility matrix chosen with ``--c-scale`` -- exactly the score
-that ``run_s1_shard.py --select`` uses.  Numbers only, one ``.npz`` per shard:
+that ``run_s1_shard.py --select`` uses; ``--ebic-gamma G`` adds Dettling's extended
+term ``4 G |E| log p`` to it (wave 5c), for both searches.  Numbers only, one ``.npz`` per shard:
 
   per dataset   p, k, c_choice, rep, M* (sparse), scale
   pure_*        support (packed bits, ``m_pure_support``), refit (``m_pure_i/j/v``),
-                confusion counts, orientation breakdown (order: ORIENT), BIC, the
-                final BIC of every start, how many starts ended at the truth
+                confusion counts, orientation breakdown (order: ORIENT), BIC; per
+                start (random ones first, the empty graph last): the final BIC
+                (``pure_scores``), the final support (``m_pure_starts_support``,
+                packed, unpack with ``unpack_supports(.., restarts + 1, p)``) and
+                the number of moves made; how many starts ended at the truth
   truth_*       the same for the search started from the truth, plus the BIC of
                 the truth itself and the moves that left it (add, delete, reverse)
 
@@ -49,13 +56,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gclm.config import S1Config, parse_n_obs  # noqa: E402
 from gclm.data.simulate import C_SCALES, CChoice, draw_instance, estimation_volatility  # noqa: E402
 from gclm.solvers.search import Scorer, greedy_search, multistart_search, random_support  # noqa: E402
-from run_s1_shard import ORIENT, RAGGED, _counts, sparse_triple, task_list  # noqa: E402,F401
+from run_s1_shard import EBIC_FORM, ORIENT, RAGGED, _counts, sparse_triple, task_list  # noqa: E402,F401
 
 METHODS = ("pure", "truth")
 #: second seed word of the random starts; with (p, k, C, rep) it fixes them per dataset,
 #: whatever the shard layout
 RESTART_SEED = 20261003
-#: largest edge probability of a random start (the value used in S3b)
+#: how the random starting graphs are drawn.  "sparse": edge probability drawn from
+#: U[0, MAX_DENSITY] per graph, then each entry independently (the choice of S3b and of the
+#: campaign's wave 2).  "uniform": each entry with probability 1/2, i.e. uniformly over all
+#: directed graphs on p nodes (2-cycles allowed) -- the analogue of the uniformly drawn
+#: restarts of Nowzohour et al. (2017); needs no MCMC for this graph class.
+STARTS = ("sparse", "uniform")
+#: largest edge probability of a "sparse" random start (the value used in S3b)
 MAX_DENSITY = 0.3
 
 
@@ -68,7 +81,8 @@ def _graph(prefix: str, support: np.ndarray, m: np.ndarray, m_true: np.ndarray) 
             f"{prefix}_conf": conf, f"{prefix}_orient": orient}
 
 
-def run_one(p, k, c_choice, rep, cfg, restarts: int, methods=METHODS) -> dict:
+def run_one(p, k, c_choice, rep, cfg, restarts: int, methods=METHODS, starts: str = "sparse",
+            ebic_gamma: float = 0.0) -> dict:
     """Both searches on one dataset."""
     c_index = list(CChoice).index(c_choice)
     rng = np.random.default_rng([cfg.seed, p, k, c_index, rep])
@@ -88,16 +102,26 @@ def run_one(p, k, c_choice, rep, cfg, restarts: int, methods=METHODS) -> dict:
     if "pure" in methods:
         t1 = time.perf_counter()
         start_rng = np.random.default_rng([RESTART_SEED, p, k, c_index, rep])
-        starts = [random_support(p, start_rng, MAX_DENSITY) for _ in range(restarts)]
-        starts.append(np.zeros((p, p), dtype=bool))               # the empty graph, last
+        if starts == "sparse":
+            start_graphs = [random_support(p, start_rng, MAX_DENSITY) for _ in range(restarts)]
+        else:
+            start_graphs = []
+            for _ in range(restarts):
+                g = start_rng.random((p, p)) < 0.5
+                np.fill_diagonal(g, False)
+                start_graphs.append(g)
+        start_graphs.append(np.zeros((p, p), dtype=bool))         # the empty graph, last
         # max_steps: a guard only, as in run_s1_shard.select_graph (the search stops by
         # itself when no move lowers the BIC)
-        best, results = multistart_search(sigma_hat, c_est, cfg.n_obs, starts, loss="direct",
-                                          max_steps=p * (p - 1))
+        best, results = multistart_search(sigma_hat, c_est, cfg.n_obs, start_graphs, loss="direct",
+                                          max_steps=p * (p - 1), ebic_gamma=ebic_gamma,
+                                          ebic_form=EBIC_FORM)
         row.update(_graph("pure", best.support, best.m, m_true))
         row.update({
             "pure_score": best.score,
             "pure_scores": np.array([r.score for r in results], dtype=float),
+            "m_pure_starts_support": np.packbits(np.array([r.support for r in results])),
+            "pure_start_moves": np.array([len(r.moves) for r in results], dtype=np.int32),
             "pure_exact_starts": sum(np.array_equal(r.support, truth) for r in results),
             "pure_empty_start_exact": int(np.array_equal(results[-1].support, truth)),
             "pure_evaluations": best.evaluations,
@@ -106,7 +130,7 @@ def run_one(p, k, c_choice, rep, cfg, restarts: int, methods=METHODS) -> dict:
 
     if "truth" in methods:
         t1 = time.perf_counter()
-        scorer = Scorer(sigma_hat, c_est, cfg.n_obs, "direct")
+        scorer = Scorer(sigma_hat, c_est, cfg.n_obs, "direct", ebic_gamma, EBIC_FORM)
         truth_score, _ = scorer(truth)
         res = greedy_search(sigma_hat, c_est, cfg.n_obs, truth, scorer=scorer,
                             max_steps=p * (p - 1))
@@ -140,6 +164,11 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--restarts", type=int, default=10,
                     help="random starting graphs of the pure search, besides the empty graph")
     ap.add_argument("--methods", nargs="+", default=list(METHODS), choices=list(METHODS))
+    ap.add_argument("--starts", default="sparse", choices=list(STARTS),
+                    help="random starting graphs: sparse (edge probability ~ U[0, 0.3], "
+                         "default) or uniform (every entry with probability 1/2)")
+    ap.add_argument("--ebic-gamma", type=float, default=0.0, metavar="G",
+                    help="add Dettling's extended term 4 G |E| log p to the score (default 0)")
     return ap
 
 
@@ -150,6 +179,8 @@ def main() -> None:
         ap.error(f"--shard must be in 0..{args.n_shards - 1}, got {args.shard}")
     if args.restarts < 0:
         ap.error("--restarts must not be negative")
+    if args.ebic_gamma < 0:
+        ap.error("--ebic-gamma must not be negative")
 
     base = S1Config()
     cfg = S1Config(
@@ -163,12 +194,14 @@ def main() -> None:
     out = args.out_dir / f"shard_{args.shard:04d}_of_{args.n_shards:04d}.npz"
     print(f"shard {args.shard}/{args.n_shards}: {len(tasks)} datasets "
           f"[n={cfg.n_obs}, c_scale={cfg.c_scale}, methods={args.methods}, "
-          f"restarts={args.restarts}] -> {out}", flush=True)
+          f"restarts={args.restarts}, starts={args.starts}, ebic_gamma={args.ebic_gamma}] -> {out}",
+          flush=True)
 
     store: dict[str, list] = {}
     t0 = time.time()
     for n, (p, k, c, r) in enumerate(tasks, 1):
-        row = run_one(p, k, c, r, cfg, args.restarts, tuple(args.methods))
+        row = run_one(p, k, c, r, cfg, args.restarts, tuple(args.methods), args.starts,
+                      args.ebic_gamma)
         for key, val in row.items():
             store.setdefault(key, []).append(val)
         if n % 10 == 0 or n == len(tasks):
@@ -190,9 +223,9 @@ def main() -> None:
                                         "c_scale")},
         "p_values": list(cfg.p_values), "k_values": list(cfg.k_values),
         "c_choices": [c.value for c in cfg.c_choices],
-        "methods": list(args.methods), "restarts": args.restarts,
+        "methods": list(args.methods), "restarts": args.restarts, "starts": args.starts,
         "restart_seed": RESTART_SEED, "max_density": MAX_DENSITY, "score": "bic",
-        "refit": "direct",
+        "refit": "direct", "ebic_gamma": args.ebic_gamma, "ebic_form": EBIC_FORM,
     })
     payload["c_choice_names"] = np.array([c.value for c in CChoice])
     payload["provenance_json"] = json.dumps({

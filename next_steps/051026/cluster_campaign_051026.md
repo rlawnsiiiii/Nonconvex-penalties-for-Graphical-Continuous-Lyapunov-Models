@@ -6,9 +6,10 @@ directions A, D, E and F of [`next_steps_051026.md`](next_steps_051026.md) into 
 campaign that includes the side experiments: adaptive lasso, search, log-likelihood loss,
 larger $p$. The verdicts so far are in [`../../simulations/VERDICTS.md`](../../simulations/VERDICTS.md).*
 
-**Status (5 October, evening): confirmed by Joon. The code for waves 1 – 3 is written and tested;
-nothing has been submitted yet. §4 says where everything is implemented, §5 gives the commands
-for the cluster.** §1 – §3 are the plan as proposed in the afternoon; where the implementation
+**Status (7 October): waves 1 – 3 submitted on 5 October, wave 1 complete, wave 2 complete but
+for one resubmitted shard, wave 3 half complete, wave 4 started. The results are in
+[`../../simulations/S4_campaign.md`](../../simulations/S4_campaign.md); §4 says where everything
+is implemented, §5 gives the commands for the cluster.** §1 – §3 are the plan as proposed in the afternoon; where the implementation
 differs, the text says so. The new numbers in §2 and the cost estimates in §3 come from small
 laptop checks; their scripts and outputs are in [`files/`](files/) and listed in §8.
 
@@ -404,6 +405,7 @@ the truth?". The three are defined side by side, with the refit behind the BIC, 
 | **2** | search without any penalty (Améndola et al. 2020), and the search started from the true graph as a ceiling; $n = 10^3, 10^4, \infty$ | 3 × 3 = 9 (20 tasks per $n$) | 170 | a sharded version of the S3b driver |
 | **3** | the log-likelihood loss at $p = 10$: the 2 × 2 for MCP, with the lasso in both orders; $n = 10^3, 10^4, \infty$ | 8 × 3 = 24 (56 tasks per $n$) | 180; $p = 20$ at one $n$: + 340 | none beyond wave 1 |
 | **4** | larger $p$ (15, 25, 30, 40, 50) at $n = 10^3$, the setting of Figure 5 | chosen after wave 1 | 200 – 600 | none |
+| **5** | three checks of the selection step: (a) at $p = 10$ the BIC with the maximised likelihood instead of the least-squares refit, with the search, for lasso / MCP dense → sparse / adaptive lasso, both $C$; (b) 100 randomly drawn starting graphs for the pure search, sparse and uniform (and 30 at $p = 20$ on 5 replicates); (c) the extended BIC term ($\gamma = 0.5, 1$) inside the selection and the search, next to the plain BIC on the same path, $p = 10, 20$, and in the pure search with $\gamma = 1$ | 6 + 2 (+ 1) + 6 + 3 per $n$ | (a) 15 – 30 per cell; (b) 15 per cell, the $p = 20$ cell 50 – 100; (c) about 190 per $n$, the pure search 170 for three $n$ | `--refit loglik`, `--starts`, `--ebic-gamma`, the result of every start; wave 5 in the submit script; `restarts.py` |
 | later | a diagonal $C$ that is estimated; a DGP in which direction is identifiable | | | a new solver feature |
 
 For comparison: the baseline was 36 cells and 720 CPU-h. With the 96 cores LRZ gives one user,
@@ -480,6 +482,52 @@ wave 3), plus waiting in the queue.
 - **Open there:** at $p = 40, 50$ with $n = 1000$ there are more parameters than observations,
   and the dense start rests on a noisy fit. Whether dense → sparse still helps is not known.
 - `cluster/submit_campaign.sh --wave 4 --p <p>`; cells are named `..._p<p>_n1000`.
+
+**Wave 5** *(two checks of the selection step; decided on 7 October, implemented, not yet submitted)*
+
+- **(a) The BIC proper.** The campaign's BIC scores a support by the Gaussian likelihood at the
+  least-squares refit on the direct loss, not at the maximum-likelihood refit (`docs/SEARCH.md`
+  §2a); Améndola et al. and Dettling use the maximised likelihood. `--refit loglik` switches the
+  refit (`CovRefit`, iterative, through `Scorer(..., "loglik")`) for the BIC along the path and for
+  the search alike. Cells `direct_<lasso|MCP-up|adaptive>-ml_<C2I|Cresc>`, $p = 10$, 800 graphs,
+  `--select search`. On the laptop: 1 to 4 s per graph for the selection, 13 to 100 s for the
+  search with every add move scored (`--add-screen` would cut that, but is not used, so that only
+  the score differs from wave 1's search). On those three graphs (`files/time_refit_loglik.txt`)
+  the two refits selected the same $\lambda$ twice and neighbouring ones once, where the likelihood
+  refit was better by 0.03 to 0.04 in $F_1$. About 15 to 30 CPU-h per cell; 6 cells per $n$.
+- **(b) The starting graphs of the pure search.** Ten had not saturated (S4 §4a). `--restarts 100`
+  with `--starts sparse` (as in wave 2) and `--starts uniform` (a fair coin per entry: Nowzohour et
+  al.'s uniform draw, which for our graph class needs no MCMC). The graph and the BIC of every
+  start are stored (`m_pure_starts_support`, `pure_scores`, `pure_start_moves`), so one run gives
+  the best of the first $r$ starts for every $r \le 100$ (`simulations/diagnostics/restarts.py`,
+  table and `campaign_restarts.csv`). Cells `search100s_p10_Cresc`, `search100u_p10_Cresc`: 38 to
+  46 s per graph on the laptop, about 15 CPU-h per cell. `search30s_p20_Cresc` (30 starts, 5
+  replicates = 160 graphs, 32 shards, 24 h) is optional, 50 to 100 CPU-h. On the one graph timed
+  per $p$ (`files/time_starts.py`) the uniform starts ended worse than the sparse ones: at $p = 20$
+  the best of 5 uniform starts had 114 false positives against 3, and cost twice as much; uniform
+  starting graphs are what the reference does, not necessarily what works in this class.
+- **(c) The extended term, inside the search.** `docs/SEARCH.md` §2 writes the BIC with an
+  optional extended term. It was used in S3b (Chen & Chen's form, $\gamma_e = 1$: the same graphs
+  within 0.01) and in the campaign only offline, on the supports of a path (Dettling's
+  $4\gamma|E|\log p$, columns `ebic05_*`, `ebic1_*`), never inside the selection-plus-search or
+  the pure search. Since the plain BIC over-selects and the search prunes, the term may change
+  where the search ends. `run_s1_shard.py --ebic-gamma 0.5 1` selects and searches once more per
+  $\gamma$ on the same path (Dettling's form; fields `ebic05_*`, `ebic1_*` next to the plain-BIC
+  ones, so with / without is paired graph by graph) and `run_search_shard.py --ebic-gamma 1`
+  scores both of its searches with it. Cells `direct_<lasso|MCP-up|adaptive>-ebic_<C>` at
+  $p = 10, 20$ (the paths are computed again, which is most of the cost: about 130 CPU-h per $n$,
+  MCP dense → sparse 100 of them; the two extra searches about 60) and `searche1_p10_C2I`,
+  `searche1_p10_Cresc`, `searche1_p20_Cresc` (as wave 2: about 170 CPU-h for three $n$, the
+  $p = 20$ cell most of it). Cheapest informative subset: the lasso and adaptive-lasso cells at
+  $n = 10^4$ (about 40 CPU-h) and `searche1_p10_Cresc` (a few CPU-h per $n$).
+- **Found while timing.** With the rescaled $C$ the least-squares refit of the empty graph is
+  unstable, so its BIC is $+\infty$ and the search cannot leave it (a dead start), for 6 to 7 % of
+  the wave 2 graphs at $p = 10$ and 24 to 25 % at $p = 20$; the refit of the true support is
+  unstable for 2 to 5 % (mostly `C_Random_Full`). The best of the 11 starts was dead once in 2 375
+  graphs. The likelihood refit cannot be unstable. Numbers in `docs/SEARCH.md` §2a and S4 §4a.
+- **Suggested order:** (a) at $n = 10^4$ and (b) at $p = 10$ for all three $n$ first (about 200
+  CPU-h); the rest of (a), and the $p = 20$ cell, if those show something. Block 11 of
+  `cluster_commands_051026.md`.
 
 **Later, not in this campaign**
 
@@ -595,6 +643,17 @@ The definitions with formulas, and what each test checks, are in
 [`docs/DENSE_START.md`](../../docs/DENSE_START.md) (the new estimators) and
 [`docs/SEARCH.md`](../../docs/SEARCH.md) (BIC and search). The cluster procedure is also in
 [`docs/REPRODUCTION.md`](../../docs/REPRODUCTION.md) §2.7.
+
+**Added for wave 5 (7 October).** `simulations/run_s1_shard.py --refit {direct,loglik}`,
+`--add-screen N` and `--ebic-gamma G...` (`select_graph`; the likelihood refit is
+`gclm.solvers.search.CovRefit` behind `Scorer(..., "loglik")`; the extended term is
+`gclm.solvers.search.bic(..., ebic_form)` with `EBIC_FORM = "dettling"`, fields `ebic<G>_*`);
+`simulations/run_search_shard.py --starts {sparse,uniform}`, `--ebic-gamma G` and the per-start
+fields `m_pure_starts_support`, `pure_start_moves`; `simulations/diagnostics/restarts.py`
+(best of the first $r$ starts); `cluster/submit_campaign.sh --wave 5`; the analysis script knows the
+`-ml` estimators and the `search100s` / `search100u` / `search30s` cells. Tests:
+`tests/test_campaign_runner.py` (the likelihood refit), `tests/test_search_shard.py` (uniform starts,
+per-start results), `tests/test_campaign_submit.py` (wave 5), `tests/test_restarts_analysis.py`.
 
 ### 4.2 The main pieces, with the code (abridged)
 
@@ -877,6 +936,11 @@ python simulations/diagnostics/campaign.py --check-baseline
    with `runs/nsweep_p10-20` graph by graph. The lasso must agree exactly; MCP and SCAD may differ
    on a handful of graphs (S2b §2).
 
+**Feeding the queue automatically.** From 7 October `cluster/feed_queue.sh` runs a plan of submit
+commands (`cluster/plan_071026.txt`: the rest of wave 4, the suggested subset of wave 5, the
+repairs) as the queue has room, so nobody has to watch `squeue`; block 12 of
+`cluster_commands_051026.md`.
+
 **How long.** Per task 1 to 3 hours for waves 1 and 2, up to a few hours for wave 3.
 
 | round | tasks | CPU-h (estimate) | at 96 cores |
@@ -885,6 +949,11 @@ python simulations/diagnostics/campaign.py --check-baseline
 | wave 2, all three sample sizes | 60 | 170 | 2 to 4 hours |
 | wave 3, all three sample sizes | 168 | 180 – 300 | 2 to 4 hours |
 | wave 4, all five $p$ | 784 | about 700 | 8 hours, over a day with queueing |
+| wave 5a, one sample size | 48 | 90 – 180 | 1 to 3 hours |
+| wave 5b at $p = 10$, three sample sizes | 48 | about 45 | about an hour |
+| wave 5b at $p = 20$ (optional) | 32 | 50 – 100 | 2 to 3 hours |
+| wave 5c, paths with three scores, one sample size | 64 | about 190 | 2 to 4 hours |
+| wave 5c, pure search with $\gamma = 1$, three sample sizes | 60 | about 170 | 2 to 4 hours |
 
 So the first results (wave 1 at $n = 1000$) are back a few hours after block 5, and everything
 within about a day if the rounds follow each other.
@@ -914,6 +983,9 @@ so if you want one of them changed; each is a one-line change in `cluster/submit
 4. **Three sample sizes** ($10^3$, $10^4$, $\infty$) in every wave. `--n 1e5` adds the fourth.
 5. **The estimated $C$** stays for after the meeting, unless wave 1 shows that $C$ is the
    bottleneck.
+6. **Wave 5 (7 October):** implemented and tested, in the submit script as `--wave 5`; whether and
+   which subset to submit is your call (§3.4 suggests (a) at $n = 10^4$, (b) at $p = 10$ and the
+   cheap cells of (c) first).
 
 ## 8. Scripts of this note
 
@@ -926,5 +998,6 @@ All in [`files/`](files/); run them from the repository root. None of them chang
 | `estimate_c_check.py`, `estimate_c_check.R` | Varando & Hansen's package with four treatments of $C$ (§2.4); needs R with `gclm`; `--markdown` prints the tables of §2.4 | `estimate_c_check.csv` | 30 min |
 | `loglik_order_check.py` | the repository's log-likelihood lasso in both path orders (§2.5) | `loglik_order_check.csv` | 25 min |
 | `time_direct_up.py`, `time_loglik_up.py` | timing pilots for waves 1 and 3 (§3.4) | `time_direct_up.txt`, `time_loglik_up.txt` | 15 min, 1 h |
+| `time_refit_loglik.py`, `time_starts.py` | timing pilots for wave 5 (§3.4): the BIC selection and the search with the least-squares against the maximised-likelihood refit on three $p = 10$ graphs; the pure search from 100 sparse and 100 uniform starting graphs at $p = 10$ and 5 of each at $p = 20$ (7 October) | `time_refit_loglik.txt`, `time_starts.txt` | 3 min, 8 min |
 | `why_rescaling_helps.py` | why the rescaled $C$ helps the dense-start estimators: misfit of the truth, the dense shift of the solution set, ranking quality of the dense end, under both $C$ (7 October) | printed | 5 min |
 | `summarize_other_c.py` | the first look at the other settings of the true $C$ (§3.7); the run itself is `../031026/files/replicate_dense_to_sparse.py --c C_Random_Diag C_Random_Min_Diag C_Random_Full --reps 5` | `replicate_other_c.csv` | 80 min, stopped before $n = \infty$ finished |

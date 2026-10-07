@@ -82,12 +82,24 @@ def test_waves_have_the_planned_cells(cluster):
                                          ("lasso", "MCP", "SCAD", "MCP-up", "SCAD-up", "adaptive")]
     assert all("--select bic" in " ".join(c[5]) and "--select search" not in " ".join(c[5]) for c in wave4)
     assert all(c[3] == ("24:00:00" if int(c[0].rsplit("_p", 1)[1]) >= 30 else "12:00:00") for c in wave4)
-    for wave in (1, 2, 3, 4):                                     # job names: unique, short enough
+    wave5 = listed(submit, 5)
+    assert [c[0] for c in wave5] == [f"direct_{e}-ml_{c}" for c in ("C2I", "Cresc")
+                                     for e in ("lasso", "MCP-up", "adaptive")] + \
+        ["search100s_p10_Cresc", "search100u_p10_Cresc", "search30s_p20_Cresc"] + \
+        [f"direct_{e}-ebic_{c}" for c in ("C2I", "Cresc") for e in ("lasso", "MCP-up", "adaptive")] + \
+        ["searche1_p10_C2I", "searche1_p10_Cresc", "searche1_p20_Cresc"]
+    for name, _, _, _, runner, args in wave5:
+        if runner == "run_s1_shard.py":
+            assert "--select search" in " ".join(args)
+            assert ("--refit loglik" in " ".join(args)) == ("-ml" in name)
+            assert ("--ebic-gamma 0.5 1" in " ".join(args)) == ("-ebic" in name)
+    assert sum(c[2] for c in wave5) == 180
+    for wave in (1, 2, 3, 4, 5):                                  # job names: unique, short enough
         tags = [c[1] for c in listed(submit, wave)]
         assert len(set(tags)) == len(tags) and all(len(t) + 1 < 10 for t in tags)
 
 
-@pytest.mark.parametrize("wave", [1, 2, 3, 4])
+@pytest.mark.parametrize("wave", [1, 2, 3, 4, 5])
 def test_every_cell_is_accepted_by_its_runner(cluster, wave):
     """The arguments the submit script would pass parse with the runner's own
     command line and describe an implemented combination, with the C and the
@@ -98,16 +110,27 @@ def test_every_cell_is_accepted_by_its_runner(cluster, wave):
         ns = module.build_parser().parse_args(
             ["--shard", "0", "--n-shards", "4", "--out-dir", "x", "--n-obs", "inf", *args])
         assert ns.c_scale == ("variance" if "_Cresc" in name else "identity")
-        if module is run_s1_shard:
-            cfg = run_s1_shard.config_from_args(ns)               # raises if not implemented
-            assert cfg.loss == name.split("_")[0]
-            assert (cfg.direction == "up") == ("-up" in name)
-            assert (cfg.method == "lla") == ("-lla" in name)
-            assert (cfg.method == "adaptive") == ("adaptive" in name)
-            assert cfg.penalty == ("lasso" if "lasso" in name or "adaptive" in name
-                                   else name.split("_")[1].split("-")[0])
-            expected_p = (10, 20) if wave == 1 else (int(name.rsplit("_p", 1)[1]),) if wave == 4 else (10,)
-            assert cfg.n_rep == 25 and cfg.p_values == expected_p
+        if module is run_search_shard:                            # waves 2, 5b and 5c
+            restart_cell = name.startswith(("search100", "search30"))
+            assert ns.methods == (["pure"] if restart_cell else ["pure", "truth"])
+            assert ns.starts == ("uniform" if "100u" in name else "sparse")
+            assert ns.restarts == (100 if "search100" in name else 30 if "search30" in name else 10)
+            assert ns.ebic_gamma == (1.0 if "searche1" in name else 0.0)
+            assert (ns.reps, tuple(ns.p)) == ((5, (20,)) if "search30s" in name else
+                                              (25, (20,)) if "p20" in name else (25, (10,)))
+            continue
+        assert ns.refit == ("loglik" if "-ml" in name else "direct") and ns.add_screen is None
+        assert ns.ebic_gamma == ([0.5, 1.0] if "-ebic" in name else [])
+        cfg = run_s1_shard.config_from_args(ns)                   # raises if not implemented
+        assert cfg.loss == name.split("_")[0]
+        assert (cfg.direction == "up") == ("-up" in name)
+        assert (cfg.method == "lla") == ("-lla" in name)
+        assert (cfg.method == "adaptive") == ("adaptive" in name)
+        assert cfg.penalty == ("lasso" if "lasso" in name or "adaptive" in name
+                               else name.split("_")[1].split("-")[0])
+        expected_p = ((10, 20) if wave == 1 or "-ebic" in name else
+                      (int(name.rsplit("_p", 1)[1]),) if wave == 4 else (10,))
+        assert cfg.n_rep == 25 and cfg.p_values == expected_p
 
 
 def test_submits_once_reports_status_and_fills_missing_shards(cluster):

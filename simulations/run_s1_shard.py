@@ -74,6 +74,17 @@ from gclm.solvers.search import Scorer, bic_along_path, greedy_search
 
 METHODS = ("path", "lla", "adaptive")
 SELECT = ("none", "bic", "search")
+#: how a support is refitted for the BIC: least squares on the direct loss (closed form, the
+#: campaign's default) or the maximised Gaussian likelihood (iterative; 200 to 1000 times slower)
+REFITS = ("direct", "loglik")
+#: the form of the extended-BIC term used by --ebic-gamma: Dettling's 4 gamma |E| log p (his
+#: eq. 6.2), the same rule campaign.py applies offline to the path (columns ebic05_*, ebic1_*)
+EBIC_FORM = "dettling"
+
+
+def ebic_tag(gamma: float) -> str:
+    """Field prefix of one extended-BIC gamma: 0.5 -> ``ebic05``, 1 -> ``ebic1``."""
+    return f"ebic{gamma:g}".replace(".", "")
 #: order of the entries of ``bic_orient`` / ``search_orient`` (gclm.metrics.orientation_breakdown)
 ORIENT = ("correct", "reversed", "hedged", "both", "half", "missed_single", "missed_double",
           "fp_single", "fp_double")
@@ -131,18 +142,32 @@ def _counts(support: np.ndarray, m_true: np.ndarray):
             np.array([ob[key] for key in ORIENT], dtype=np.int32))
 
 
-def select_graph(supports, sigma_hat, c_est, n_obs, m_true, search: bool) -> dict:
+def select_graph(supports, sigma_hat, c_est, n_obs, m_true, search: bool,
+                 refit: str = "direct", add_screen: int | None = None,
+                 ebic_gamma: float = 0.0) -> dict:
     """What one gets from the path without knowing the truth.
 
-    Every support of the path is refitted without penalty by least squares on the
-    direct loss and scored by the Gaussian BIC of the implied covariance, under
-    the same ``C`` the path was fitted with (:class:`gclm.solvers.search.Scorer`;
-    the same rule for every loss and penalty, so that only the paths differ).  The
-    best-scoring support is the BIC-selected graph.  With ``search`` it is then the
-    start of :func:`gclm.solvers.search.greedy_search`.
+    Every support of the path is refitted without penalty and scored by the
+    Gaussian BIC of the implied covariance, under the same ``C`` the path was
+    fitted with (:class:`gclm.solvers.search.Scorer`; the same rule for every loss
+    and penalty, so that only the paths differ).  ``refit="direct"``: least squares
+    on the direct loss (closed form; the campaign's default).  ``refit="loglik"``:
+    the maximised Gaussian likelihood on the support, i.e. the BIC proper, as in
+    Amendola et al. 2020 and in Dettling's eq. 6.1 (wave 5; an iterative refit,
+    about 0.05 s per support at p = 10 against microseconds for least squares).
+    The best-scoring support is the BIC-selected graph.  With ``search`` it is then
+    the start of :func:`gclm.solvers.search.greedy_search`; ``add_screen`` limits
+    the add moves scored per step to the ones with the largest gradient (only
+    meaningful with the likelihood refit; ``None`` scores them all, which at p = 10
+    costs 15 to 60 s per graph and keeps the search identical in its moves to the
+    least-squares one).  ``ebic_gamma > 0`` adds Dettling's extended term
+    ``4 gamma |S| log p`` to every score (:data:`EBIC_FORM`; wave 5c), for the
+    selection and the search alike.
     """
     t0 = time.perf_counter()
-    scorer = Scorer(sigma_hat, c_est, n_obs, "direct")
+    if refit not in REFITS:
+        raise ValueError(f"unknown refit {refit!r}; expected one of {REFITS}")
+    scorer = Scorer(sigma_hat, c_est, n_obs, refit, ebic_gamma, EBIC_FORM)
     ib, scores = bic_along_path(sigma_hat, c_est, n_obs, supports, scorer=scorer)
     conf, orient = _counts(supports[ib], m_true)
     out = {"bic_index": ib, "bic_scores": np.array(scores, dtype=float),
@@ -155,7 +180,7 @@ def select_graph(supports, sigma_hat, c_est, n_obs, m_true, search: bool) -> dic
         # hundred deletions (the number of moves made is stored in search_moves).
         p = len(m_true)
         res = greedy_search(sigma_hat, c_est, n_obs, supports[ib], scorer=scorer,
-                            max_steps=p * (p - 1))
+                            max_steps=p * (p - 1), loss=refit, add_screen=add_screen)
         conf, orient = _counts(res.support, m_true)
         kinds = [move[0] for move in res.moves]
         si, sj, sv = sparse_triple(np.where(res.support | np.eye(len(m_true), dtype=bool), res.m, 0.0))
@@ -172,8 +197,15 @@ def select_graph(supports, sigma_hat, c_est, n_obs, m_true, search: bool) -> dic
     return out
 
 
-def run_one(p, k, c_choice, rep, cfg, select: str = "none"):
-    """One dataset -> a dict of arrays.  No metric is reduced away here."""
+def run_one(p, k, c_choice, rep, cfg, select: str = "none", refit: str = "direct",
+            add_screen: int | None = None, ebic_gammas=()):
+    """One dataset -> a dict of arrays.  No metric is reduced away here.
+
+    ``ebic_gammas``: besides the plain BIC (always recorded), select and search once
+    more per gamma with the extended BIC on the same path; those fields carry the
+    prefix ``ebic<gamma>_`` (``m_ebic<gamma>_...`` for the stored matrices), so that
+    with and without the term are paired graph by graph.
+    """
     rng = np.random.default_rng([cfg.seed, p, k, list(CChoice).index(c_choice), rep])
     t0 = time.perf_counter()
 
@@ -263,7 +295,14 @@ def run_one(p, k, c_choice, rep, cfg, select: str = "none"):
         row["supports_packed"] = np.packbits(np.array(supports))
         row["scale"] = np.asarray(scale, dtype=float)
         row.update(select_graph(supports, sigma_hat, c_est, cfg.n_obs, m_true,
-                                search=select == "search"))
+                                search=select == "search", refit=refit, add_screen=add_screen))
+        for gamma in ebic_gammas:
+            tag = ebic_tag(gamma)
+            extra = select_graph(supports, sigma_hat, c_est, cfg.n_obs, m_true,
+                                 search=select == "search", refit=refit, add_screen=add_screen,
+                                 ebic_gamma=gamma)
+            for key, val in extra.items():
+                row[f"m_{tag}_{key[2:]}" if key.startswith("m_") else f"{tag}_{key}"] = val
     row["seconds"] = time.perf_counter() - t0
     return row
 
@@ -303,6 +342,16 @@ def build_parser() -> argparse.ArgumentParser:
                     help="also record the BIC-selected graph of the path (bic) and the "
                          "graph the greedy BIC search reaches from it (search), plus the "
                          "support at every lambda; default none = the original output")
+    ap.add_argument("--refit", default="direct", choices=list(REFITS),
+                    help="refit behind the BIC: least squares on the direct loss (default) "
+                         "or the maximised Gaussian likelihood (the BIC proper; slow)")
+    ap.add_argument("--add-screen", type=int, default=None, metavar="N",
+                    help="with --refit loglik and --select search: score only the N add "
+                         "moves with the largest gradient per step (default: all of them)")
+    ap.add_argument("--ebic-gamma", type=float, nargs="+", default=[], metavar="G",
+                    help="with --select: besides the plain BIC, also select (and search) with "
+                         "Dettling's extended BIC, 4 G |E| log p, for each G > 0; fields "
+                         "ebic<G>_* (e.g. ebic05_, ebic1_)")
     return ap
 
 
@@ -334,6 +383,10 @@ def main() -> None:
     args = ap.parse_args()
     if not 0 <= args.shard < args.n_shards:
         ap.error(f"--shard must be in 0..{args.n_shards - 1}, got {args.shard}")
+    if any(g <= 0 for g in args.ebic_gamma) or len(set(args.ebic_gamma)) < len(args.ebic_gamma):
+        ap.error("--ebic-gamma takes distinct positive values (0 is the plain BIC, always recorded)")
+    if args.ebic_gamma and args.select == "none":
+        ap.error("--ebic-gamma needs --select bic or search")
     try:
         cfg = config_from_args(args)
     except ValueError as err:
@@ -345,13 +398,15 @@ def main() -> None:
 
     print(f"shard {args.shard}/{args.n_shards}: {len(tasks)} datasets "
           f"[n={cfg.n_obs}, loss={cfg.loss}, penalty={cfg.penalty}, method={cfg.method}, "
-          f"direction={cfg.direction}, c_scale={cfg.c_scale}, select={args.select}] -> {out}",
+          f"direction={cfg.direction}, c_scale={cfg.c_scale}, select={args.select}, "
+          f"refit={args.refit}, ebic_gamma={args.ebic_gamma}] -> {out}",
           flush=True)
 
     store: dict[str, list] = {}
     t0 = time.time()
     for n, (p, k, c, r) in enumerate(tasks, 1):
-        row = run_one(p, k, c, r, cfg, select=args.select)
+        row = run_one(p, k, c, r, cfg, select=args.select, refit=args.refit,
+                      add_screen=args.add_screen, ebic_gammas=tuple(args.ebic_gamma))
         for key, val in row.items():
             store.setdefault(key, []).append(val)
         if n % 25 == 0 or n == len(tasks):
@@ -379,7 +434,8 @@ def main() -> None:
             "metrics_include_diagonal", "standardize", "metzler", "seed",
             "solver", "loss", "direction", "penalty", "convention", "tol", "c_scale",
             "method")},
-        "select": args.select,
+        "select": args.select, "refit": args.refit, "add_screen": args.add_screen,
+        "ebic_gammas": list(args.ebic_gamma), "ebic_form": EBIC_FORM,
         "p_values": list(cfg.p_values),
         "k_values": list(cfg.k_values),
         "c_choices": [c.value for c in cfg.c_choices],

@@ -148,11 +148,19 @@ def log_binom(n: int, k: int) -> float:
     return math.lgamma(n + 1) - math.lgamma(k + 1) - math.lgamma(n - k + 1)
 
 
+#: the two forms of the extended-BIC term: Chen & Chen's ``2 gamma log binom(p(p-1), k)``
+#: ("binom", S3b) and Dettling's ``4 gamma k log p`` (his eq. 6.2, "dettling", the campaign)
+EBIC_FORMS = ("binom", "dettling")
+
+
 def bic(m: np.ndarray, sigma_hat: np.ndarray, c: np.ndarray, n: float, n_edges: int,
-        ebic_gamma: float = 0.0) -> float:
+        ebic_gamma: float = 0.0, ebic_form: str = "binom") -> float:
     """``n [log det Sigma(M) + tr(Sigma(M)^{-1} Sigma_hat)] + log(n) (p + n_edges)``,
-    plus ``2 gamma_e log binom(p (p - 1), n_edges)``; ``inf`` if ``M`` is not stable.
-    ``n = inf`` uses the nominal ``N_INF``."""
+    plus, when ``ebic_gamma > 0``, the extended term ``2 gamma_e log binom(p (p - 1),
+    n_edges)`` (``ebic_form="binom"``) or ``4 gamma_e n_edges log p`` (``"dettling"``);
+    ``inf`` if ``M`` is not stable.  ``n = inf`` uses the nominal ``N_INF``."""
+    if ebic_form not in EBIC_FORMS:
+        raise ValueError(f"unknown ebic_form {ebic_form!r}; expected one of {EBIC_FORMS}")
     if not is_stable(m):
         return math.inf
     try:
@@ -169,7 +177,10 @@ def bic(m: np.ndarray, sigma_hat: np.ndarray, c: np.ndarray, n: float, n_edges: 
     p = m.shape[0]
     score = nn * nll + math.log(nn) * (p + n_edges)
     if ebic_gamma:
-        score += 2.0 * ebic_gamma * log_binom(p * (p - 1), n_edges)
+        if ebic_form == "binom":
+            score += 2.0 * ebic_gamma * log_binom(p * (p - 1), n_edges)
+        else:
+            score += 4.0 * ebic_gamma * n_edges * math.log(p)
     return score
 
 
@@ -200,9 +211,11 @@ class Scorer:
     it is the same iterative solve from the same warm start.
     """
 
-    def __init__(self, sigma_hat, c, n, loss="direct", ebic_gamma=0.0):
+    def __init__(self, sigma_hat, c, n, loss="direct", ebic_gamma=0.0, ebic_form="binom"):
         self.sigma_hat, self.c, self.n, self.ebic_gamma = sigma_hat, np.asarray(c, float), n, ebic_gamma
-        self.loss = loss
+        self.loss, self.ebic_form = loss, ebic_form
+        if ebic_form not in EBIC_FORMS:
+            raise ValueError(f"unknown ebic_form {ebic_form!r}; expected one of {EBIC_FORMS}")
         self.refit = make_refit(sigma_hat, self.c, loss)
         self.cache: dict[bytes, float] = {}
         self.evaluations = 0
@@ -214,7 +227,7 @@ class Scorer:
             self.evaluations += 1
             m = self.refit.fit(support, m_init)
             self.cache[key] = bic(m, self.sigma_hat, self.c, self.n, int(support.sum()),
-                                  self.ebic_gamma)
+                                  self.ebic_gamma, self.ebic_form)
             self._last = (key, m)
         return self.cache[key]
 
@@ -262,7 +275,7 @@ def _warm_start(m: np.ndarray, move: str, i: int, j: int) -> np.ndarray:
 
 def greedy_search(sigma_hat, c, n, start: np.ndarray, loss: str = "direct", ebic_gamma: float = 0.0,
                   max_steps: int = 200, allow_two_cycles: bool = True, add_screen: int | None = None,
-                  scorer: Scorer | None = None) -> SearchResult:
+                  scorer: Scorer | None = None, ebic_form: str = "binom") -> SearchResult:
     """Best-improvement hill climbing from the support ``start``.
 
     ``add_screen``: if given, only that many add moves are scored per step -- the
@@ -272,7 +285,7 @@ def greedy_search(sigma_hat, c, n, start: np.ndarray, loss: str = "direct", ebic
     """
     p = sigma_hat.shape[0]
     off = ~np.eye(p, dtype=bool)
-    sc = scorer or Scorer(sigma_hat, c, n, loss, ebic_gamma)
+    sc = scorer or Scorer(sigma_hat, c, n, loss, ebic_gamma, ebic_form)
     cur = np.asarray(start, bool) & off
     if not allow_two_cycles:
         cur = cur & ~(cur & cur.T & np.triu(np.ones((p, p), bool), 1))
@@ -320,8 +333,10 @@ def multistart_search(sigma_hat, c, n, starts: list[np.ndarray], **kw) -> tuple[
     """Run :func:`greedy_search` from every start with one shared cache; return
     the best-scoring result and all of them."""
     loss, ebic_gamma = kw.pop("loss", "direct"), kw.pop("ebic_gamma", 0.0)
-    sc = Scorer(sigma_hat, c, n, loss, ebic_gamma)
-    results = [greedy_search(sigma_hat, c, n, s, loss=loss, ebic_gamma=ebic_gamma, scorer=sc, **kw)
+    ebic_form = kw.pop("ebic_form", "binom")
+    sc = Scorer(sigma_hat, c, n, loss, ebic_gamma, ebic_form)
+    results = [greedy_search(sigma_hat, c, n, s, loss=loss, ebic_gamma=ebic_gamma, ebic_form=ebic_form,
+                             scorer=sc, **kw)
                for s in starts]
     best = min(results, key=lambda r: r.score)
     best.evaluations = sc.evaluations
@@ -329,10 +344,11 @@ def multistart_search(sigma_hat, c, n, starts: list[np.ndarray], **kw) -> tuple[
 
 
 def bic_along_path(sigma_hat, c, n, supports: list[np.ndarray], loss: str = "direct",
-                   ebic_gamma: float = 0.0, scorer: Scorer | None = None) -> tuple[int, list[float]]:
+                   ebic_gamma: float = 0.0, scorer: Scorer | None = None,
+                   ebic_form: str = "binom") -> tuple[int, list[float]]:
     """Refit and score the support of every estimate of a path; return the index
     of the lowest score (the BIC-selected lambda) and all scores."""
-    sc = scorer or Scorer(sigma_hat, c, n, loss, ebic_gamma)
+    sc = scorer or Scorer(sigma_hat, c, n, loss, ebic_gamma, ebic_form)
     p = sigma_hat.shape[0]
     off = ~np.eye(p, dtype=bool)
     scores = [sc.score(np.asarray(s, bool) & off) for s in supports]

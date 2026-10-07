@@ -114,3 +114,20 @@ def test_command_line_writes_the_tables(tiny_campaign):
     for name in ("campaign_per_dataset.csv", "campaign_means.csv", "campaign_paired.csv"):
         assert (tiny_campaign / name).stat().st_size > 0
     assert "MCP-up" in res.stdout and "96 rows from 5 cells" in res.stdout
+
+
+def test_searched_extended_bic_graphs_are_loaded_next_to_the_offline_selection(tmp_path):
+    """Wave 5c: a cell run with --ebic-gamma 1 gets ebic1_search_* columns from the stored
+    counts, next to the offline ebic1_* selection every cell has."""
+    cell = tmp_path / "direct_lasso_Cresc_n1000" / "shards"
+    cmd = [sys.executable, str(ROOT / "simulations" / "run_s1_shard.py"), "--shard", "0",
+           "--n-shards", "4", "--p", "5", "--reps", "1", "--n-obs", "1000", "--select", "search",
+           "--c-scale", "variance", "--ebic-gamma", "1", "--out-dir", str(cell)]
+    res = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
+    assert res.returncode == 0, res.stderr
+    rows = campaign.load(tmp_path)
+    assert len(rows) == 4
+    for row in rows:
+        assert {"ebic1_f1", "ebic1_edges", "ebic1_search_f1", "ebic1_search_edges",
+                "ebic1_search_moves", "search_f1"} <= set(row)
+        assert 0 <= row["ebic1_search_f1"] <= 1 and "ebic05_search_f1" not in row

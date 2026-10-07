@@ -347,6 +347,7 @@ Same graphs as the n-sweep (same seeds), so everything is paired with `runs/nswe
 | 2 | 3 | 20 | search without a penalty and search started from the truth: $p = 10$ (`C2I`, `Cresc`), $p = 20$ (`Cresc`) |
 | 3 | 8 | 56 | log-likelihood loss, $p = 10$: lasso and MCP in both path orders, `C2I` and `Cresc`; path and BIC-selected graph |
 | 4 | 12 per $p$ | 112 – 224 per $p$ | larger $p$ at $n = 1000$ ($p = 15, 25, 30, 40, 50$): lasso, MCP, SCAD, MCP / SCAD dense → sparse, adaptive lasso, `C2I` and `Cresc`; path and BIC-selected graph, no search. Selected with `--p`, not `--n`; cells `..._p<p>_n1000` |
+| 5 | 6 + 3 + 6 + 3 | 48 + 48 (+ 32) + 64 + 20 | three checks of the selection step: (a) at $p = 10$ the BIC with the maximised likelihood (`--refit loglik`) for the lasso, MCP dense → sparse and the adaptive lasso, `C2I` and `Cresc`, with the search (cells `direct_<estimator>-ml_<C>`); (b) the pure search from 100 randomly drawn starting graphs, sparse and uniform (`search100s_p10_Cresc`, `search100u_p10_Cresc`), and 30 at $p = 20$ on 5 replicates (`search30s_p20_Cresc`); `simulations/diagnostics/restarts.py` reads off the best of the first $r$ starts; (c) the extended BIC term inside the selection and the search (`--ebic-gamma 0.5 1`, cells `direct_<estimator>-ebic_<C>`, $p = 10, 20$) and in the pure search (`searche1_p<p>_<C>`) |
 
 `cluster/submit_campaign.sh` does the bookkeeping exactly as `submit_nsweep.sh` does (one
 submission per cell, `--status`, `--fill`); a cell is a folder
@@ -363,22 +364,30 @@ bash cluster/submit_campaign.sh --wave 1 --status        # complete / k of N sha
 bash cluster/submit_campaign.sh --wave 1 --fill          # resubmit missing shards, once the jobs have ended
 bash cluster/submit_campaign.sh --wave 1 --only MCP-up --n inf    # a subset of cells
 bash cluster/submit_campaign.sh --wave 4 --p 15 25                 # wave 4: by p, n = 1000
+bash cluster/submit_campaign.sh --wave 5 --n 1e4 --only -ml        # wave 5a at one n; --only search100 for 5b
 ```
 
 LRZ accepts about 200 queued or running tasks per user and runs 96 at a time. When `sbatch`
 refuses a cell, the script records nothing for it and stops; the same command, run again later,
-continues there. Check the room with `squeue -M serial -u $USER -h -r | wc -l`.
+continues there. Check the room with `squeue -M serial -u $USER -h -r | wc -l`, or let
+`cluster/feed_queue.sh PLAN` do it: it runs the submit commands of a plan file (one argument list
+per line, e.g. `cluster/plan_071026.txt`) in order, each as soon as the queue has room for all of
+its tasks, holds a `--fill` line until no job of its wave is queued, and logs to
+`logs/feed_queue.log`; start it with `nohup ... &` on the login node.
 
 Back on the laptop:
 
 ```bash
-scp -r $USER@cool.hpc.lrz.de:~/repo/runs/campaign runs/
+rsync -av $USER@cool.hpc.lrz.de:repo/runs/campaign/ runs/campaign/     # incremental; rerun as cells finish
 python simulations/diagnostics/campaign.py --check-baseline
 ```
 
 writes `campaign_per_dataset.csv`, `campaign_means.csv` and `campaign_paired.csv` into
 `runs/campaign/`, and compares the three cells that repeat the n-sweep (direct loss, `C2I`,
-standard paths) with `runs/nsweep_p10-20` graph by graph.
+standard paths) with `runs/nsweep_p10-20` graph by graph. `python simulations/diagnostics/plot_campaign.py`
+(needs matplotlib) draws the figures of `simulations/S4_campaign.md` into `runs/campaign/figures/`.
+`python simulations/diagnostics/restarts.py` reads the search cells (waves 2 and 5b) and tabulates
+the best of the first $r$ randomly drawn starting graphs for every $r$ (`campaign_restarts.csv`).
 
 **A rehearsal without a cluster.** `cluster/local/sbatch` is a stand-in for `sbatch` that turns
 every array task into a small shell script instead of submitting it:

@@ -19,7 +19,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from gclm.config import S1Config
+from gclm.data.simulate import CChoice, draw_instance, estimation_volatility
 from gclm.metrics import confusion, orientation_breakdown
+from gclm.solvers.search import Scorer
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "simulations" / "run_s1_shard.py"
@@ -154,6 +157,85 @@ def test_combinations_that_are_not_implemented_are_refused(tmp_path, extra, mess
     assert res.returncode != 0 and shard is None
     assert message in res.stderr
     assert not list((tmp_path / "out").glob("*.npz"))
+
+
+def dataset(shard, i, n_obs, c_scale):
+    """Rebuild dataset ``i`` of the shard from its seed, as the runner does."""
+    cfg = S1Config()
+    p, k, c, rep = (int(shard[key][i]) for key in ("p", "k", "c_choice", "rep"))
+    rng = np.random.default_rng([cfg.seed, p, k, c, rep])
+    m_true, _, _, sigma_hat, scale = draw_instance(p, k, n_obs, list(CChoice)[c], rng,
+                                                   standardize=True, return_scale=True)
+    return m_true, sigma_hat, estimation_volatility(scale, c_scale)
+
+
+def test_the_likelihood_refit_behind_the_bic_is_an_option(tmp_path):
+    """Wave 5a: ``--refit loglik`` scores every support by the maximised Gaussian
+    likelihood instead of the least-squares refit (the BIC proper).  Same fields;
+    the stored scores are those of the likelihood scorer, the search descends on
+    them, and the likelihood cannot be worse than least squares on a support."""
+    res, shard = run(tmp_path, "--method", "adaptive", "--c-scale", "variance", "--n-obs", "10000",
+                     "--select", "search", "--refit", "loglik", n_shards=8)
+    assert res.returncode == 0, res.stderr
+    assert set(shard.files) == LEGACY | BIC | SEARCH
+    config = json.loads(str(shard["config_json"]))
+    assert (config["refit"], config["add_screen"], config["select"]) == ("loglik", None, "search")
+    for i in range(len(shard["p"])):
+        m_true, sigma_hat, c_est = dataset(shard, i, 10_000, "variance")
+        ib = int(shard["bic_index"][i])
+        supports = unpack_supports(shard["supports_packed"][i], len(shard["lambdas"][i]), P)
+        ml, ls = Scorer(sigma_hat, c_est, 10_000, "loglik"), Scorer(sigma_hat, c_est, 10_000, "direct")
+        for l in (0, ib, len(supports) - 1):
+            assert np.isclose(ml.score(supports[l]), shard["bic_scores"][i][l], rtol=1e-8)
+            assert ml.score(supports[l]) <= ls.score(supports[l]) + 1e-6 * abs(ls.score(supports[l]))
+        assert shard["search_score"][i] <= shard["bic_scores"][i][ib] + 1e-9
+        searched = unpack_supports(shard["m_search_support"][i], 1, P)[0]
+        assert np.isclose(ml.score(searched), shard["search_score"][i], rtol=1e-8)
+    # the default is the least-squares refit, and the screening is recorded
+    res, shard = run(tmp_path, "--method", "adaptive", "--select", "bic", n_shards=16, name="ls")
+    assert json.loads(str(shard["config_json"]))["refit"] == "direct"
+    res, shard = run(tmp_path, "--select", "search", "--refit", "loglik", "--add-screen", "3",
+                     n_shards=16, name="screened")
+    assert res.returncode == 0, res.stderr
+    assert json.loads(str(shard["config_json"]))["add_screen"] == 3
+
+
+def test_the_extended_bic_can_score_the_selection_and_the_search(tmp_path):
+    """Wave 5c: ``--ebic-gamma 0.5 1`` selects and searches once more per gamma with
+    Dettling's extended BIC (4 gamma |E| log p) on the same path.  The plain-BIC
+    fields are unchanged; the extra ones carry the prefix ebic<gamma>_, their
+    selection is the offline rule of campaign.py, and their search descends on the
+    extended score."""
+    res, shard = run(tmp_path, "--c-scale", "variance", "--n-obs", "10000", "--select", "search",
+                     "--ebic-gamma", "0.5", "1", n_shards=8)
+    assert res.returncode == 0, res.stderr
+    tags = ("ebic05", "ebic1")
+    extra = {f"{t}_{k}" for t in tags for k in BIC - {"supports_packed", "scale"} | SEARCH
+             if not k.startswith("m_")} | {f"m_{t}_search_{k}" for t in tags for k in ("support", "i", "j", "v")}
+    assert set(shard.files) == LEGACY | BIC | SEARCH | extra
+    config = json.loads(str(shard["config_json"]))
+    assert (config["ebic_gammas"], config["ebic_form"]) == ([0.5, 1.0], "dettling")
+    _, plain = run(tmp_path, "--c-scale", "variance", "--n-obs", "10000", "--select", "search",
+                   n_shards=8, name="plain")
+    assert np.array_equal(plain["bic_index"], shard["bic_index"])
+    assert np.array_equal(plain["search_conf"], shard["search_conf"])
+    for i in range(len(shard["p"])):
+        m_true, sigma_hat, c_est = dataset(shard, i, 10_000, "variance")
+        supports = unpack_supports(shard["supports_packed"][i], len(shard["lambdas"][i]), P)
+        edges = supports.sum(axis=(1, 2))
+        for gamma, tag in zip((0.5, 1.0), tags):
+            scores = shard["bic_scores"][i] + 4 * gamma * edges * np.log(P)       # the offline rule
+            assert np.allclose(shard[f"{tag}_bic_scores"][i], scores)
+            ib = int(shard[f"{tag}_bic_index"][i])
+            assert np.isclose(scores[ib], scores.min())
+            sc = Scorer(sigma_hat, c_est, 10_000, "direct", gamma, "dettling")
+            searched = unpack_supports(shard[f"m_{tag}_search_support"][i], 1, P)[0]
+            assert np.isclose(sc.score(searched), shard[f"{tag}_search_score"][i], rtol=1e-10)
+            assert shard[f"{tag}_search_score"][i] <= scores[ib] + 1e-9
+    res, _ = run(tmp_path, "--select", "bic", "--ebic-gamma", "0", n_shards=16, name="zero")
+    assert res.returncode == 2
+    res, _ = run(tmp_path, "--ebic-gamma", "1", n_shards=16, name="noselect")
+    assert res.returncode == 2
 
 
 def test_selection_is_recorded_for_the_log_likelihood_loss_too(tmp_path):

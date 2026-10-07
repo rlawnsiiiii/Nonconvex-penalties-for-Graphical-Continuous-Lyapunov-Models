@@ -51,6 +51,11 @@ def test_bic_counts_parameters_and_rejects_unstable(cycle):
     base = bic(m, sigma, C5, 1000, k)
     assert bic(m, sigma, C5, 1000, k + 1) - base == pytest.approx(math.log(1000))
     assert bic(m, sigma, C5, 1000, k, ebic_gamma=0.5) - base == pytest.approx(log_binom(20, k))
+    # Dettling's form of the term: 4 gamma k log p
+    assert bic(m, sigma, C5, 1000, k, ebic_gamma=0.5, ebic_form="dettling") - base == \
+        pytest.approx(2.0 * k * math.log(5))
+    with pytest.raises(ValueError):
+        bic(m, sigma, C5, 1000, k, ebic_gamma=0.5, ebic_form="chen")
     assert bic(m, sigma, C5, math.inf, k) == pytest.approx(bic(m, sigma, C5, N_INF, k))
     assert bic(np.eye(5), sigma, C5, 1000, 0) == math.inf          # unstable
 

@@ -81,6 +81,47 @@ def test_random_starts_depend_on_the_dataset_only(tmp_path):
     assert "truth_score" in a.files and "truth_score" not in b.files
 
 
+def test_every_start_is_recorded_and_uniform_starts_are_an_option(tmp_path):
+    """Wave 5b: the graph and the BIC every start ended at are stored (random starts
+    first, the empty graph last), so that the best of the first r starts can be read
+    off for any r; ``--starts uniform`` draws the starts with a fair coin per entry
+    instead of sparsely.  The empty start does not depend on that choice."""
+    sparse = run(tmp_path, "--n-obs", "10000", "--methods", "pure", name="s")
+    uniform = run(tmp_path, "--n-obs", "10000", "--methods", "pure", "--starts", "uniform", name="u")
+    assert json.loads(str(sparse["config_json"]))["starts"] == "sparse"
+    assert json.loads(str(uniform["config_json"]))["starts"] == "uniform"
+    for shard in (sparse, uniform):
+        for i in range(2):
+            m_true, sigma_hat, c_est = dataset(shard, i, 10_000, "identity")
+            scorer = Scorer(sigma_hat, c_est, 10_000, "direct")
+            ends = unpack_supports(shard["m_pure_starts_support"][i], 4, P)
+            scores = shard["pure_scores"][i]
+            assert ends.shape == (4, P, P) and shard["pure_start_moves"][i].shape == (4,)
+            for s, score in zip(ends, scores):             # every stored score is its end's BIC
+                assert np.isclose(scorer(s)[0], score, rtol=1e-10)
+            best = unpack_supports(shard["m_pure_support"][i], 1, P)[0]
+            assert np.array_equal(ends[int(np.argmin(scores))], best)
+            # the search from the empty graph (last) can only add at first, so it made moves
+            assert shard["pure_start_moves"][i][-1] > 0 or not ends[-1].any()
+    assert np.allclose(sparse["pure_scores"][:, -1], uniform["pure_scores"][:, -1])
+
+
+def test_the_extended_bic_scores_both_searches(tmp_path):
+    """Wave 5c: ``--ebic-gamma 1`` adds Dettling's term to the score of the pure
+    search and of the search from the truth."""
+    shard = run(tmp_path, "--n-obs", "10000", "--c-scale", "variance", "--ebic-gamma", "1")
+    config = json.loads(str(shard["config_json"]))
+    assert (config["ebic_gamma"], config["ebic_form"]) == (1.0, "dettling")
+    for i in range(2):
+        m_true, sigma_hat, c_est = dataset(shard, i, 10_000, "variance")
+        truth = (m_true != 0) & ~np.eye(P, dtype=bool)
+        scorer = Scorer(sigma_hat, c_est, 10_000, "direct", 1.0, "dettling")
+        for name in ("pure", "truth"):
+            support = unpack_supports(shard[f"m_{name}_support"][i], 1, P)[0]
+            assert np.isclose(scorer(support)[0], shard[f"{name}_score"][i], rtol=1e-10)
+        assert np.isclose(scorer(truth)[0], shard["truth_start_score"][i], rtol=1e-10)
+
+
 def test_population_covariance_with_the_right_c_keeps_the_truth(tmp_path):
     """n = inf, data generated with C = 2I (the first dataset of the shard is C_ID),
     scored with the rescaled C: the model is exact, so the truth cannot be improved

@@ -25,12 +25,26 @@
 #           Path and BIC-selected graph, no search (too slow at this size).  Cells
 #           are named <...>_p<p>_n1000; --p selects the sizes.  --n is 1000 unless
 #           given (e.g. --n inf --only Cresc for the population version of a subset).
+#   wave 5  two checks of the selection step, p = 10 (decided on 7 October):
+#           (a) the BIC with the maximised likelihood instead of the least-squares
+#               refit (--refit loglik), with the search, for lasso / MCP-up / adaptive
+#               and both C: cells direct_<estimator>-ml_<C>, 6 per n;
+#           (b) the pure search with 100 random starting graphs instead of 10, drawn
+#               sparse as before or uniformly (--starts), rescaled C: cells
+#               search100s_p10_Cresc and search100u_p10_Cresc; and, optional and
+#               expensive, 30 sparse starts at p = 20 on 5 replicates (search30s_p20_Cresc);
+#           (c) the extended BIC term (Dettling's 4 gamma |E| log p, gamma = 0.5 and 1)
+#               inside the selection and the search, next to the plain BIC on the same
+#               path (--ebic-gamma), for lasso / MCP-up / adaptive, p = 10 and 20, both C:
+#               cells direct_<estimator>-ebic_<C>; and the pure search scored with
+#               gamma = 1: searche1_p10_C2I, searche1_p10_Cresc, searche1_p20_Cresc.
 #
 # From ~/repo on the login node (nothing needs to be activated first):
 #     bash cluster/submit_campaign.sh --wave 1 --list            # the cells of a wave
 #     bash cluster/submit_campaign.sh --wave 1 --dry-run         # print the sbatch calls
 #     bash cluster/submit_campaign.sh --wave 1 --n 1000          # submit one sample size
 #     bash cluster/submit_campaign.sh --wave 4 --p 15 25         # wave 4: one or more p
+#     bash cluster/submit_campaign.sh --wave 5 --n 1e4 --only -ml # wave 5a at one n
 #     bash cluster/submit_campaign.sh --wave 1 --status          # state of every cell
 #     bash cluster/submit_campaign.sh --wave 1 --fill            # resubmit missing shards,
 #                                                                # once the jobs have ended
@@ -71,7 +85,11 @@ SHARDS=""
 # MCP / SCAD paths get 8; a dense -> sparse path costs 2 to 5 standard paths,
 # hence 16.  Wave 4 scales the shards with p (a path costs about p^3: 36 s per
 # graph for the lasso at p = 50 against 6 s at p = 20) and allows 24 h from
-# p = 30 on.
+# p = 30 on.  Wave 5a: the likelihood refit costs 15 to 90 s per graph at p = 10
+# on the laptop (the search with every add move scored), hence 8 shards.  Wave 5b:
+# 100 starts cost about ten times the 11 of wave 2 (9 to 15 s per graph there).
+# Wave 5c computes the paths again and searches three times per graph, hence 8
+# shards for the cheap paths.
 cells() {
   local c cs ci s1 s3 run=simulations/run_s1_shard.py
   case "$1" in
@@ -119,7 +137,31 @@ cells() {
           echo "direct_adaptive_${c}_p${p}|4ad${ci}${p}|$run|${sh[5]}|$t4|$s4 --c-scale $cs --method adaptive"
         done
       done ;;
-    *) echo "unknown wave: $1 (1, 2, 3 or 4)" >&2; return 2 ;;
+    5)
+      s5="--p 10 --reps 25 --select search --refit loglik"
+      for c in C2I Cresc; do
+        if [ "$c" = C2I ]; then cs=identity; ci=i; else cs=variance; ci=r; fi
+        echo "direct_lasso-ml_${c}|5la${ci}|$run|8|12:00:00|$s5 --c-scale $cs --penalty lasso"
+        echo "direct_MCP-up-ml_${c}|5Mu${ci}|$run|8|12:00:00|$s5 --c-scale $cs --penalty MCP --direction up"
+        echo "direct_adaptive-ml_${c}|5ad${ci}|$run|8|12:00:00|$s5 --c-scale $cs --method adaptive"
+      done
+      run=simulations/run_search_shard.py
+      echo "search100s_p10_Cresc|5s10r|$run|8|12:00:00|--p 10 --reps 25 --c-scale variance --methods pure --restarts 100 --starts sparse"
+      echo "search100u_p10_Cresc|5u10r|$run|8|12:00:00|--p 10 --reps 25 --c-scale variance --methods pure --restarts 100 --starts uniform"
+      echo "search30s_p20_Cresc|5s20r|$run|32|24:00:00|--p 20 --reps 5 --c-scale variance --methods pure --restarts 30 --starts sparse"
+      run=simulations/run_s1_shard.py
+      s5c="--p 10 20 --reps 25 --select search --ebic-gamma 0.5 1"
+      for c in C2I Cresc; do
+        if [ "$c" = C2I ]; then cs=identity; ci=i; else cs=variance; ci=r; fi
+        echo "direct_lasso-ebic_${c}|5le${ci}|$run|8|12:00:00|$s5c --c-scale $cs --penalty lasso"
+        echo "direct_MCP-up-ebic_${c}|5Me${ci}|$run|16|12:00:00|$s5c --c-scale $cs --penalty MCP --direction up"
+        echo "direct_adaptive-ebic_${c}|5ae${ci}|$run|8|12:00:00|$s5c --c-scale $cs --method adaptive"
+      done
+      run=simulations/run_search_shard.py
+      echo "searche1_p10_C2I|5e10i|$run|2|12:00:00|--p 10 --reps 25 --c-scale identity --ebic-gamma 1"
+      echo "searche1_p10_Cresc|5e10r|$run|2|12:00:00|--p 10 --reps 25 --c-scale variance --ebic-gamma 1"
+      echo "searche1_p20_Cresc|5e20r|$run|16|12:00:00|--p 20 --reps 25 --c-scale variance --ebic-gamma 1" ;;
+    *) echo "unknown wave: $1 (1, 2, 3, 4 or 5)" >&2; return 2 ;;
   esac
 }
 
@@ -128,7 +170,7 @@ n_code() { case "$1" in 1000) echo 3 ;; 1e4) echo 4 ;; 1e5) echo 5 ;; inf) echo 
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --wave) WAVE=${2:?--wave needs 1, 2, 3 or 4}; shift 2 ;;
+    --wave) WAVE=${2:?--wave needs 1, 2, 3, 4 or 5}; shift 2 ;;
     --dry-run) DRY=1; shift ;;
     --fill) FILL=1; shift ;;
     --status) STATUS=1; shift ;;
@@ -146,11 +188,11 @@ while [ $# -gt 0 ]; do
         --p) PS=("${vals[@]}") ;;
         --only) ONLY=("${vals[@]}") ;;
       esac ;;
-    -h|--help) sed -n '2,46p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,61p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
-[ -n "$WAVE" ] || { echo "--wave is required (1, 2, 3 or 4); see --help" >&2; exit 2; }
+[ -n "$WAVE" ] || { echo "--wave is required (1, 2, 3, 4 or 5); see --help" >&2; exit 2; }
 if [ "$WAVE" = 4 ]; then
   [ "$NS_GIVEN" -eq 1 ] || NS=(1000)          # Figure 5's sample size unless --n says otherwise
   for p in "${PS[@]}"; do

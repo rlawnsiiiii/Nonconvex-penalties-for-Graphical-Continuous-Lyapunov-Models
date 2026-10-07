@@ -231,6 +231,33 @@ bash cluster/submit_campaign.sh --wave 5 --fill --time 24:00:00        # after t
   the best score for the best of the first $r$ starting graphs, $r = 1 \dots 100$, and writes
   `runs/campaign/campaign_restarts.csv`.
 
+## 12. LRZ: let a script feed the queue (instead of watching for room)
+
+`cluster/feed_queue.sh` runs the submit commands of a plan file in order, each as soon as the
+queue has room for all of its tasks, and logs what it did. `cluster/plan_071026.txt` holds the
+order of 7 October: the rest of wave 4, the suggested subset of wave 5, then the repairs (a
+`--fill` line waits until no job of its wave is queued or running). Lines already submitted are
+recognised by their dry run and skipped, so the plan can be started at any time and restarted
+after a login-node logout.
+
+```bash
+cd ~/repo && git pull
+cat cluster/plan_071026.txt                                  # edit the order or drop lines first
+nohup bash cluster/feed_queue.sh cluster/plan_071026.txt > logs/feed.out 2>&1 &
+tail -f logs/feed_queue.log                                  # every decision, with a time stamp
+pgrep -fl feed_queue.sh                                      # is it still running?
+pkill -f feed_queue.sh                                       # stop it
+```
+
+- It checks every 10 minutes (`INTERVAL=600`), submits only when the queue has room for the
+  whole line (`LIMIT=200` queued tasks), and gives up on a line after 5 attempts with a warning.
+- A login-node session ends when you log out unless the job runs under `nohup` (as above),
+  `screen` or `tmux`; with `nohup` it survives the logout.
+- The log contains one row per submission in the format of the submission log below; copy them
+  there.
+- Expect the whole plan to take two to three days of queueing; `--status` of each wave still
+  works at any time.
+
 ---
 
 ## How long

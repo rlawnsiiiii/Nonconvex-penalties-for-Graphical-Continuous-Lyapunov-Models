@@ -53,7 +53,8 @@ repo/
 │   ├── run_s1.py                  ▶ Figure 5   — local, multiprocessing
 │   ├── run_s1_shard.py            ▶ Figure 5   — one cluster shard -> rich .npz; with --select also
 │   │                              the BIC-selected graph and the graph after the BIC search
-│   ├── run_search_shard.py        ▶ search without a penalty / from the truth — one cluster shard
+│   ├── run_search_shard.py        ▶ search without a penalty / from the truth — one cluster shard;
+│   │                              --restarts / --starts and the result of every start (wave 5b)
 │   ├── aggregate_s1.py            shards -> s1_per_dataset / _summary / _curves
 │   ├── plot_figures.py            CSVs -> figures  (LOCAL ONLY, never on the cluster)
 │   ├── plot_penalties.py          overlay several runs: penalties / losses vs. p  (LOCAL)
@@ -83,6 +84,7 @@ repo/
 │   ├── s1_array.sbatch            Figure 5, 64-task array on serial_std
 │   ├── submit_nsweep.sh           n-sweep at p = 10, 20: one array per (loss, penalty, n)
 │   ├── submit_campaign.sh         campaign of October 2026: the cells of each wave, one array per cell
+│   ├── feed_queue.sh              runs a plan of submit commands as the queue has room (cluster/plan_071026.txt)
 │   ├── campaign_array.sbatch      one campaign cell (any runner) as a job array
 │   ├── local/sbatch               stand-in for sbatch: rehearse a wave on a laptop
 │   └── m0.sbatch                  Figure 3, single serial job

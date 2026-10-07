@@ -3,7 +3,8 @@
 Numbers only; it reads the shards that ``cluster/submit_campaign.sh`` produces,
 
     <root>/<loss>_<estimator>_<C>_n<n>/shards/shard_*.npz      run_s1_shard.py  (waves 1, 3)
-    <root>/search_p<p>_<C>_n<n>/shards/shard_*.npz             run_search_shard.py  (wave 2)
+    <root>/search<v>_p<p>_<C>_n<n>/shards/shard_*.npz          run_search_shard.py  (wave 2; wave 5:
+                                                               v = 100s, 100u, 30s, e1)
 
 and writes into ``<root>``:
 
@@ -54,19 +55,25 @@ DEFAULT = ROOT / "runs" / "campaign"
 BASELINE = ROOT / "runs" / "nsweep_p10-20"
 #: <loss>_<estimator>_<C>_n<n>, or with _p<p> before _n<n> for the wave 4 cells (one p each)
 CELL = re.compile(r"^(?P<loss>direct|loglik|frobenius)_(?P<estimator>[A-Za-z-]+)_(?P<c>C2I|Cresc)(?:_p(?P<p_label>[0-9]+))?_n(?P<n>[0-9e]+|inf)$")
-SEARCH_CELL = re.compile(r"^search_p(?P<p>[0-9]+)_(?P<c>C2I|Cresc)_n(?P<n>[0-9e]+|inf)$")
+#: wave 2 cells (search_p10_Cresc) and the restart cells of wave 5 (search100s_p10_Cresc:
+#: 100 sparse starts; search100u_...: 100 uniform starts; searche1_...: the extended BIC with
+#: gamma = 1 in the score); the variant becomes part of the estimator label ("search-pure-100s")
+SEARCH_CELL = re.compile(r"^search(?P<variant>[0-9a-z]+)?_p(?P<p>[0-9]+)_(?P<c>C2I|Cresc)_n(?P<n>[0-9e]+|inf)$")
 PATH_METRICS = ("max_f1", "aupr", "auc", "max_acc")
 #: Dettling's extended BIC (his eq. 6.2): BIC + 4 gamma |E| log p, for these gammas.  Computed
 #: offline from the stored BIC of every support of the path; column prefix "ebic<gamma>"
 EBIC_GAMMAS = (0.5, 1.0)
 #: the columns reported in the tables: path metrics, then the data-driven graphs
-REPORT = ("max_f1", "aupr", "auc", "bic_f1", "ebic1_f1", "search_f1", "bic_skeleton_f1",
-          "search_skeleton_f1")
+REPORT = ("max_f1", "aupr", "auc", "bic_f1", "ebic1_f1", "search_f1", "ebic1_search_f1",
+          "bic_skeleton_f1", "search_skeleton_f1")
 ID = ("p", "k", "c_choice", "rep")
 #: the order of the estimators in the tables: reference first, then the standard
-#: paths, then the three that start from the lasso, then the searches without a path
+#: paths, then the three that start from the lasso, then the same with the
+#: likelihood refit behind the BIC (wave 5a, "-ml"), then the searches without a path
 ORDER = ("lasso", "lasso-up", "MCP", "SCAD", "MCP-up", "SCAD-up", "MCP-lla", "SCAD-lla",
-         "adaptive", "search-pure", "search-truth")
+         "adaptive", "lasso-ml", "MCP-up-ml", "adaptive-ml",
+         "search-pure", "search-pure-100s", "search-pure-100u", "search-pure-30s", "search-pure-e1",
+         "search-truth", "search-truth-e1")
 
 
 def graph_metrics(conf: np.ndarray, orient: np.ndarray, prefix: str) -> dict:
@@ -129,6 +136,11 @@ def load_estimator_cell(folder: Path, meta: dict) -> list[dict]:
                 row["bic_index"] = int(d["bic_index"][i])
                 for gamma in EBIC_GAMMAS:
                     row.update(ebic_selection(d, i, gamma))
+                    tag = f"ebic{gamma:g}".replace(".", "")
+                    if f"{tag}_search_conf" in d.files:      # wave 5c: searched with that score
+                        row.update(graph_metrics(d[f"{tag}_search_conf"][i],
+                                                 d[f"{tag}_search_orient"][i], f"{tag}_search"))
+                        row[f"{tag}_search_moves"] = int(d[f"{tag}_search_moves"][i].sum())
             if has_search:
                 row.update(graph_metrics(d["search_conf"][i], d["search_orient"][i], "search"))
                 row["search_moves"] = int(d["search_moves"][i].sum())
@@ -137,10 +149,11 @@ def load_estimator_cell(folder: Path, meta: dict) -> list[dict]:
     return rows
 
 
-def load_search_cell(folder: Path, meta: dict) -> list[dict]:
+def load_search_cell(folder: Path, meta: dict, variant: str = "") -> list[dict]:
     """Two rows per graph of a ``run_search_shard.py`` cell: the search without a
-    penalty ("search-pure") and the search started from the truth ("search-truth"),
-    both in the ``search_*`` columns so that they line up with the estimators."""
+    penalty ("search-pure", or "search-pure-<variant>" for the restart cells of
+    wave 5) and the search started from the truth ("search-truth"), both in the
+    ``search_*`` columns so that they line up with the estimators."""
     rows = []
     for f in sorted((folder / "shards").glob("shard_*.npz")):
         d = np.load(f, allow_pickle=True)
@@ -152,7 +165,8 @@ def load_search_cell(folder: Path, meta: dict) -> list[dict]:
             for name in ("pure", "truth"):
                 if f"{name}_conf" not in d.files:
                     continue
-                row = {**base, "estimator": f"search-{name}",
+                label = f"search-{name}" + (f"-{variant}" if variant else "")
+                row = {**base, "estimator": label,
                        **graph_metrics(d[f"{name}_conf"][i], d[f"{name}_orient"][i], "search"),
                        "seconds": float(d[f"{name}_seconds"][i])}
                 if name == "truth":
@@ -171,7 +185,7 @@ def load(root: Path) -> list[dict]:
             rows += load_estimator_cell(folder, {"cell": folder.name, **meta})
         elif s:
             rows += load_search_cell(folder, {"cell": folder.name, "loss": "direct",
-                                              "c": s["c"], "n": s["n"]})
+                                              "c": s["c"], "n": s["n"]}, s["variant"] or "")
     return rows
 
 
