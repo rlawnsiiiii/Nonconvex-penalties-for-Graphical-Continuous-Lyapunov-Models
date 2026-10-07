@@ -37,6 +37,15 @@ diagonal is always free. The edge $i \to j$ is the entry $M_{ji}$.
      $M$; the covariance-loss solver accepts only stable iterates.
    - **$n = \infty$** ($\hat\Sigma = \Sigma$ exactly) uses a nominal $n = 10^6$ in the weight. The
      score then prefers exact fits first and fewer edges second: the $\ell_0$ target.
+   - **A singular refit.** The Gram matrix $A_S^\top A_S$ is singular when a nonzero $M$ supported
+     in $S$ solves $M\hat\Sigma + \hat\Sigma M^\top = 0$. At $n = \infty$ this happens for real: two
+     nodes $i, j$ that are isolated in the true graph have $\hat\Sigma_{ij} = 0$ exactly, and then
+     the columns of $A$ for $M_{ij}$ and $M_{ji}$ are identical, so any support holding both
+     directions of such a pair (the random starts of the pure search do) is rank deficient. The
+     refit then falls back to least squares on the columns (minimum-norm solution), with SciPy's
+     QR-based driver as a second fallback, because LAPACK's SVD-based one failed to converge on
+     one such matrix on the cluster (campaign, 5 October); if nothing works the support scores
+     $+\infty$ and the search skips it. At finite $n$ the columns are only nearly dependent.
 
 ## 2a. From a path to one graph: oracle $\lambda$, BIC, search
 

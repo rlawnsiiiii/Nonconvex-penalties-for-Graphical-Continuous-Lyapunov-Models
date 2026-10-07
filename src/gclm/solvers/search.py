@@ -39,7 +39,14 @@ def vec_index(p: int) -> np.ndarray:
 
 
 def is_stable(m: np.ndarray) -> bool:
-    return bool(np.all(np.isfinite(m)) and np.all(np.linalg.eigvals(m).real < 0.0))
+    """Every eigenvalue of ``m`` has a negative real part.  A matrix that is not
+    finite, or whose eigenvalues LAPACK cannot compute, counts as not stable."""
+    if not np.all(np.isfinite(m)):
+        return False
+    try:
+        return bool(np.all(np.linalg.eigvals(m).real < 0.0))
+    except np.linalg.LinAlgError:
+        return False
 
 
 # --------------------------------------------------------------------------- #
@@ -70,10 +77,27 @@ class DirectRefit:
             if not np.all(np.isfinite(x)) or np.linalg.cond(g) > 1e12:
                 raise np.linalg.LinAlgError
         except np.linalg.LinAlgError:
-            x = np.linalg.lstsq(self.a[:, cols], self.rhs, rcond=None)[0]
+            x = self._lstsq(cols)
         m = np.zeros(self.p * self.p)
         m[cols] = x
         return m.reshape((self.p, self.p), order="F")
+
+    def _lstsq(self, cols: np.ndarray) -> np.ndarray:
+        """Least squares on the design columns themselves, for a singular or badly
+        conditioned Gram matrix.  NumPy's driver is SVD-based and can fail to converge
+        on badly scaled columns (it did once, at p = 20, n = inf, on a dense random
+        start of the pure search: ``LinAlgError: SVD did not converge``).  SciPy's
+        QR-based driver then takes over; if that fails too, the support is marked
+        unfittable (NaN), which :func:`bic` scores as ``inf``, so the search skips it."""
+        try:
+            return np.linalg.lstsq(self.a[:, cols], self.rhs, rcond=None)[0]
+        except np.linalg.LinAlgError:
+            pass
+        try:
+            from scipy.linalg import lstsq
+            return lstsq(self.a[:, cols], self.rhs, lapack_driver="gelsy")[0]
+        except Exception:                      # noqa: BLE001  -- any LAPACK failure
+            return np.full(len(cols), np.nan)
 
 
 class CovRefit:
@@ -165,23 +189,46 @@ class SearchResult:
 
 
 class Scorer:
-    """Refit + BIC with a cache keyed by the support, so no support is fitted twice."""
+    """Refit + BIC with a cache keyed by the support, so no support is scored twice.
+
+    Only the score is cached.  A search at p = 20 evaluates up to a few hundred
+    thousand supports (S3b: 380,000 for one graph at n = inf), and caching the
+    refitted matrix with each of them took more than a cluster task's 2 GB.  The
+    matrix is recomputed on demand (:meth:`fit`): once per accepted move in the
+    search, against hundreds of scores per move.  For the direct loss the refit is
+    a closed form, so the recomputed matrix is identical; for the covariance losses
+    it is the same iterative solve from the same warm start.
+    """
 
     def __init__(self, sigma_hat, c, n, loss="direct", ebic_gamma=0.0):
         self.sigma_hat, self.c, self.n, self.ebic_gamma = sigma_hat, np.asarray(c, float), n, ebic_gamma
         self.loss = loss
         self.refit = make_refit(sigma_hat, self.c, loss)
-        self.cache: dict[bytes, tuple[float, np.ndarray]] = {}
+        self.cache: dict[bytes, float] = {}
         self.evaluations = 0
+        self._last: tuple[bytes, np.ndarray] | None = None     # the refit of the last new support
 
-    def __call__(self, support: np.ndarray, m_init: np.ndarray | None = None):
+    def score(self, support: np.ndarray, m_init: np.ndarray | None = None) -> float:
         key = np.packbits(support).tobytes()
         if key not in self.cache:
             self.evaluations += 1
             m = self.refit.fit(support, m_init)
-            self.cache[key] = (bic(m, self.sigma_hat, self.c, self.n, int(support.sum()),
-                                   self.ebic_gamma), m)
+            self.cache[key] = bic(m, self.sigma_hat, self.c, self.n, int(support.sum()),
+                                  self.ebic_gamma)
+            self._last = (key, m)
         return self.cache[key]
+
+    def fit(self, support: np.ndarray, m_init: np.ndarray | None = None) -> np.ndarray:
+        """The unpenalised refit on ``support`` (not cached, see above)."""
+        key = np.packbits(support).tobytes()
+        if self._last is not None and self._last[0] == key:
+            return self._last[1]
+        return self.refit.fit(support, m_init)
+
+    def __call__(self, support: np.ndarray, m_init: np.ndarray | None = None):
+        """``(score, refit)`` of a support."""
+        score = self.score(support, m_init)
+        return score, self.fit(support, m_init)
 
 
 def neighbours(support: np.ndarray, allow_two_cycles: bool = True):
@@ -242,13 +289,15 @@ def greedy_search(sigma_hat, c, n, start: np.ndarray, loss: str = "direct", ebic
         for move, i, j, s in neighbours(cur, allow_two_cycles):
             if move == "add" and allowed_adds is not None and (i, j) not in allowed_adds:
                 continue
-            score, m = sc(s, _warm_start(cur_m, move, i, j) if np.isfinite(cur_score) else None)
+            warm = _warm_start(cur_m, move, i, j) if np.isfinite(cur_score) else None
+            score = sc.score(s, warm)
             if best is None or score < best[0]:
-                best = (score, m, s, (move, i, j))
+                best = (score, s, (move, i, j), warm)
         if best is None or not best[0] < cur_score - 1e-9 * max(1.0, abs(cur_score) if np.isfinite(cur_score) else 1.0):
             break
-        cur_score, cur_m, cur = best[0], best[1], best[2]
-        res.moves.append(best[3])
+        cur_score, cur = best[0], best[1]
+        cur_m = sc.fit(cur, best[3])                 # one refit per accepted move
+        res.moves.append(best[2])
         res.scores.append(cur_score)
     res.support, res.m, res.score, res.evaluations = cur, cur_m, cur_score, sc.evaluations
     return res
@@ -286,5 +335,5 @@ def bic_along_path(sigma_hat, c, n, supports: list[np.ndarray], loss: str = "dir
     sc = scorer or Scorer(sigma_hat, c, n, loss, ebic_gamma)
     p = sigma_hat.shape[0]
     off = ~np.eye(p, dtype=bool)
-    scores = [sc(np.asarray(s, bool) & off)[0] for s in supports]
+    scores = [sc.score(np.asarray(s, bool) & off) for s in supports]
     return int(np.argmin(scores)), scores

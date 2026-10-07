@@ -106,3 +106,32 @@ def test_bic_along_path_picks_the_true_support(cycle):
     supports = [np.zeros((5, 5), bool), truth, OFF5]
     idx, scores = bic_along_path(sigma, C5, 1e4, supports)
     assert idx == 1 and scores[1] < scores[0]
+
+
+def test_a_support_whose_refit_cannot_be_computed_scores_inf_and_the_search_goes_on(monkeypatch):
+    """At p = 20, n = inf one dense random start made LAPACK's SVD fail inside the
+    least-squares fallback (campaign, 5 October).  Such a support must score inf
+    rather than end the task."""
+    import gclm.solvers.search as S
+    m = example2_cycle()
+    sigma = solve_lyapunov(m, C5)
+    truth = (m != 0) & OFF5
+    refit = DirectRefit(sigma, C5)
+
+    def failing_solve(*a, **k):
+        raise np.linalg.LinAlgError("Singular matrix")
+
+    def failing_lstsq(*a, **k):
+        raise np.linalg.LinAlgError("SVD did not converge in Linear Least Squares")
+
+    monkeypatch.setattr(S.np.linalg, "solve", failing_solve)
+    monkeypatch.setattr(S.np.linalg, "lstsq", failing_lstsq)
+    fitted = refit.fit(truth)                               # SciPy's QR driver takes over
+    assert np.all(np.isfinite(fitted)) and np.allclose(fitted, m, atol=1e-5)
+    import scipy.linalg
+    monkeypatch.setattr(scipy.linalg, "lstsq", failing_lstsq)
+    fitted = refit.fit(truth)                               # nothing works: unfittable
+    assert np.all(np.isnan(fitted[truth | np.eye(5, dtype=bool)]))
+    assert bic(fitted, sigma, C5, 1000, int(truth.sum())) == math.inf
+    res = greedy_search(sigma, C5, 1000, truth, scorer=S.Scorer(sigma, C5, 1000))
+    assert np.isinf(res.score) and res.moves == []        # no finite neighbour: it stops
