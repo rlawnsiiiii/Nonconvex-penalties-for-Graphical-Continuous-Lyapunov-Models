@@ -184,6 +184,101 @@ campaign. Details, the list of cells and the commands: campaign note §4 and §5
 
 ---
 
+## 7. Why the rescaled $C$ helps these estimators, and not the lasso
+
+*Numbers: `next_steps/051026/files/why_rescaling_helps.py` (C_ID graphs, $p = 10$: 20 graphs,
+$p = 20$: 8) and the campaign tables (`runs/campaign/campaign_paired.csv`, 800 graphs per cell).*
+
+### 7.1 $C$ is the right-hand side, not a tuning constant
+
+The direct loss is $\tfrac12\|M\hat\Sigma+\hat\Sigma M^\top+C\|_F^2$. The drift matrices that fit
+exactly are the solutions of the linear system
+
+$$M\hat\Sigma+\hat\Sigma M^\top=-C ,$$
+
+an affine space of dimension $p(p-1)/2$ (the design $A(\hat\Sigma)$ has rank $p(p+1)/2$ and
+maps onto the symmetric matrices, so the system is consistent for every $C$). $C$ decides which
+$M$ fit the data at all. Change $C$ and the whole solution set moves.
+
+With the rescaled $C$ the true (standardised) drift matrix $\tilde M$ is in the set: at $n=\infty$
+its misfit is 0. With $C=2I$ it is not: the best fit on the true support misses by 0.8 % of the
+diagonal fit's loss at $p=10$ and 1.8 % at $p=20$ (`misfit` in the script; the table in the
+campaign note §2.2 uses another normalisation and reads 1.4 % at $p=10$).
+
+### 7.2 A diagonal error in $C$ is a dense error in $M$
+
+Let $C$ be wrong by a diagonal $\Delta$. Moving from the true solution set to the wrong one means
+adding to $M$ a solution $X$ of $X\hat\Sigma+\hat\Sigma X^\top=-\Delta$. If $\hat\Sigma$ were
+diagonal, $X$ could be diagonal, and the unpenalised diagonal of $M$ would absorb the error for
+free. It is not. For two nodes with correlation $\rho$ and $\Delta=\mathrm{diag}(\delta,0)$, writing
+$X=\begin{pmatrix}a&b\\c&d\end{pmatrix}$, the three equations are $a+b\rho=-\delta/2$,
+$c\rho+d=0$ and $a\rho+b+c+d\rho=0$, which give
+
+$$b+c=\frac{\rho\,\delta}{2(1-\rho^2)} .$$
+
+An error $\delta$ in $C_{11}$ forces off-diagonal mass of size $\rho\delta/(2(1-\rho^2))$ between
+the two nodes: a false edge, or a changed true one, proportional to the correlation. In general
+the smallest correction is $X=-A(\hat\Sigma)^{+}\mathrm{vec}(\Delta)$, and it is dense.
+
+How large is it here? On standardised C_ID data $\Delta=2I-2\,\mathrm{diag}(1/s_i^2)$ with
+$s_i^2$ the raw stationary variances, which range from 0.3 to 2.1 (10th to 90th percentile at
+$p=10$), so $|\Delta_{ii}|$ has median 1.5: the same order as $C$ itself. Most of it is absorbed by
+the diagonal of $M$; what leaks into the off-diagonal entries is the shift of §7.1: median entry
+0.06 ($p=10$) and 0.03 ($p=20$), largest entry 1.0 and 1.8, against true edge weights with median
+0.7 and 10th percentile 0.16. Small on most entries, as large as the weakest true edges on some,
+larger than a typical true edge on a few.
+
+### 7.3 Where each estimator makes its decision
+
+- **The lasso** takes its best graph in the middle of the path, where the fit is a compromise with
+  sparsity anyway. Only the *order* in which entries enter matters there, and a shift of this size
+  hardly changes the order. In the campaign the lasso path's `max_f1` is unchanged by rescaling
+  at $p=10$ (0.589 against 0.584 at $n=10^3$) and slightly worse at $p=20$ (0.531 against 0.507).
+  Dettling's robustness of the lasso to a misspecified $C$ is this.
+- **The dense-start estimators** (§3–§5) decide at the dense end: they take the lasso solution at
+  the smallest $\lambda$, a point of the solution set, and keep its large entries. That works when
+  the dense end is "truth plus a null-space component", which pruning can strip. With $C=2I$ it is
+  truth plus null-space component plus the shift of §7.2, and the pruning drops weak true edges and
+  keeps shifted false ones. Measured on the dense end (the sizes $|M^0_{ij}|$, which are exactly
+  the adaptive lasso's weights and the dense → sparse paths' start):
+
+  | C_ID, $n=\infty$ | ranking of true edges above non-edges by $\lvert M^0_{ij}\rvert$ (AUC) | true edges whose reversed entry is the larger one |
+  |---|---|---|
+  | $p=10$, $C=2I$ | 0.71 | 22 % |
+  | $p=10$, rescaled $C$ | 0.76 | 14 % |
+  | $p=20$, $C=2I$ | 0.88 | 10 % |
+  | $p=20$, rescaled $C$ | 0.93 | 1 % |
+
+  At $n=10^4$ the same pattern with smaller differences (0.66 → 0.73 and 0.86 → 0.87 in AUC).
+
+### 7.4 Two mechanisms that add, and a graded response
+
+The dense start helps on its own, with $C=2I$, because it avoids the early orientation lock-in of
+the standard path (`next_steps/051026/orientation_lock_in.md`); that has nothing to do with $C$.
+The correct $C$ then makes the dense end informative. Campaign numbers, MCP dense → sparse against
+the lasso with the same $C$, `max_f1`, $p=20$, $n=10^4$:
+
+| true $C$ | gain with $C=2I$ | gain with the rescaled $C$ | extra from rescaling | misfit removed by rescaling |
+|---|---|---|---|---|
+| `C_ID` | +0.077 | +0.154 | +0.077 | 100 % |
+| `C_Random_Min_Diag` | +0.081 | +0.141 | +0.060 | 95 % |
+| `C_Random_Diag` | +0.079 | +0.122 | +0.043 | 40 % |
+| `C_Random_Full` | +0.004 | +0.042 | +0.038 | 30 % |
+
+The extra gain follows how much of the misfit the rescaling removes (misfit figures: campaign note
+§2.2).
+
+### 7.5 A third channel: the score
+
+The BIC refit and the search use the likelihood of $\Sigma(M,C)$. With the wrong $C$ the
+best-scoring graph is a different graph (S3b §9; `next_steps/051026/next_steps_051026.md` §2).
+This is why lasso + search gains from rescaling (0.614 → 0.650 at $p=20$, $n=10^4$) although the
+lasso path does not.
+
+**In one sentence:** with the wrong $C$ the data say that no sparse graph fits; the lasso, which
+never insists on an exact fit, is barely affected, while the estimators that start from an exact
+fit and prune are pruning the wrong object.
+
 ## References
 
 - Fan, J., Xue, L. & Zou, H. (2014). Strong oracle optimality of folded concave penalized

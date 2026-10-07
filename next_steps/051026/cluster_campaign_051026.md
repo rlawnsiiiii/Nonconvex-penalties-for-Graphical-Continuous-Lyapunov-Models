@@ -145,7 +145,9 @@ support at $n = \infty$, relative to the diagonal fit; 0 means the true graph fi
 (The middle column was 0.0077 and 0.1939 in the 3 October note for the two random settings; that
 table scaled the loss differently. The conclusions are the same.)
 
-**My answer: yes, with three caveats.**
+**My answer: yes, with three caveats.** (Why the correct $C$ matters for the dense-start
+estimators in particular, and not for the lasso, is worked out with numbers in
+[`docs/DENSE_START.md`](../../docs/DENSE_START.md) §7, added on 7 October.)
 
 - **It is the correct specification of Dettling's own benchmark.** In that simulation the data
   are generated with $C = 2I$, and the paper calls this the setting in which the fitted $C$ is
@@ -391,7 +393,8 @@ dense, not from the nonconvex penalty. In the independent study it does match (�
    rerunning anything.
 
 Item 1 answers "is the right graph on the path?", items 2 and 3 "does one get it without knowing
-the truth?".
+the truth?". The three are defined side by side, with the refit behind the BIC, in
+[`docs/SEARCH.md`](../../docs/SEARCH.md) §2a.
 
 ### 3.4 The waves
 
@@ -913,4 +916,5 @@ All in [`files/`](files/); run them from the repository root. None of them chang
 | `estimate_c_check.py`, `estimate_c_check.R` | Varando & Hansen's package with four treatments of $C$ (§2.4); needs R with `gclm`; `--markdown` prints the tables of §2.4 | `estimate_c_check.csv` | 30 min |
 | `loglik_order_check.py` | the repository's log-likelihood lasso in both path orders (§2.5) | `loglik_order_check.csv` | 25 min |
 | `time_direct_up.py`, `time_loglik_up.py` | timing pilots for waves 1 and 3 (§3.4) | `time_direct_up.txt`, `time_loglik_up.txt` | 15 min, 1 h |
+| `why_rescaling_helps.py` | why the rescaled $C$ helps the dense-start estimators: misfit of the truth, the dense shift of the solution set, ranking quality of the dense end, under both $C$ (7 October) | printed | 5 min |
 | `summarize_other_c.py` | the first look at the other settings of the true $C$ (§3.7); the run itself is `../031026/files/replicate_dense_to_sparse.py --c C_Random_Diag C_Random_Min_Diag C_Random_Full --reps 5` | `replicate_other_c.csv` | 80 min, stopped before $n = \infty$ finished |

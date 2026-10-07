@@ -1,0 +1,8 @@
+p=10 k=2 C_ID rep=0 C=identity lasso    1.5s  MCP standard    6.9s, dense->sparse   16.9s  SCAD standard   10.0s, dense->sparse   21.4s | max_f1 lasso 0.596, MCP 0.638 -> 0.545, SCAD 0.600 -> 0.622
+p=10 k=2 C_ID rep=0 C=variance lasso    3.1s  MCP standard    7.8s, dense->sparse   29.3s  SCAD standard    9.9s, dense->sparse   31.4s | max_f1 lasso 0.600, MCP 0.778 -> 0.611, SCAD 0.800 -> 0.553
+p=20 k=2 C_ID rep=0 C=identity lasso    4.9s  MCP standard   25.4s, dense->sparse   66.9s  SCAD standard   35.1s, dense->sparse   79.0s | max_f1 lasso 0.560, MCP 0.456 -> 0.682, SCAD 0.526 -> 0.611
+p=20 k=2 C_ID rep=0 C=variance lasso    6.1s  MCP standard   26.2s, dense->sparse   60.0s  SCAD standard   35.9s, dense->sparse   79.4s | max_f1 lasso 0.566, MCP 0.442 -> 0.658, SCAD 0.543 -> 0.625
+p=20 k=4 C_Random_Diag rep=0 C=identity lasso    5.4s  MCP standard   22.9s, dense->sparse   44.0s  SCAD standard   24.4s, dense->sparse   47.0s | max_f1 lasso 0.585, MCP 0.489 -> 0.630, SCAD 0.566 -> 0.648
+p=20 k=4 C_Random_Diag rep=0 C=variance lasso    3.3s  MCP standard   18.1s, dense->sparse   52.1s  SCAD standard   27.3s, dense->sparse   59.8s | max_f1 lasso 0.564, MCP 0.611 -> 0.603, SCAD 0.610 -> 0.581
+p=20 k=1 C_ID rep=1 C=identity lasso    9.1s  MCP standard   14.2s, dense->sparse   78.1s  SCAD standard   18.1s, dense->sparse   82.8s | max_f1 lasso 0.586, MCP 0.379 -> 0.578, SCAD 0.483 -> 0.536
+p=20 k=1 C_ID rep=1 C=variance lasso    5.2s  MCP standard    9.7s, dense->sparse   27.3s  SCAD standard   16.1s, dense->sparse   45.1s | max_f1 lasso 0.557, MCP 0.386 -> 0.642, SCAD 0.519 -> 0.586

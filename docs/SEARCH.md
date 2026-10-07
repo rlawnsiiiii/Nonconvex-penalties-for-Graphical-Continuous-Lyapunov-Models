@@ -38,6 +38,34 @@ diagonal is always free. The edge $i \to j$ is the entry $M_{ji}$.
    - **$n = \infty$** ($\hat\Sigma = \Sigma$ exactly) uses a nominal $n = 10^6$ in the weight. The
      score then prefers exact fits first and fewer edges second: the $\ell_0$ target.
 
+## 2a. From a path to one graph: oracle $\lambda$, BIC, search
+
+A regularisation path gives 100 graphs per dataset, one per $\lambda$. Three ways to turn it into
+one graph are used in the thesis, and the campaign of October 2026 records all three for every
+estimator (`run_s1_shard.py --select search`; campaign note §3.3):
+
+| | how the graph is chosen | uses the truth | column |
+|---|---|---|---|
+| **oracle $\lambda$** | every graph on the path is compared with the true graph; the best $F_1$ is reported | yes | `max_f1` (Dettling's Figure 5; likewise `max_acc`, and `auc` / `aupr`, which summarise the whole path) |
+| **BIC-selected** | every support on the path is refitted as in §2 (least squares on the direct loss) and scored by the BIC; the lowest score wins (`bic_along_path`) | no | `bic_f1` |
+| **after the search** | the BIC-selected graph is the start of the greedy search of §3 | no | `search_f1` |
+
+The oracle value says whether a good graph is *on* the path; the other two say whether one *gets*
+it without the truth. They can disagree: at $p = 10$, $n = 10^3$ the dense → sparse MCP path gains
++0.016 in `max_f1` over the lasso and nothing in `bic_f1`.
+
+**Why refit, and why by least squares.** The estimate at a given $\lambda$ is shrunk by the
+penalty, so its likelihood says little about the *support*. The BIC therefore scores each support
+by the best unpenalised fit on it: $M$ restricted to the support plus the diagonal, minimising the
+direct loss $\tfrac12\|M\hat\Sigma+\hat\Sigma M^\top+C\|_F^2$, which is linear in $M$ and so an
+ordinary least-squares problem (`DirectRefit`). That refit is then plugged into the Gaussian
+log-likelihood of §2. Two consequences: the same selection rule applies to every estimator and
+every loss, so only the paths differ; and the refit maximises the direct loss rather than the
+likelihood, so the score is the likelihood *at the least-squares fit*, not the maximised
+likelihood. At $n = \infty$ with the correct $C$ the two coincide on the true support (both fit
+exactly); at finite $n$ they differ slightly. The `CovRefit` of §2 is the likelihood version and is
+used in S3b for the covariance losses, not in the campaign.
+
 ## 3. The moves and the search
 
 **Neighbourhood** of $S$, as in the paper:
