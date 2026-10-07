@@ -189,3 +189,4 @@ python simulations/diagnostics/campaign.py --check-baseline
 | 061026| bash cluster/submit_campaign.sh --wave 1 --n 1e4| |
 | 071026| bash cluster/submit_campaign.sh --wave 1 --n inf| |
 | 081026| bash cluster/submit_campaign.sh --wave 3| |
+| 081026| bash cluster/submit_campaign.sh --wave 2 --fill --time 24:00:00| |
