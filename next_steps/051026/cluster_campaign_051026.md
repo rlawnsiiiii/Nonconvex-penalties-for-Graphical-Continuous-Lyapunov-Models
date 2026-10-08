@@ -481,6 +481,8 @@ wave 3), plus waiting in the queue.
   version of a subset (`--n inf --only Cresc`, $p = 30, 50$) would add about 250.
 - **Open there:** at $p = 40, 50$ with $n = 1000$ there are more parameters than observations,
   and the dense start rests on a noisy fit. Whether dense → sparse still helps is not known.
+  *Answered on 8 October (S4 §6a): it helps most there; the gap to the lasso grows with $p$ to
+  +0.04 / +0.07 for MCP dense → sparse and +0.08 / +0.13 for the adaptive lasso at $p = 50$.*
 - `cluster/submit_campaign.sh --wave 4 --p <p>`; cells are named `..._p<p>_n1000`.
 
 **Wave 5** *(two checks of the selection step; decided on 7 October, implemented, not yet submitted)*

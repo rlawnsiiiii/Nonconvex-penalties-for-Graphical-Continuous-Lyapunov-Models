@@ -2,10 +2,11 @@ the# S4 — The campaign: every estimator with $C = 2I$ and with the rescaled $C
 
 *Results of the cluster campaign planned in
 [`../next_steps/051026/cluster_campaign_051026.md`](../next_steps/051026/cluster_campaign_051026.md)
-(the plan, the reasons, the code map). Status on 7 October 2026: wave 1 complete, wave 2 complete
-but for one shard, wave 3 (log-likelihood loss) half complete, wave 4 (larger $p$) started; wave 5
-(the BIC with the likelihood refit and the extended BIC inside the search, §5; 100 starting graphs
-for the pure search, §4a) implemented on 7 October and not yet submitted. The sections on waves 3 and 4 are preliminary and marked as such. Numbers:
+(the plan, the reasons, the code map). Status on 8 October 2026: waves 1 to 4 complete (one
+$p = 50$ cell, SCAD dense → sparse with the rescaled $C$, at 350 of 400 graphs, its last shards
+still running); wave 5 (the BIC with the likelihood refit and the extended BIC inside the search,
+§5; 100 starting graphs for the pure search, §4a) submitted on 8 October and running, its first
+cell in (§4a). Numbers:
 `runs/campaign/campaign_{means,paired,per_dataset}.csv` from `simulations/diagnostics/campaign.py`;
 figures: `simulations/diagnostics/plot_campaign.py` → `runs/campaign/figures/`.*
 
@@ -21,12 +22,15 @@ settings of the true $C$), the answer is:
    SCAD by 0.03 to 0.07 with $C = 2I$; the gap grows with $n$. (As in S2 and S2b.)
 2. **Started from the dense lasso solution and pruned, yes.** MCP and SCAD run dense → sparse beat
    the lasso in every cell except one tie, by up to +0.146 at $p = 20$, $n = \infty$ with the rescaled
-   $C$ and +0.086 with $C = 2I$. The gain grows with $p$ and with $n$.
+   $C$ and +0.086 with $C = 2I$. The gain grows with $p$ and with $n$: at $n = 10^3$ it rises from
+   about zero at $p = 10$ to +0.044 ($C = 2I$) and +0.065 (rescaled $C$) for MCP at $p = 50$ (§6a).
 3. **The gain does not need the nonconvex penalty.** The adaptive lasso, which starts from the same
    dense solution and prunes with a convex step, matches MCP dense → sparse in `max_f1` (differences
    of 0.00 to 0.045, in its favour) and is better on everything else: `aupr` by +0.08 to +0.14, the
-   BIC-selected graph by +0.02 to +0.08. The message is "start from the lasso, then prune"; MCP and
-   SCAD are one way to do it, the adaptive lasso the best of the ways tried.
+   BIC-selected graph by +0.02 to +0.08. Over $p$ at $n = 10^3$ its `max_f1` hardly falls (0.58 at
+   $p = 10$, 0.55 to 0.57 at $p = 50$) while the lasso's falls from 0.59 to 0.43 to 0.47, so the gap
+   reaches +0.08 ($C = 2I$) and +0.13 (rescaled $C$) at $p = 50$. The message is "start from the lasso,
+   then prune"; MCP and SCAD are one way to do it, the adaptive lasso the best of the ways tried.
 4. **The gain holds for every diagonal true $C$,** known or not: `C_ID`, `C_Random_Min_Diag` and
    `C_Random_Diag` show gains of the same size. For the non-diagonal `C_Random_Full` there is none
    at $p = 10$ and a small one at $p = 20$.
@@ -39,10 +43,41 @@ settings of the true $C$), the answer is:
    each other, the adaptive lasso on top. The greedy search from random starts is 0.02 to 0.07
    worse; the greedy search from the truth is 0.10 to 0.24 better, so most of the remaining gap is in the
    search, not in the paths.
-7. **Preliminary, wave 3:** on the log-likelihood loss MCP dense → sparse does *not* beat the lasso
-   at finite $n$ (−0.05 to −0.07 with $C = 2I$, 0.00 and −0.04 with the rescaled $C$), only at
-   $n = \infty$ with the rescaled $C$ (+0.02). Its dense start is the exact fit $-\tfrac12 C\hat\Sigma^{-1}$,
-   not the lasso's dense end; see §6 for why that may be the difference.
+7. **On the log-likelihood loss (wave 3, complete)** MCP dense → sparse does *not* beat the lasso
+   at finite $n$ (−0.05 to −0.07 with $C = 2I$, −0.00 and −0.03 with the rescaled $C$), only at
+   $n = \infty$ with the rescaled $C$ (+0.025); its `aupr` is better with the rescaled $C$ (+0.06 to
+   +0.14). Its dense start is the exact fit $-\tfrac12 C\hat\Sigma^{-1}$, not the lasso's dense end;
+   §6 for why that is probably the difference. The log-likelihood lasso matches the direct-loss
+   lasso; the best estimators on either loss are the direct-loss dense-start ones.
+8. **At large $p$ the plain BIC over-selects badly,** and more so with the rescaled $C$: at $p = 50$,
+   $n = 10^3$ the lasso's BIC-selected graph has 313 ($C = 2I$) and 610 (rescaled $C$) edges for 123
+   true ones, the adaptive lasso's 161 and 301. The BIC-selected $F_1$ therefore falls with $p$ for
+   every estimator, fastest with the rescaled $C$, and the ranking (adaptive lasso, then MCP / SCAD
+   dense → sparse, then the lasso, then the standard paths) stays. Dettling's extended BIC with
+   $\gamma = 1$ halves the excess and is the better rule from $p = 25$ on (§6a).
+9. **More starting graphs do not rescue the pure search** (wave 5b, first cell: $p = 10$, rescaled
+   $C$, $n = 10^3$): 100 sparse starting graphs instead of 10 raise its $F_1$ by +0.011, to 0.486,
+   still 0.025 below the lasso + search and 0.04 below the adaptive lasso + search on the same
+   graphs (§4a).
+
+**The two headline figures.** Over $p$ at Figure 5's sample size, and over $n$ at $p = 10, 20$:
+
+![](../runs/campaign/figures/by_p.png)
+
+![](../runs/campaign/figures/twobytwo_max_f1.png)
+
+**Figure index** (all in `../runs/campaign/figures/`, drawn on 8 October from the complete data by
+`simulations/diagnostics/plot_campaign.py`; the numbers are in the CSVs next to them):
+
+| figure | what | section | data behind it |
+|---|---|---|---|
+| `by_p`, `gain_by_p` | the six estimators over $p = 10 \dots 50$ at $n = 10^3$, both $C$; and as paired gains over the lasso | §6a | final (one $p = 50$ cell at 350 of 400 graphs) |
+| `twobytwo_max_f1`, `_aupr`, `_bic_f1`, `_search_f1` | the 2 × 2 over $n$ at $p = 10, 20$ | §2, §5 | final |
+| `by_true_c_max_f1`, `_bic_f1`, `_search_f1` | the gains per setting of the true $C$ | §3 | final |
+| `selection_p20`, `orientation_p20` | oracle $\lambda$ against BIC against search; what the selected graphs consist of | §4, §5 | final |
+| `search_ceilings` | the search from the estimators' graphs, from random starts and from the truth | §5 | final (wave 2 complete) |
+| `loglik_p10` | the log-likelihood loss | §6 | final (wave 3 complete) |
+| `restarts` | the pure search with 100 starting graphs | §4a | preliminary (1 of 6 cells) |
 
 Against the expectations written down before the run (campaign note §3.5): five of seven held,
 one was too cautious (`C_Random_Diag` gains as much as `C_ID`) and one was wrong in size (the
@@ -250,6 +285,18 @@ size; the graph every start ends at is stored, so `simulations/diagnostics/resta
 $F_1$ of the best of the first $r$ starts for every $r \le 100$ from one run. A smaller version at
 $p = 20$ (30 starts on 5 replicates, `search30s_p20_Cresc`) costs 50 to 100 CPU-h.
 
+![](../runs/campaign/figures/restarts.png)
+
+**First result (8 October; `search100s_p10_Cresc_n1000`, 400 graphs, 9.5 CPU-h).** The $F_1$ of
+the best of the first $r$ random starts plus the empty graph rises from 0.43 at $r = 1$ to 0.475 at
+$r = 10$ (the wave 2 value), 0.481 at $r = 50$ and 0.486 at $r = 100$; without the empty graph it
+is 0.40 at $r = 1$ and the same 0.486 at $r = 100$. The *score* has still not saturated (the best
+of 100 is reached within the first 10 starts for 27 % of the graphs, within 50 for 65 %), but the
+$F_1$ gains have: +0.011 from 10 to 100 starts, +0.005 from 50 to 100. The lasso + search ends at
+0.511 and the adaptive lasso + search at 0.527 on the same graphs, so with ten times the starts the
+pure search closes a third of its gap to the lasso-based starts and none of the gap to the truth
+(0.695). The other five cells (uniform starts, $n = 10^4, \infty$) are running.
+
 **A start can be dead.** With the rescaled $C$ the least-squares refit of a very sparse support is
 not always stable (`docs/SEARCH.md` §2a): the empty graph then has BIC $= +\infty$ and the search
 cannot leave it. In wave 2 this is so for 6 to 7 % of the graphs at $p = 10$ and 24 to 25 % at
@@ -326,23 +373,32 @@ select and search once more per $\gamma$ on the same path, next to the plain BIC
 `searche1_p10_C2I`, `searche1_p10_Cresc`, `searche1_p20_Cresc` repeat wave 2 with $\gamma = 1$;
 the form is Dettling's $4\gamma|E|\log p$ throughout (`docs/SEARCH.md` §2).
 
-## 6. Preliminary: the log-likelihood loss (wave 3, $p = 10$)
+## 6. The log-likelihood loss (wave 3, $p = 10$, complete)
 
 ![](../runs/campaign/figures/loglik_p10.png)
 
-*The rescaled-$C$ cells are at 200 to 300 of 400 graphs; the figure will be redrawn when they are
-complete.*
+*The log-likelihood loss, $p = 10$, 400 graphs per cell: lasso and MCP in both path orders, both
+$C$, $F_1$ at the oracle $\lambda$.*
 
-| MCP dense → sparse − lasso, log-likelihood loss, `max_f1` | $n = 10^3$ | $10^4$ | $\infty$ |
+| paired difference to the log-likelihood lasso, same $C$ ($z$) | $n = 10^3$ | $10^4$ | $\infty$ |
 |---|---|---|---|
-| $C = 2I$ (400 graphs) | −0.052 (−8) | −0.068 (−9) | −0.018 (−3) |
-| rescaled $C$ (300 / 250 / 200 graphs) | 0.000 (0) | −0.036 (−4) | +0.024 (+3) |
+| MCP dense → sparse, `max_f1`, $C = 2I$ | −0.052 (−8) | −0.068 (−9) | −0.018 (−3) |
+| MCP dense → sparse, `max_f1`, rescaled $C$ | −0.004 (−1) | −0.028 (−4) | **+0.025 (+4)** |
+| MCP dense → sparse, `aupr`, $C = 2I$ | −0.054 (−8) | −0.062 (−7) | +0.007 (+1) |
+| MCP dense → sparse, `aupr`, rescaled $C$ | **+0.059 (+9)** | **+0.062 (+8)** | **+0.135 (+18)** |
+| MCP dense → sparse, `bic_f1`, $C = 2I$ / rescaled $C$ | −0.100 / −0.035 | −0.106 / −0.062 | −0.012 / +0.009 |
+| lasso dense → sparse, `max_f1`, $C = 2I$ / rescaled $C$ | +0.003 / +0.019 | +0.004 / +0.008 | +0.002 / +0.008 |
+| lasso dense → sparse, `aupr`, $C = 2I$ / rescaled $C$ | +0.018 / +0.065 | +0.022 / +0.069 | +0.021 / +0.074 |
+| MCP standard path, `max_f1`, $C = 2I$ / rescaled $C$ | −0.108 / −0.121 | −0.121 / −0.147 | −0.139 / −0.161 |
 
-On this loss the dense → sparse MCP path does not beat the lasso at finite $n$. Two things are
-different from the direct loss, and the second is probably the reason:
+On this loss the dense → sparse MCP path does not beat the lasso in `max_f1` at finite $n$; only at
+$n = \infty$ with the rescaled $C$ does it (+0.025), and in `aupr` it is better with the rescaled $C$
+at every $n$ (its path ranks the entries better, but its best single graph is not better). The
+standard MCP path loses here as on the direct loss, by 0.11 to 0.16. Two things differ from the
+direct loss, and the second is probably the reason for the missing gain:
 
-- the lasso's own order matters little here (dense → sparse +0.00 to +0.02 over sparse → dense),
-  so the lasso is not the problem;
+- the lasso's own order matters little here (dense → sparse +0.00 to +0.02 in `max_f1`, +0.02 to
+  +0.07 in `aupr` over sparse → dense), so the lasso is not the problem;
 - **the dense start is a different one.** For the covariance losses `covloss_path(direction="up")`
   starts from the exact fit $-\tfrac12 C\hat\Sigma^{-1}$, as Varando & Hansen do: a fully dense matrix
   with no preference for sparsity. The direct-loss dense → sparse path starts from the *lasso's*
@@ -350,8 +406,76 @@ different from the direct loss, and the second is probably the reason:
   The natural next cell is the log-likelihood MCP path started from the log-likelihood lasso's dense
   end; it needs one option in `covloss_path` and about 60 CPU-h.
 
-The standard MCP path loses here as on the direct loss (−0.11 to −0.14). All log-likelihood fits
-are machine-dependent for single graphs (S2b §2); only the means are meaningful.
+**Across the two losses.** The log-likelihood lasso and the direct-loss lasso are within 0.01 of
+each other in `max_f1` at every $n$ and $C$ (0.60 / 0.63 / 0.65 against 0.59 / 0.63 / 0.64 with
+$C = 2I$). The best estimators overall are the direct-loss dense-start ones: at $n = 10^4$ with the
+rescaled $C$ the direct-loss MCP dense → sparse reaches 0.673 and the adaptive lasso 0.666, against
+0.638 for the best log-likelihood estimator (the lasso dense → sparse) and 0.602 for the
+log-likelihood MCP dense → sparse. The thesis can therefore stay with the direct loss. All
+log-likelihood fits are machine-dependent for single graphs (S2b §2); only the means are meaningful.
+
+## 6a. Over $p$: the thesis figure (wave 4 with wave 1, $n = 10^3$)
+
+![](../runs/campaign/figures/by_p.png)
+
+*Figure 5's setting, $n = 10^3$, 800 graphs per cell at $p = 10, 20$ and 400 at $p = 15, 25, 30, 40,
+50$ (the SCAD dense → sparse cell with the rescaled $C$ at $p = 50$: 350). Rows: $F_1$ at the oracle
+$\lambda$, area under the precision–recall curve, $F_1$ of the BIC-selected graph.*
+
+![](../runs/campaign/figures/gain_by_p.png)
+
+*The same as paired differences to the lasso with the same $C$; error bars are one standard error
+of the paired difference.*
+
+| `max_f1` − lasso, same $C$ | $p = 10$ | 15 | 20 | 25 | 30 | 40 | 50 |
+|---|---|---|---|---|---|---|---|
+| MCP dense → sparse, $C = 2I$ | −0.009 | +0.002 | +0.018 | +0.022 | +0.028 | +0.043 | +0.044 |
+| MCP dense → sparse, rescaled $C$ | +0.016 | +0.040 | +0.056 | +0.060 | +0.064 | +0.067 | +0.065 |
+| SCAD dense → sparse, $C = 2I$ / rescaled $C$ | −0.005 / +0.021 | +0.003 / +0.030 | +0.011 / +0.038 | +0.012 / +0.035 | +0.010 / +0.033 | +0.019 / +0.032 | +0.017 / +0.025 |
+| adaptive lasso, $C = 2I$ | −0.007 | +0.017 | +0.027 | +0.045 | +0.053 | +0.070 | +0.078 |
+| adaptive lasso, rescaled $C$ | +0.020 | +0.055 | +0.080 | +0.094 | +0.102 | +0.124 | +0.133 |
+| MCP standard, $C = 2I$ / rescaled $C$ | −0.096 / −0.074 | −0.083 / −0.061 | −0.076 / −0.043 | −0.058 / −0.027 | −0.052 / −0.014 | −0.038 / −0.004 | −0.028 / +0.006 |
+| SCAD standard, $C = 2I$ / rescaled $C$ | −0.053 / −0.034 | −0.036 / −0.009 | −0.031 / +0.002 | −0.024 / +0.007 | −0.019 / +0.009 | −0.013 / +0.012 | −0.008 / +0.011 |
+
+Every entry beyond ±0.01 has $|z| \ge 3$; the adaptive lasso's and MCP dense → sparse's gains have
+$z$ from 4 at $p = 20$ to 18 to 34 at $p = 50$.
+
+- **The gap opens with $p$ because the lasso deteriorates and the dense-start estimators hardly
+  do.** The lasso's `max_f1` falls from 0.59 at $p = 10$ to 0.47 ($C = 2I$) and 0.43 (rescaled $C$)
+  at $p = 50$; the adaptive lasso's from 0.58 / 0.60 to 0.55 / 0.57; MCP dense → sparse's from 0.58 /
+  0.60 to 0.52 / 0.50. The `aupr` says the same more strongly: the adaptive lasso's is +0.14 and
+  +0.22 above the lasso's at $p = 50$.
+- **The standard paths "catch up" only because the lasso comes down to them.** Their `max_f1`
+  is nearly constant in $p$ (MCP 0.49 → 0.44), so the deficit shrinks from −0.10 to −0.03 with
+  $C = 2I$ and turns into a tie with the rescaled $C$; they never beat the dense-start paths.
+- **The rescaled $C$ helps the dense-start estimators and hurts the lasso at large $p$.** With it
+  the adaptive lasso is better than with $C = 2I$ at every $p$ (0.566 against 0.549 at $p = 50$), the
+  lasso worse (0.433 against 0.471). This is the mechanism of `docs/DENSE_START.md` §7: the
+  correctly specified $C$ improves the ranking at the dense end, which only the dense-start
+  estimators use.
+- **$p > n$ is no obstacle.** At $p = 40$ and $50$ the drift matrix has 1 600 and 2 500 free entries
+  against $n = 10^3$ observations, the dense start is a least-squares fit on a rank-deficient design,
+  and the gains are the largest of the sweep.
+- **The plain BIC over-selects at large $p$, badly, and worst with the rescaled $C$.** Mean edges of
+  the BIC-selected graph against the true number:
+
+| $n = 10^3$, edges | $p = 10$ (23 true) | 20 (47) | 30 (73) | 40 (98) | 50 (123) |
+|---|---|---|---|---|---|
+| lasso, BIC, $C = 2I$ / rescaled $C$ | 24 / 27 | 71 / 95 | 129 / 205 | 216 / 384 | 313 / 610 |
+| adaptive lasso, BIC | 18 / 19 | 47 / 57 | 81 / 111 | 120 / 188 | 161 / 301 |
+| MCP dense → sparse, BIC | 18 / 19 | 50 / 62 | 88 / 128 | 134 / 227 | 183 / 365 |
+| lasso, eBIC $\gamma = 1$ | 20 / 23 | 53 / 80 | 92 / 155 | 129 / 282 | 164 / 440 |
+| adaptive lasso, eBIC $\gamma = 1$ | 14 / 16 | 33 / 42 | 51 / 79 | 70 / 135 | 89 / 203 |
+
+  The BIC-selected $F_1$ therefore falls with $p$ for every estimator (lasso 0.51 → 0.40 with
+  $C = 2I$, 0.51 → 0.28 with the rescaled $C$), and the dense-start estimators, which select fewer
+  edges to begin with, keep their lead: +0.06 (MCP dense → sparse) and +0.10 to +0.12 (adaptive
+  lasso) at $p = 50$. Dettling's extended BIC with $\gamma = 1$ halves the excess edges and gives a
+  higher $F_1$ than the plain BIC for every estimator from $p = 25$ on (lasso 0.405 against 0.397 at
+  $p = 50$ with $C = 2I$, 0.311 against 0.279 with the rescaled $C$; adaptive lasso 0.506 against
+  0.492 and 0.444 against 0.395), without changing the ranking. Why the rescaled $C$ makes the
+  plain BIC select more edges is not worked out; the extended term inside the search (wave 5c) is
+  the pragmatic answer.
 
 ## 7. Expectations against outcome
 
@@ -365,7 +489,8 @@ Written down before the run (campaign note §3.5):
 | 4. standard paths lose with either $C$, MCP clearly, SCAD slightly | held; SCAD ties with the rescaled $C$ at $p = 20$ |
 | 5. LLA and the adaptive lasso match dense → sparse in `max_f1`; the adaptive lasso better in `aupr` | adaptive lasso: held, and better on every data-driven metric too; LLA: held at $p = 10$, **−0.03 at $p = 20$** |
 | 6. BIC keeps the order with smaller gains at $n = 10^3$; the search adds +0.01 to +0.03 with the rescaled $C$, nothing with $C = 2I$ | first half held; the search adds **+0.09 to +0.14 to the lasso** at $p = 20$ and less to the others, with either $C$ (more with the rescaled one) |
-| 7. log-likelihood: open | preliminary: dense → sparse does not beat the lasso at finite $n$ on this loss (§6) |
+| 7. log-likelihood: open | dense → sparse MCP does not beat the lasso in `max_f1` at finite $n$ on this loss, does in `aupr` with the rescaled $C$ and in `max_f1` at $n = \infty$ (§6) |
+| 8. larger $p$ (campaign note §3.4, wave 4): "whether dense → sparse still helps at $p = 40, 50$ with $n = 1000$ is not known" | it helps most there: the gap to the lasso grows monotonically with $p$, to +0.04 / +0.07 (MCP dense → sparse) and +0.08 / +0.13 (adaptive lasso) at $p = 50$ (§6a); the plain BIC over-selects badly at large $p$ |
 
 The reading rules of §3.6 of the note: the claim "MCP / SCAD dense → sparse beat the lasso when $C$
 is specified correctly" stands ($z$ 6 to 30 for `C_ID` at $n \ge 10^4$, both $p$); it extends to a
@@ -393,6 +518,6 @@ adaptive lasso does at least as well. $C$ is the bottleneck only when it is not 
 | `runs/campaign/campaign_per_dataset.csv` | one row per graph and estimator: path metrics, BIC / eBIC / search graphs with their orientation breakdown |
 | `runs/campaign/campaign_means.csv`, `campaign_paired.csv` | the tables of this write-up |
 | `runs/campaign/campaign_baseline_check.txt` | the reproduction of the n-sweep cells |
-| `runs/campaign/figures/` | the figures above and `twobytwo_{bic_f1,search_f1,aupr}`, `by_true_c_bic_f1` |
+| `runs/campaign/figures/` | the figures above and `twobytwo_{bic_f1,search_f1,aupr}`, `by_true_c_bic_f1`; `by_p`, `gain_by_p` (§6a), `restarts` (§4a) |
 | `simulations/diagnostics/campaign.py`, `plot_campaign.py` | tables and figures |
 | `simulations/diagnostics/restarts.py` → `runs/campaign/campaign_restarts.csv` | the best of the first $r$ randomly drawn starting graphs of the pure search, for every $r$ (wave 2: scores only; wave 5b: also $F_1$) |
