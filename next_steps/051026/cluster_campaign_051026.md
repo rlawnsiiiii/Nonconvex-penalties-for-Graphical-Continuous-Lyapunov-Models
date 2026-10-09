@@ -531,6 +531,22 @@ wave 3), plus waiting in the queue.
   CPU-h); the rest of (a), and the $p = 20$ cell, if those show something. Block 11 of
   `cluster_commands_051026.md`.
 
+**Wave 6** *(9 October; the extended BIC as the rule everywhere)*
+
+- Wave 5c showed that the extended term inside the selection and the search adds about +0.02 at
+  $p = 20$ for every estimator (S4 §5). To draw every figure of S4 under that rule, every wave 1
+  cell is **rescored** rather than rerun: `simulations/rescore_shard.py` reads the stored supports
+  of a cell's paths, rebuilds each data set from its seed (and checks the recomputed plain BIC
+  against the stored one), and runs the selection and the search once more with $\gamma = 1$. No
+  path is recomputed, so a cell costs its search part only: about 50 CPU-h per sample size for the
+  16 cells, against 200 for wave 1. Cells `rescore1_<source cell>_n<n>`, one task per source
+  shard; `campaign.py` overlays them on the source rows (`ebic1_search_*`), and
+  `plot_campaign.py --rule ebic1` writes the figures into `runs/campaign/figures_ebic1/`.
+- **300 starting graphs** for the pure search (`search300s_p10_Cresc`, wave 5b), because the
+  100-start curve was still rising at $n \ge 10^4$ (S4 §4a): about 40 CPU-h per sample size.
+- The $p = 20$ pure search with the term inside (`searche1_p20_Cresc`, about 100 CPU-h).
+- `cluster/plan_091026.txt` holds the order; block 13 of the command sheet.
+
 **Later, not in this campaign**
 
 - **A diagonal $C$ that is estimated** (§2.4, §2.5).
@@ -956,6 +972,8 @@ repairs) as the queue has room, so nobody has to watch `squeue`; block 12 of
 | wave 5b at $p = 20$ (optional) | 32 | 50 – 100 | 2 to 3 hours |
 | wave 5c, paths with three scores, one sample size | 64 | about 190 | 2 to 4 hours |
 | wave 5c, pure search with $\gamma = 1$, three sample sizes | 60 | about 170 | 2 to 4 hours |
+| wave 6, rescoring of wave 1, one sample size | 128 | about 50 | 1 to 2 hours |
+| wave 5b, 300 starting graphs, three sample sizes | 48 | about 120 | 2 to 3 hours |
 
 So the first results (wave 1 at $n = 1000$) are back a few hours after block 5, and everything
 within about a day if the rounds follow each other.

@@ -58,14 +58,17 @@ CELL = re.compile(r"^(?P<loss>direct|loglik|frobenius)_(?P<estimator>[A-Za-z-]+)
 #: wave 2 cells (search_p10_Cresc) and the restart cells of wave 5 (search100s_p10_Cresc:
 #: 100 sparse starts; search100u_...: 100 uniform starts; searche1_...: the extended BIC with
 #: gamma = 1 in the score); the variant becomes part of the estimator label ("search-pure-100s")
+#: wave 6: a source cell rescored with the extended term inside the selection and the search
+#: (simulations/rescore_shard.py); its shards overlay the source cell's rows, matched by file name
+RESCORE_CELL = re.compile(r"^rescore(?P<gamma>[0-9]+)_(?P<source>.+)$")
 SEARCH_CELL = re.compile(r"^search(?P<variant>[0-9a-z]+)?_p(?P<p>[0-9]+)_(?P<c>C2I|Cresc)_n(?P<n>[0-9e]+|inf)$")
 PATH_METRICS = ("max_f1", "aupr", "auc", "max_acc")
 #: Dettling's extended BIC (his eq. 6.2): BIC + 4 gamma |E| log p, for these gammas.  Computed
 #: offline from the stored BIC of every support of the path; column prefix "ebic<gamma>"
 EBIC_GAMMAS = (0.5, 1.0)
 #: the columns reported in the tables: path metrics, then the data-driven graphs
-REPORT = ("max_f1", "aupr", "auc", "bic_f1", "ebic1_f1", "search_f1", "ebic1_search_f1",
-          "bic_skeleton_f1", "search_skeleton_f1")
+REPORT = ("max_f1", "aupr", "auc", "bic_f1", "ebic05_f1", "ebic1_f1", "search_f1", "ebic1_search_f1",
+          "bic_skeleton_f1", "ebic1_skeleton_f1", "search_skeleton_f1", "ebic1_search_skeleton_f1")
 ID = ("p", "k", "c_choice", "rep")
 #: the order of the estimators in the tables: reference first, then the standard
 #: paths, then the three that start from the lasso, then the same with the
@@ -118,13 +121,20 @@ def ebic_selection(d, i: int, gamma: float) -> dict:
             f"{tag}_edges": int(support.sum()), f"{tag}_index": idx}
 
 
-def load_estimator_cell(folder: Path, meta: dict) -> list[dict]:
-    """One row per graph of a ``run_s1_shard.py`` cell."""
+def load_estimator_cell(folder: Path, meta: dict, rescored: dict | None = None) -> list[dict]:
+    """One row per graph of a ``run_s1_shard.py`` cell.  ``rescored`` maps a shard file name
+    to a rescoring of it (wave 6); its ``ebic<gamma>_search_*`` fields are overlaid."""
     rows = []
     for f in sorted((folder / "shards").glob("shard_*.npz")):
         d = np.load(f, allow_pickle=True)
         names = [str(x) for x in d["c_choice_names"]]
         has_bic, has_search = "bic_index" in d.files, "search_conf" in d.files
+        extra = None
+        if rescored and f.name in rescored:
+            extra = np.load(rescored[f.name], allow_pickle=True)
+            for key in ID:
+                if not np.array_equal(extra[key], d[key]):
+                    raise ValueError(f"{rescored[f.name]} does not line up with {f}")
         for i in range(len(d["p"])):
             m = metrics_from_counts(d["conf_offdiag"][i])
             row = {**meta, "p": int(d["p"][i]), "k": int(d["k"][i]),
@@ -137,10 +147,12 @@ def load_estimator_cell(folder: Path, meta: dict) -> list[dict]:
                 for gamma in EBIC_GAMMAS:
                     row.update(ebic_selection(d, i, gamma))
                     tag = f"ebic{gamma:g}".replace(".", "")
-                    if f"{tag}_search_conf" in d.files:      # wave 5c: searched with that score
-                        row.update(graph_metrics(d[f"{tag}_search_conf"][i],
-                                                 d[f"{tag}_search_orient"][i], f"{tag}_search"))
-                        row[f"{tag}_search_moves"] = int(d[f"{tag}_search_moves"][i].sum())
+                    src = d if f"{tag}_search_conf" in d.files else \
+                        extra if extra is not None and f"{tag}_search_conf" in extra.files else None
+                    if src is not None:                      # wave 5c or a wave 6 rescoring
+                        row.update(graph_metrics(src[f"{tag}_search_conf"][i],
+                                                 src[f"{tag}_search_orient"][i], f"{tag}_search"))
+                        row[f"{tag}_search_moves"] = int(src[f"{tag}_search_moves"][i].sum())
             if has_search:
                 row.update(graph_metrics(d["search_conf"][i], d["search_orient"][i], "search"))
                 row["search_moves"] = int(d["search_moves"][i].sum())
@@ -178,11 +190,19 @@ def load_search_cell(folder: Path, meta: dict, variant: str = "") -> list[dict]:
 def load(root: Path) -> list[dict]:
     """All rows of all cells under ``root``; cells without shards are skipped."""
     rows = []
+    rescored: dict[str, dict[str, Path]] = {}
     for folder in sorted(p for p in root.iterdir() if p.is_dir()):
+        r = RESCORE_CELL.match(folder.name)
+        if r and (folder / "shards").is_dir():
+            for f in (folder / "shards").glob("shard_*.npz"):
+                rescored.setdefault(r["source"], {})[f.name] = f
+    for folder in sorted(p for p in root.iterdir() if p.is_dir()):
+        if RESCORE_CELL.match(folder.name):
+            continue
         m, s = CELL.match(folder.name), SEARCH_CELL.match(folder.name)
         if m:
             meta = {k: v for k, v in m.groupdict().items() if k != "p_label"}
-            rows += load_estimator_cell(folder, {"cell": folder.name, **meta})
+            rows += load_estimator_cell(folder, {"cell": folder.name, **meta}, rescored.get(folder.name))
         elif s:
             rows += load_search_cell(folder, {"cell": folder.name, "loss": "direct",
                                               "c": s["c"], "n": s["n"]}, s["variant"] or "")

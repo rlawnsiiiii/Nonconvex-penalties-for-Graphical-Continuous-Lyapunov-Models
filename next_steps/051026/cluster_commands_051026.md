@@ -339,11 +339,37 @@ pkill -f feed_queue.sh                                       # stop it
   `sbatch` accepted nothing.
 - A login-node session ends when you log out unless the job runs under `nohup` (as above),
   `screen` or `tmux`; with `nohup` it survives the logout.
+- **`pkill` and `pgrep` see only the login node you are on** (cm4login1, cm4login2, ...). Before
+  starting a feeder, make sure none runs on another node: `ssh cm4login1 pgrep -fl feed_queue.sh`
+  and the same for cm4login2. Two feeders on one plan write every log line twice and would submit
+  a fill twice (9 October).
 - The log contains one row per submission in the format of the submission log below; copy them
   there. `rsync` it to the laptop with the results (block 9):
   `rsync -av ge47xod3@cool.hpc.lrz.de:repo/logs/feed_queue.log logs/lrz/`.
 - Expect the whole plan to take two to three days of queueing; `--status` of each wave still
   works at any time.
+
+## 13. LRZ: the extended BIC everywhere (wave 6) and 300 starting graphs, 9 October
+
+Wave 6 rescores every wave 1 cell with the extended term inside the selection and the search,
+from the stored supports (no path is recomputed; `simulations/rescore_shard.py`), so that every
+figure can be drawn under that rule; the plan also adds 300 starting graphs for the pure search
+and the $p = 20$ pure search with the term. The plan file `cluster/plan_091026.txt` has the order;
+on the cluster, after `git pull` and once no feeder is running on any login node (block 12):
+
+```bash
+nohup bash cluster/feed_queue.sh cluster/plan_091026.txt > logs/feed.out 2>&1 &
+sleep 5 && tail -3 logs/feed_queue.log
+```
+
+- 128 tasks per sample size for wave 6 (one per source shard; about 50 CPU-h), 48 for the
+  300-start cells, 16 for the $p = 20$ pure search. About 400 CPU-h in all, a day of queueing.
+- On the laptop afterwards: the `rsync` lines of block 9, then
+  `python simulations/diagnostics/campaign.py`, `python3 simulations/diagnostics/plot_campaign.py`
+  (the plain-BIC figures, including `bic_vs_ebic`) and
+  `python3 simulations/diagnostics/plot_campaign.py --rule ebic1` (every rule-dependent figure
+  with the extended BIC as the rule, into `runs/campaign/figures_ebic1/`), and
+  `python simulations/diagnostics/restarts.py` for the 300-start curves.
 
 ---
 
@@ -360,6 +386,8 @@ pkill -f feed_queue.sh                                       # stop it
 | wave 5b at $p = 20$ (optional) | 32 | 50 – 100 | 2 to 3 hours |
 | wave 5c, paths with three scores, one sample size | 64 | about 190 | 2 to 4 hours |
 | wave 5c, pure search with $\gamma = 1$, three sample sizes | 60 | about 170 | 2 to 4 hours |
+| wave 6, rescoring of wave 1, one sample size | 128 | about 50 | 1 to 2 hours |
+| wave 5b, 300 starting graphs, three sample sizes | 48 | about 120 | 2 to 3 hours |
 
 - Each task takes about 1 to 3 hours (limit 12 h; wave 3: 24 h).
 - The first results (wave 1 at $n = 1000$) are back a few hours after block 5.

@@ -37,7 +37,12 @@
 #               inside the selection and the search, next to the plain BIC on the same
 #               path (--ebic-gamma), for lasso / MCP-up / adaptive, p = 10 and 20, both C:
 #               cells direct_<estimator>-ebic_<C>; and the pure search scored with
-#               gamma = 1: searche1_p10_C2I, searche1_p10_Cresc, searche1_p20_Cresc.
+#               gamma = 1: searche1_p10_C2I, searche1_p10_Cresc, searche1_p20_Cresc;
+#           and (9 October) 300 sparse starting graphs at p = 10: search300s_p10_Cresc.
+#   wave 6  (9 October) every wave 1 cell rescored with the extended BIC (gamma = 1)
+#           inside the selection and the search, from its stored supports: no path is
+#           recomputed (simulations/rescore_shard.py).  Cells rescore1_<source cell>, the
+#           source's shard count; campaign.py overlays them on the source cell's rows.
 #
 # From ~/repo on the login node (nothing needs to be activated first):
 #     bash cluster/submit_campaign.sh --wave 1 --list            # the cells of a wave
@@ -149,6 +154,7 @@ cells() {
       echo "search100s_p10_Cresc|5s10r|$run|8|12:00:00|--p 10 --reps 25 --c-scale variance --methods pure --restarts 100 --starts sparse"
       echo "search100u_p10_Cresc|5u10r|$run|8|12:00:00|--p 10 --reps 25 --c-scale variance --methods pure --restarts 100 --starts uniform"
       echo "search30s_p20_Cresc|5s20r|$run|32|24:00:00|--p 20 --reps 5 --c-scale variance --methods pure --restarts 30 --starts sparse"
+      echo "search300s_p10_Cresc|5t10r|$run|16|12:00:00|--p 10 --reps 25 --c-scale variance --methods pure --restarts 300 --starts sparse"
       run=simulations/run_s1_shard.py
       s5c="--p 10 20 --reps 25 --select search --ebic-gamma 0.5 1"
       for c in C2I Cresc; do
@@ -161,7 +167,21 @@ cells() {
       echo "searche1_p10_C2I|5e10i|$run|2|12:00:00|--p 10 --reps 25 --c-scale identity --ebic-gamma 1"
       echo "searche1_p10_Cresc|5e10r|$run|2|12:00:00|--p 10 --reps 25 --c-scale variance --ebic-gamma 1"
       echo "searche1_p20_Cresc|5e20r|$run|16|12:00:00|--p 20 --reps 25 --c-scale variance --ebic-gamma 1" ;;
-    *) echo "unknown wave: $1 (1, 2, 3, 4 or 5)" >&2; return 2 ;;
+    6)
+      run=simulations/rescore_shard.py
+      s6="--select search --ebic-gamma 1"
+      for c in C2I Cresc; do
+        if [ "$c" = C2I ]; then ci=i; else ci=r; fi
+        echo "rescore1_direct_lasso_${c}|6la${ci}|$run|4|12:00:00|$s6 --source-cell direct_lasso_${c}"
+        echo "rescore1_direct_MCP_${c}|6Ms${ci}|$run|8|12:00:00|$s6 --source-cell direct_MCP_${c}"
+        echo "rescore1_direct_SCAD_${c}|6Ss${ci}|$run|8|12:00:00|$s6 --source-cell direct_SCAD_${c}"
+        echo "rescore1_direct_MCP-up_${c}|6Mu${ci}|$run|16|12:00:00|$s6 --source-cell direct_MCP-up_${c}"
+        echo "rescore1_direct_SCAD-up_${c}|6Su${ci}|$run|16|12:00:00|$s6 --source-cell direct_SCAD-up_${c}"
+        echo "rescore1_direct_MCP-lla_${c}|6Ml${ci}|$run|4|12:00:00|$s6 --source-cell direct_MCP-lla_${c}"
+        echo "rescore1_direct_SCAD-lla_${c}|6Sl${ci}|$run|4|12:00:00|$s6 --source-cell direct_SCAD-lla_${c}"
+        echo "rescore1_direct_adaptive_${c}|6ad${ci}|$run|4|12:00:00|$s6 --source-cell direct_adaptive_${c}"
+      done ;;
+    *) echo "unknown wave: $1 (1, 2, 3, 4, 5 or 6)" >&2; return 2 ;;
   esac
 }
 
@@ -170,7 +190,7 @@ n_code() { case "$1" in 1000) echo 3 ;; 1e4) echo 4 ;; 1e5) echo 5 ;; inf) echo 
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --wave) WAVE=${2:?--wave needs 1, 2, 3, 4 or 5}; shift 2 ;;
+    --wave) WAVE=${2:?--wave needs 1 to 6}; shift 2 ;;
     --dry-run) DRY=1; shift ;;
     --fill) FILL=1; shift ;;
     --status) STATUS=1; shift ;;
@@ -188,11 +208,11 @@ while [ $# -gt 0 ]; do
         --p) PS=("${vals[@]}") ;;
         --only) ONLY=("${vals[@]}") ;;
       esac ;;
-    -h|--help) sed -n '2,61p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,66p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
-[ -n "$WAVE" ] || { echo "--wave is required (1, 2, 3, 4 or 5); see --help" >&2; exit 2; }
+[ -n "$WAVE" ] || { echo "--wave is required (1 to 6); see --help" >&2; exit 2; }
 if [ "$WAVE" = 4 ]; then
   [ "$NS_GIVEN" -eq 1 ] || NS=(1000)          # Figure 5's sample size unless --n says otherwise
   for p in "${PS[@]}"; do

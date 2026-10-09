@@ -53,6 +53,8 @@ repo/
 │   ├── run_s1.py                  ▶ Figure 5   — local, multiprocessing
 │   ├── run_s1_shard.py            ▶ Figure 5   — one cluster shard -> rich .npz; with --select also
 │   │                              the BIC-selected graph and the graph after the BIC search
+│   ├── rescore_shard.py           ▶ a finished cell re-selected and re-searched with the extended BIC
+│   │                              from its stored supports (wave 6) — one cluster shard
 │   ├── run_search_shard.py        ▶ search without a penalty / from the truth — one cluster shard;
 │   │                              --restarts / --starts and the result of every start (wave 5b)
 │   ├── aggregate_s1.py            shards -> s1_per_dataset / _summary / _curves

@@ -307,6 +307,12 @@ minutes.
   and searches once more per $\gamma$ on the same path (fields `ebic05_*`, `ebic1_*` next to the
   plain-BIC ones, so with and without are paired graph by graph) and
   `run_search_shard.py --ebic-gamma 1` scores both of its searches with it; Dettling's form.
+- **Rescoring a finished cell** (wave 6, `simulations/rescore_shard.py`): the stored supports of a
+  cell's paths are re-selected and re-searched with the term inside, after rebuilding each data
+  set from its seed (checked against the stored plain scores), so no path is recomputed. Cells
+  `rescore1_<source cell>`; `campaign.py` overlays them on the source cell's rows, and
+  `plot_campaign.py --rule ebic1` draws every figure with the extended BIC as the rule
+  (`figures_ebic1/`).
 - **The volatility matrix** in the score is the one the estimator was fitted with: $2I$, or the
   rescaled $C$ of `docs/DENSE_START.md` §2 (`--c-scale variance`).
 - **The step limit** `max_steps` is raised from the default 200 to $p(p-1)$ in both runners. Every

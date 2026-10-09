@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SUBMIT = ROOT / "cluster" / "submit_campaign.sh"
 sys.path.insert(0, str(ROOT / "simulations"))
 
+import rescore_shard  # noqa: E402
 import run_s1_shard  # noqa: E402
 import run_search_shard  # noqa: E402
 
@@ -85,7 +86,7 @@ def test_waves_have_the_planned_cells(cluster):
     wave5 = listed(submit, 5)
     assert [c[0] for c in wave5] == [f"direct_{e}-ml_{c}" for c in ("C2I", "Cresc")
                                      for e in ("lasso", "MCP-up", "adaptive")] + \
-        ["search100s_p10_Cresc", "search100u_p10_Cresc", "search30s_p20_Cresc"] + \
+        ["search100s_p10_Cresc", "search100u_p10_Cresc", "search30s_p20_Cresc", "search300s_p10_Cresc"] + \
         [f"direct_{e}-ebic_{c}" for c in ("C2I", "Cresc") for e in ("lasso", "MCP-up", "adaptive")] + \
         ["searche1_p10_C2I", "searche1_p10_Cresc", "searche1_p20_Cresc"]
     for name, _, _, _, runner, args in wave5:
@@ -93,28 +94,37 @@ def test_waves_have_the_planned_cells(cluster):
             assert "--select search" in " ".join(args)
             assert ("--refit loglik" in " ".join(args)) == ("-ml" in name)
             assert ("--ebic-gamma 0.5 1" in " ".join(args)) == ("-ebic" in name)
-    assert sum(c[2] for c in wave5) == 180
-    for wave in (1, 2, 3, 4, 5):                                  # job names: unique, short enough
+    assert sum(c[2] for c in wave5) == 196
+    wave6 = listed(submit, 6)
+    assert [c[0] for c in wave6] == [f"rescore1_{c[0]}" for c in wave1]
+    assert [c[2] for c in wave6] == [c[2] for c in wave1]        # one task per source shard
+    assert all(c[4] == "rescore_shard.py" and "--ebic-gamma 1" in " ".join(c[5]) for c in wave6)
+    for wave in (1, 2, 3, 4, 5, 6):                               # job names: unique, short enough
         tags = [c[1] for c in listed(submit, wave)]
         assert len(set(tags)) == len(tags) and all(len(t) + 1 < 10 for t in tags)
 
 
-@pytest.mark.parametrize("wave", [1, 2, 3, 4, 5])
+@pytest.mark.parametrize("wave", [1, 2, 3, 4, 5, 6])
 def test_every_cell_is_accepted_by_its_runner(cluster, wave):
     """The arguments the submit script would pass parse with the runner's own
     command line and describe an implemented combination, with the C and the
     path order that the cell's name promises."""
     submit, _, _ = cluster
     for name, _, _, _, runner, args in listed(submit, wave):
-        module = {"run_s1_shard.py": run_s1_shard, "run_search_shard.py": run_search_shard}[runner]
+        module = {"run_s1_shard.py": run_s1_shard, "run_search_shard.py": run_search_shard,
+                  "rescore_shard.py": rescore_shard}[runner]
         ns = module.build_parser().parse_args(
             ["--shard", "0", "--n-shards", "4", "--out-dir", "x", "--n-obs", "inf", *args])
+        if module is rescore_shard:                               # wave 6
+            assert name == f"rescore1_{ns.source_cell}" and ns.ebic_gamma == [1.0] and ns.select == "search"
+            continue
         assert ns.c_scale == ("variance" if "_Cresc" in name else "identity")
         if module is run_search_shard:                            # waves 2, 5b and 5c
-            restart_cell = name.startswith(("search100", "search30"))
+            restart_cell = name.startswith(("search100", "search30", "search300"))
             assert ns.methods == (["pure"] if restart_cell else ["pure", "truth"])
             assert ns.starts == ("uniform" if "100u" in name else "sparse")
-            assert ns.restarts == (100 if "search100" in name else 30 if "search30" in name else 10)
+            assert ns.restarts == (300 if "search300" in name else 100 if "search100" in name
+                                   else 30 if "search30" in name else 10)
             assert ns.ebic_gamma == (1.0 if "searche1" in name else 0.0)
             assert (ns.reps, tuple(ns.p)) == ((5, (20,)) if "search30s" in name else
                                               (25, (20,)) if "p20" in name else (25, (10,)))
