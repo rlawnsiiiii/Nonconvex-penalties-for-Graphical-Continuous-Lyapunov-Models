@@ -412,6 +412,12 @@ def adaptive_lasso_path(
 
 
 DIRECTIONS = ("up", "down")
+#: where a covariance-loss dense -> sparse path starts (covloss_path, direction="up")
+UP_STARTS = ("exact", "lasso")
+#: weight of an entry that the adaptive lasso's pilot sets to zero, on the covariance losses:
+#: large and finite, so that the proximal step keeps the entry at zero while its penalty value
+#: 0 * weight stays 0 (an infinite weight would make the objective NaN there)
+EXCLUDED_WEIGHT = 1e12
 
 @dataclass
 class CovlossPath(LassoPath):
@@ -437,16 +443,28 @@ def covloss_path(
     tol: float | None = None,
     newton_after: float = 1e-4,
     max_iter: int = 50_000,
+    start: str = "exact",
 ) -> CovlossPath:
     """Solutions along a lambda grid, with warm starts, off-diagonal penalised.
 
     ``direction="down"`` (default) walks from ``lambda_max`` to the dense end,
     starting from :func:`gclm.objective.covariance.diagonal_fit` -- the order used for every other fit in
-    this repository and by glmnet/ncvreg.  ``direction="up"`` is Varando &
-    Hansen's order (Section 3.1): start from the exact unpenalised minimiser
-    :func:`gclm.objective.covariance.dense_fit` and increase ``lam``.  The problems are nonconvex, so the
-    two orders can reach different stationary points; docs/LIKELIHOOD.md
-    Section 5 compares them.
+    this repository and by glmnet/ncvreg.  ``direction="up"`` walks from the dense
+    end to ``lambda_max``, starting from
+
+      ``start="exact"`` (default): the exact unpenalised minimiser
+          :func:`gclm.objective.covariance.dense_fit`, ``-C Sigma_hat^{-1} / 2`` --
+          Varando & Hansen's order (Section 3.1);
+      ``start="lasso"``: the lasso solution of the same loss at the smallest lambda
+          of the grid, the dense end of its own sparse -> dense lasso path -- the start
+          the direct loss's dense -> sparse MCP / SCAD paths use (``lasso_path``).
+
+    Both starts reach the same minimum of the loss (every exact solution of the
+    Lyapunov equation does), but the lasso's is the exact fit with the smallest
+    l1 norm, which keeps both directions of an uncertain edge and favours sparse
+    graphs; ``dense_fit`` has no such preference (campaign of October 2026, wave 7).
+    The problems are nonconvex, so the orders and starts can reach different
+    stationary points; docs/LIKELIHOOD.md Section 5 compares the orders.
 
     The grid defaults to Dettling's: 100 log-spaced values from
     ``lambda_max / 1e4`` to ``lambda_max`` (Varando fixed ``lambda_max = 6``).
@@ -455,6 +473,8 @@ def covloss_path(
     loss = cov.check_loss(loss)
     if direction not in DIRECTIONS:
         raise ValueError(f"direction must be one of {DIRECTIONS}")
+    if start not in UP_STARTS:
+        raise ValueError(f"start must be one of {UP_STARTS}")
     penalty = canonical(penalty)
     gamma = resolve_gamma(penalty, gamma)
     p = sigma_hat.shape[0]
@@ -474,8 +494,14 @@ def covloss_path(
 
     if direction == "down":
         order, warm = np.argsort(-lambdas, kind="stable"), cov.diagonal_fit(sigma_hat, c)
-    else:
+    elif start == "exact":
         order, warm = np.argsort(lambdas, kind="stable"), cov.dense_fit(sigma_hat, c)
+    else:
+        # the dense end of the lasso path of the same loss, on the same grid
+        lasso = covloss_path(sigma_hat, c, loss, lambdas=lambdas, penalty="lasso", direction="down",
+                             method=method, tol=tol, newton_after=newton_after, max_iter=max_iter)
+        order = np.argsort(lambdas, kind="stable")
+        warm = lasso.estimates[int(order[0])]
     for i in order:
         warm, info = solve_covariance(sigma_hat, c, lambdas[i], loss=loss, weights=weights,
                            m_init=warm, penalty=penalty, gamma=gamma, method=method,
@@ -487,6 +513,88 @@ def covloss_path(
 
     return CovlossPath(lambdas=lambdas, estimates=est, iterations=iters,
                        newton_steps=newt, converged=conv, kkt=kkt, objective=obj)
+
+
+@dataclass
+class AdaptiveCovlossPath(CovlossPath):
+    """:class:`CovlossPath` plus what defines the adaptive lasso: the pilot and its weights
+    (``EXCLUDED_WEIGHT`` = entry excluded, 0 on the diagonal)."""
+
+    weights: np.ndarray = field(default_factory=lambda: np.zeros((0, 0)))
+    pilot: np.ndarray = field(default_factory=lambda: np.zeros((0, 0)))
+
+
+def adaptive_covloss_path(
+    sigma_hat: np.ndarray,
+    c: np.ndarray,
+    loss: str = "loglik",
+    lambdas: np.ndarray | None = None,
+    n_lambda: int = 100,
+    ratio: float = 1e-4,
+    power: float = 1.0,
+    pilot: np.ndarray | None = None,
+    method: str = "apg",
+    tol: float | None = None,
+    newton_after: float = 1e-4,
+    max_iter: int = 50_000,
+) -> AdaptiveCovlossPath:
+    """Adaptive lasso (Zou 2006) on a covariance loss, built exactly as on the direct loss
+    (:func:`adaptive_lasso_path`):
+
+        pilot  M0 = the lasso solution of the same loss at the smallest lambda of its grid,
+               the dense end of its sparse -> dense lasso path
+        w_ij   = 1 / |M0_ij|^power, scaled so that the smallest weight is 1;
+               EXCLUDED_WEIGHT where M0_ij = 0 (the entry stays zero); 0 on the diagonal
+        M(lam) = argmin  L(Sigma(M)) + lam * sum_ij w_ij |M_ij|,   L = loss
+
+    on its own grid of 100 log-spaced values up to ``lam_max = max_ij |grad_ij(M_diag)| /
+    w_ij``, the smallest lambda at which the diagonal fit is stationary; sparse -> dense from
+    :func:`gclm.objective.covariance.diagonal_fit` with warm starts.  Increasing-lambda order,
+    like every path here.
+    """
+    loss = cov.check_loss(loss)
+    p = sigma_hat.shape[0]
+    off = ~np.eye(p, dtype=bool)
+    solver_kw = dict(method=method, tol=tol, newton_after=newton_after, max_iter=max_iter)
+    if pilot is None:
+        lasso = covloss_path(sigma_hat, c, loss, n_lambda=n_lambda, ratio=ratio, penalty="lasso",
+                             direction="down", **solver_kw)
+        pilot = lasso.estimates[int(np.argmin(lasso.lambdas))]
+    pilot = np.array(pilot, dtype=float)
+    size = np.abs(pilot)
+    kept = off & (size > 0)
+    weights = np.where(off, EXCLUDED_WEIGHT, 0.0)
+    m_diag = cov.diagonal_fit(sigma_hat, c)
+    if kept.any():
+        weights[kept] = size[kept] ** (-power)
+        weights[kept] /= weights[kept].min()
+        grad = np.abs(cov.loss_grad(m_diag, sigma_hat, c, loss))
+        lam_max = float(np.max(grad[kept] / weights[kept]))
+    else:                                           # nothing to select from
+        lam_max = 1.0
+    if lambdas is None:
+        lambdas = lambda_grid(lam_max, n_lambda=n_lambda, ratio=ratio)
+    lambdas = np.asarray(lambdas, dtype=float)
+    n = len(lambdas)
+    est = [None] * n
+    iters = np.zeros(n, dtype=np.int32)
+    newt = np.zeros(n, dtype=np.int32)
+    conv = np.zeros(n, dtype=bool)
+    kkt = np.zeros(n)
+    obj = np.zeros(n)
+    warm = m_diag
+    for i in np.argsort(-lambdas, kind="stable"):
+        if lambdas[i] >= lam_max or not kept.any():
+            warm = m_diag                           # stationary there by the definition of lam_max
+            conv[i], obj[i] = True, cov.loss_value(m_diag, sigma_hat, c, loss)
+        else:
+            warm, info = solve_covariance(sigma_hat, c, lambdas[i], loss=loss, weights=weights,
+                                          m_init=warm, penalty="lasso", return_info=True, **solver_kw)
+            iters[i], newt[i], conv[i] = info.iterations, info.newton_steps, info.converged
+            kkt[i], obj[i] = info.stationarity, info.objective
+        est[i] = warm.copy()
+    return AdaptiveCovlossPath(lambdas=lambdas, estimates=est, iterations=iters, newton_steps=newt,
+                               converged=conv, kkt=kkt, objective=obj, weights=weights, pilot=pilot)
 
 
 def fit_path(sigma_hat, c, loss="direct", **kwargs):

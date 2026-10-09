@@ -6,6 +6,7 @@ Also: every cell's arguments are accepted by the runner it is sent to."""
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -99,12 +100,32 @@ def test_waves_have_the_planned_cells(cluster):
     assert [c[0] for c in wave6] == [f"rescore1_{c[0]}" for c in wave1]
     assert [c[2] for c in wave6] == [c[2] for c in wave1]        # one task per source shard
     assert all(c[4] == "rescore_shard.py" and "--ebic-gamma 1" in " ".join(c[5]) for c in wave6)
-    for wave in (1, 2, 3, 4, 5, 6):                               # job names: unique, short enough
+    five = ("lasso", "MCP", "MCP-up", "MCP-up-lasso", "adaptive")
+    wave7 = listed(submit, 7)                                     # (a) the log-likelihood loss over p
+    assert [c[0] for c in wave7] == [x for c in ("C2I", "Cresc") for x in
+                                     [f"loglik_MCP-up-lasso_{c}", f"loglik_adaptive_{c}"] +
+                                     [f"loglik_{e}_{c}_p20" for e in five]]   # p = 30 left out for cost
+    assert sum(c[2] for c in wave7) == 244
+    assert all("--select search" in " ".join(c[5]) and "--refit" not in c[5] for c in wave7)
+    wave8 = listed(submit, 8)                                     # (b) likelihood refit, (c) 100 starts
+    names8 = [c[0] for c in wave8]
+    assert len(wave8) == 30
+    for c in ("C2I", "Cresc"):
+        assert {f"loglik_{e}-ml_{c}" for e in ("lasso", "lasso-up", "MCP", "MCP-up", "MCP-up-lasso",
+                                               "adaptive")} <= set(names8)
+        assert {f"direct_{e}-ml_{c}" for e in ("lasso", "MCP-up", "adaptive")} <= set(names8)
+        assert {f"loglik_{e}-ml_{c}_p20" for e in five} <= set(names8)
+        assert f"search100sml_p10_{c}" in names8
+    shards = {c[0]: c[2] for w in (1, 3, 7) for c in listed(submit, w)}
+    for name, _, n_shards, _, runner, args in wave8:              # one task per source shard
+        if runner == "rescore_shard.py":
+            assert n_shards == shards[args[args.index("--source-cell") + 1]], name
+    for wave in (1, 2, 3, 4, 5, 6, 7, 8):                         # job names: unique, short enough
         tags = [c[1] for c in listed(submit, wave)]
         assert len(set(tags)) == len(tags) and all(len(t) + 1 < 10 for t in tags)
 
 
-@pytest.mark.parametrize("wave", [1, 2, 3, 4, 5, 6])
+@pytest.mark.parametrize("wave", [1, 2, 3, 4, 5, 6, 7, 8])
 def test_every_cell_is_accepted_by_its_runner(cluster, wave):
     """The arguments the submit script would pass parse with the runner's own
     command line and describe an implemented combination, with the C and the
@@ -115,19 +136,29 @@ def test_every_cell_is_accepted_by_its_runner(cluster, wave):
                   "rescore_shard.py": rescore_shard}[runner]
         ns = module.build_parser().parse_args(
             ["--shard", "0", "--n-shards", "4", "--out-dir", "x", "--n-obs", "inf", *args])
-        if module is rescore_shard:                               # wave 6
-            assert name == f"rescore1_{ns.source_cell}" and ns.ebic_gamma == [1.0] and ns.select == "search"
+        if module is rescore_shard:
+            if ns.refit == "loglik":                              # wave 8: a complete cell of its own
+                loss, est, cs, label = re.fullmatch(r"(direct|loglik)_([A-Za-z-]+)_(C2I|Cresc)(_p\d+)?",
+                                                    ns.source_cell).groups()
+                assert name == f"{loss}_{est}-ml_{cs}{label or ''}"
+                assert ns.select == ("bic" if label else "search")    # the likelihood search: p = 10 only
+                assert ns.p == ([10] if loss == "direct" else [])     # the direct cells hold p = 10 and 20
+            else:                                                 # wave 6: an overlay
+                assert name == f"rescore1_{ns.source_cell}" and ns.ebic_gamma == [1.0] and ns.select == "search"
             continue
         assert ns.c_scale == ("variance" if "_Cresc" in name else "identity")
-        if module is run_search_shard:                            # waves 2, 5b and 5c
-            restart_cell = name.startswith(("search100", "search30", "search300"))
+        if module is run_search_shard:                            # waves 2, 5b, 5c and 8 (c)
+            ml = name.startswith("search100sml")                 # 100 starts, likelihood refit
+            restart_cell = name.startswith(("search100", "search30", "search300")) and not ml
             assert ns.methods == (["pure"] if restart_cell else ["pure", "truth"])
             assert ns.starts == ("uniform" if "100u" in name else "sparse")
             assert ns.restarts == (300 if "search300" in name else 100 if "search100" in name
                                    else 30 if "search30" in name else 10)
             assert ns.ebic_gamma == (1.0 if "searche1" in name else 0.0)
+            assert ns.refit == ("loglik" if ml else "direct") and ns.add_screen == (20 if ml else None)
             assert (ns.reps, tuple(ns.p)) == ((5, (20,)) if "search30s" in name else
-                                              (25, (20,)) if "p20" in name else (25, (10,)))
+                                              (25, (20,)) if "p20" in name else
+                                              (2, (10,)) if ml else (25, (10,)))
             continue
         assert ns.refit == ("loglik" if "-ml" in name else "direct") and ns.add_screen is None
         assert ns.ebic_gamma == ([0.5, 1.0] if "-ebic" in name else [])
@@ -136,10 +167,12 @@ def test_every_cell_is_accepted_by_its_runner(cluster, wave):
         assert (cfg.direction == "up") == ("-up" in name)
         assert (cfg.method == "lla") == ("-lla" in name)
         assert (cfg.method == "adaptive") == ("adaptive" in name)
-        assert cfg.penalty == ("lasso" if "lasso" in name or "adaptive" in name
-                               else name.split("_")[1].split("-")[0])
-        expected_p = ((10, 20) if wave == 1 or "-ebic" in name else
-                      (int(name.rsplit("_p", 1)[1]),) if wave == 4 else (10,))
+        est = name.split("_")[1]
+        assert cfg.penalty == ("lasso" if est.startswith(("lasso", "adaptive")) else est.split("-")[0])
+        assert (cfg.up_start == "lasso") == ("-up-lasso" in name)
+        label = re.search(r"_p(\d+)$", name)
+        expected_p = ((int(label.group(1)),) if label else
+                      (10, 20) if wave == 1 or "-ebic" in name else (10,))
         assert cfg.n_rep == 25 and cfg.p_values == expected_p
 
 
@@ -217,7 +250,7 @@ def test_dry_run_and_argument_errors(cluster):
     assert res.stdout.count("sbatch --array=") == 24 and "would submit 168 tasks in 24 cells" in res.stdout
     res, calls = submit("--wave", "1", "--n", "1000", "--shards", "3", "--only", "lasso_C2I")
     assert "--array=0-2" in calls[0] and (root / "direct_lasso_C2I_n1000" / "n_shards").read_text().strip() == "3"
-    for bad in (["--list"], ["--wave", "7", "--list"], ["--wave", "1", "--n", "500"],
+    for bad in (["--list"], ["--wave", "9", "--list"], ["--wave", "1", "--n", "500"],
                 ["--wave", "1", "--shards", "0"], ["--wave", "1", "--frobnicate"]):
         res, _ = submit(*bad)
         assert res.returncode == 2, bad

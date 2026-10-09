@@ -95,14 +95,15 @@ $\gamma/v_{ij} \le 1.5$ for MCP, i.e. *more* concave.
    `skeleton_confusion` and `evaluate_skeleton_path` exist (`gclm.metrics`,
    `../../simulations/diagnostics/orientation.py`); add the skeleton metrics and the category counts to
    `run_s1_shard.py` / `aggregate_s1.py` so every future run reports them, and add a tuning-based
-   comparison (BIC / eBIC at one $\lambda$) next to the path maxima, which are oracle tuning.
+   comparison (one $\lambda$ selected by the score, BIC or eBIC penalty) next to the path maxima,
+   which are oracle tuning.
 3. **Try the two cheap remedies at $p=10$ on `C_ID`** (~10 min each with the orientation
    diagnostic): $\gamma$-continuation from the lasso, and Mnet. Then the $\gamma$ sweep. Success
    criterion: skeleton metrics unchanged, orientation recall back to the lasso's (≈ 0.9), directed
    `max_f1` at or above the lasso.
 4. **Target orientation directly: S3 with a reverse move.** Greedy search over add / delete /
-   reverse with a BIC-type score, started from the lasso path (or from the skeleton of step 3).
-   This advances the planned score-based study and is where the Example 2 positive control
+   reverse on a score with a BIC-type penalty, started from the lasso path (or from the skeleton of
+   step 3). This advances the planned score-based study and is where the Example 2 positive control
    belongs.
 5. **Map where nonconvexity pays off.** With the Example 2 harness: sweep $n$ ($10^3$ to
    $\infty$); random drift matrices with edge weights bounded away from zero; with and without
@@ -119,8 +120,8 @@ $\gamma/v_{ij} \le 1.5$ for MCP, i.e. *more* concave.
 - Should 2-cycles stay in the data-generating process, given the identifiability results of
   Dettling et al. (2023)? If they are not identifiable, every method should be scored on simple
   graphs as well, or the metric should treat a 2-cycle as one undirected edge.
-- Is a tuning-based comparison (BIC at one $\lambda$) required, or are Dettling's path-maximum
-  metrics acceptable for the thesis?
+- Is a tuning-based comparison (one $\lambda$ selected by the score with the BIC penalty) required,
+  or are Dettling's path-maximum metrics acceptable for the thesis?
 
 ## References
 

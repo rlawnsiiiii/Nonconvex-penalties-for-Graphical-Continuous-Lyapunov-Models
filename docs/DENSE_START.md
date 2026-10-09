@@ -177,7 +177,7 @@ every support is contained in the pilot's; with equal weights it is the lasso pa
 
 `simulations/run_s1_shard.py` takes the same options (`--c-scale`, `--direction`, `--method`).
 With `--select bic` or `--select search` it also records, for each graph, the support at every
-$\lambda$, the graph that BIC selects on the path and the graph the BIC search of
+$\lambda$, the graph that the score selects on the path and the graph the greedy search of
 [`SEARCH.md`](SEARCH.md) reaches from it. `cluster/submit_campaign.sh` defines the cells of the
 campaign. Details, the list of cells and the commands: campaign note §4 and §5, and
 [`REPRODUCTION.md`](REPRODUCTION.md) §2.7.
@@ -270,7 +270,7 @@ The extra gain follows how much of the misfit the rescaling removes (misfit figu
 
 ### 7.5 A third channel: the score
 
-The BIC refit and the search use the likelihood of $\Sigma(M,C)$. With the wrong $C$ the
+The score's loss term, and with it the search, uses the likelihood of $\Sigma(M,C)$. With the wrong $C$ the
 best-scoring graph is a different graph (S3b §9; `next_steps/051026/next_steps_051026.md` §2).
 This is why lasso + search gains from rescaling (0.614 → 0.650 at $p=20$, $n=10^4$) although the
 lasso path does not.

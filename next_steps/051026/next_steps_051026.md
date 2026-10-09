@@ -58,8 +58,8 @@ estimate $C$), and it supersedes §5 below. This note remains the overview of th
 
 `files/score_vs_optimisation.py`, from the raw-scale S3b runs at $p = 10$.
 
-**The comparison.** For each graph, take the BIC of the graph reached by the search *started from
-the truth*, and the best BIC reached by any data-driven search.
+**The comparison.** For each graph, take the score of the graph reached by the search *started
+from the truth*, and the best score reached by any data-driven search.
 
 - If the truth-started search scores better, the data-driven searches are stuck, and a better
   optimiser would help.
@@ -81,9 +81,9 @@ the two graphs in brackets):
 **Reading:**
 
 - **$n = 1000$: the score is the limit, even with the correct model.** In 30 of 40 `C_ID` graphs a
-  data-driven search finds a graph with a *better* BIC than the one next to the truth, and that
+  data-driven search finds a graph with a *better* score than the one next to the truth, and that
   graph is much worse ($F_1$ 0.52–0.66 against 0.71–0.76). The data cannot tell many graphs apart,
-  and BIC picks a sparser or re-oriented one. A more thorough search would find more of these.
+  and the score picks a sparser or re-oriented one. A more thorough search would find more of these.
 - **$n = \infty$, sparse graphs: solved.** The data-driven searches reach the same score as the
   truth-started one in 19 of 20 graphs. The remaining $F_1$ difference (0.92 against 0.98) comes
   from graphs with the same score, i.e. graphs the data cannot distinguish at all.
@@ -160,7 +160,7 @@ the two graphs in brackets):
 
 - **Small $n$: do not search harder; aggregate.** At $n = 1000$ the single best-scoring graph is
   unreliable (§2). Instead of one graph, report how often each edge appears among the good graphs
-  (restarts, bootstrap samples, or all graphs within a few BIC units of the best), and threshold
+  (restarts, bootstrap samples, or all graphs within a few score units of the best), and threshold
   that. This is the lasso's hedge done on purpose. The "report both directions when unsure" layer
   of the independent study (+0.02 to +0.03, [IS §12]) is the simplest version. Exploratory: there
   is no evidence yet that it beats the lasso.
@@ -186,9 +186,9 @@ the two graphs in brackets):
 
 ### H. One real-data example, near the end
 
-- Dettling's own application (the Sachs protein data, §6 of the paper): the lasso with eBIC, then the
-  rescaled $C$, then MCP dense → sparse, compared with the consensus network. Small ($p = 11$) and
-  directly comparable to the paper.
+- Dettling's own application (the Sachs protein data, §6 of the paper): the lasso selected by the
+  score with the eBIC penalty, then the rescaled $C$, then MCP dense → sparse, compared with the
+  consensus network. Small ($p = 11$) and directly comparable to the paper.
 
 ## 4. What I would drop
 

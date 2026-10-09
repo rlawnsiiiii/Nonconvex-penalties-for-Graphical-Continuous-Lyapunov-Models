@@ -9,10 +9,10 @@ draws, into runs/campaign/figures/:
   by_true_c_<metric>     paired difference to the lasso with the same C, per setting of the
                          true C (columns), rescaled C, rows p = 10, 20
   selection_p20          p = 20, rescaled C: the same estimators under the three ways to get one
-                         graph (oracle lambda, BIC-selected, after the BIC search)
-  orientation_p20        what the BIC-selected graphs consist of (correct / hedged / reversed /
+                         graph (oracle lambda, selected by the score, after the search)
+  orientation_p20        what the graphs selected by the score consist of (correct / hedged / reversed /
                          false edges), p = 20, n = 1e4, rescaled C
-  search_ceilings        the BIC search from three estimators' graphs, from random starts
+  search_ceilings        the greedy search from three estimators' selected graphs, from random starts
                          (Amendola et al. 2020) and from the truth, rescaled C
   loglik_p10             wave 3: the log-likelihood loss, lasso and MCP in both path orders
   by_p                   wave 4 with wave 1: the six estimators of the thesis figure over
@@ -21,17 +21,18 @@ draws, into runs/campaign/figures/:
   restarts               wave 5b: F1 of the best of the first r randomly drawn starting graphs
                          of the pure search, r = 1 ... 100, sparse and uniform starts, against
                          the 10 of wave 2 and the lasso-based search (campaign_restarts.csv)
-  selection_checks       waves 5a and 5c: the BIC with the likelihood refit, and the extended
-                         term inside the search, next to the campaign's rule
-  bic_vs_ebic            the plain BIC against Dettling's extended BIC (gamma = 0.5, 1) as the
-                         rule that picks one graph: F1 difference and edges selected relative to
-                         the truth, over p and over n; the search with the term inside where run
-  With --rule ebic1 the rule-dependent figures are redrawn with the extended BIC (gamma = 1) as
-  the selection rule and, where waves 5c / 6 ran it, inside the search, into figures_ebic1/.
+  selection_checks       waves 5a and 5c: the score with the likelihood refit, and the eBIC
+                         penalty inside the search, next to the campaign's rule
+  bic_vs_ebic            the BIC penalty against Dettling's eBIC penalty (gamma = 0.5, 1) in the
+                         score that picks one graph: F1 difference and edges selected relative to
+                         the truth, over p and over n; the search with the eBIC penalty where run
+  With --rule ebic1 the rule-dependent figures are redrawn with the eBIC penalty (gamma = 1) in the
+  score that selects the graph and, where waves 5c / 6 ran it, inside the search, into figures_ebic1/.
+  (Score = loss + penalty; BIC and eBIC name the penalty, docs/SEARCH.md §2.)
 
 Series carry a fixed hue per estimator (lasso blue, MCP orange, SCAD aqua, LLA magenta,
-adaptive lasso green) and a distinct marker; the standard paths are hollow, the dense-start
-paths filled.  Palette validated for colour-vision deficiency with the dataviz checks (the
+adaptive lasso green) and a distinct marker; the sparse → dense paths are hollow, the
+dense-start paths filled.  Palette validated for colour-vision deficiency with the dataviz checks (the
 magenta-aqua pair is at the floor and is separated by the markers).  Every number plotted is in
 the CSVs next to the figures.
 
@@ -67,8 +68,8 @@ GREY = "#8f8d88"
 #: estimator -> (hue, marker, filled, label)
 STYLE = {
     "lasso": ("#2a78d6", "o", True, "lasso"),
-    "MCP": ("#eb6834", "s", False, "MCP, standard path"),
-    "SCAD": ("#1baf7a", "^", False, "SCAD, standard path"),
+    "MCP": ("#eb6834", "s", False, "MCP, sparse → dense"),
+    "SCAD": ("#1baf7a", "^", False, "SCAD, sparse → dense"),
     "MCP-up": ("#eb6834", "s", True, "MCP, dense → sparse"),
     "SCAD-up": ("#1baf7a", "^", True, "SCAD, dense → sparse"),
     "MCP-lla": ("#e87ba4", "D", True, "MCP by LLA"),
@@ -84,11 +85,11 @@ C_NAME = {"C2I": "C = 2I (Dettling's pipeline)", "Cresc": "rescaled C"}
 TRUE_C = (("C_ID", "true C = 2I"), ("C_Random_Min_Diag", "diagonal, U[2, 4]"),
           ("C_Random_Diag", "diagonal, U[0.5, 4]"), ("C_Random_Full", "non-diagonal"))
 METRIC_NAME = {"max_f1": "F₁ at the oracle λ (best on the path)",
-               "bic_f1": "F₁ of the BIC-selected graph",
-               "search_f1": "F₁ after the BIC search",
+               "bic_f1": "F₁ of the selected graph (BIC penalty)",
+               "search_f1": "F₁ after the search (BIC penalty)",
                "aupr": "area under the precision–recall curve"}
 #: short panel titles of the two data-driven rules; replaced under --rule ebic1
-RULE_SHORT = {"bic_f1": "BIC-selected", "search_f1": "after the BIC search"}
+RULE_SHORT = {"bic_f1": "selected (BIC penalty)", "search_f1": "after the search (BIC penalty)"}
 X = np.arange(len(NS))
 
 
@@ -130,9 +131,10 @@ def dodge(k, n_series):
 # --------------------------------------------------------------------------- #
 
 
-def fig_twobytwo(means, metric, out, ests=MAIN):
-    fig, axes = plt.subplots(2, 2, figsize=(8.6, 6.6), sharey=True, squeeze=False)
-    for a, p in enumerate(("10", "20")):
+def fig_twobytwo(means, metric, out, ests=MAIN, ps=("10", "20"), name=None):
+    """Rows p in ``ps`` (one row for a slide), columns the two C, x = n."""
+    fig, axes = plt.subplots(len(ps), 2, figsize=(8.6, 3.4 * len(ps)), sharey=True, squeeze=False)
+    for a, p in enumerate(ps):
         for b, c in enumerate(("C2I", "Cresc")):
             ax = axes[a][b]
             style_axes(ax)
@@ -146,17 +148,18 @@ def fig_twobytwo(means, metric, out, ests=MAIN):
             ax.set_xticks(X)
             ax.set_xticklabels([N_LABEL[n] for n in NS])
             ax.set_title(f"p = {p}, {C_NAME[c]}", loc="left", fontsize=9.5, color=INK)
-            if a == 1:
+            if a == len(ps) - 1:
                 ax.set_xlabel("sample size n", fontsize=9, color=INK_2)
         axes[a][0].set_ylabel(METRIC_NAME[metric], fontsize=9, color=INK_2)
     fig.tight_layout()
     legend(fig, ests)
-    save(fig, out, f"twobytwo_{metric}")
+    save(fig, out, name or f"twobytwo_{metric}")
 
 
-def fig_by_true_c(paired, metric, out, c="Cresc", ests=("MCP", "MCP-up", "SCAD-up", "MCP-lla", "adaptive")):
-    fig, axes = plt.subplots(2, 4, figsize=(12.4, 6.2), sharey=True, squeeze=False)
-    for a, p in enumerate(("10", "20")):
+def fig_by_true_c(paired, metric, out, c="Cresc", ests=("MCP", "MCP-up", "SCAD-up", "MCP-lla", "adaptive"),
+                  ps=("10", "20"), name=None):
+    fig, axes = plt.subplots(len(ps), 4, figsize=(12.4, 3.2 * len(ps)), sharey=True, squeeze=False)
+    for a, p in enumerate(ps):
         for b, (tc, tc_name) in enumerate(TRUE_C):
             ax = axes[a][b]
             style_axes(ax)
@@ -170,13 +173,13 @@ def fig_by_true_c(paired, metric, out, c="Cresc", ests=("MCP", "MCP-up", "SCAD-u
             ax.set_xticks(X)
             ax.set_xticklabels([N_LABEL[n] for n in NS])
             ax.set_title(f"p = {p}, {tc_name}", loc="left", fontsize=9.5, color=INK)
-            if a == 1:
+            if a == len(ps) - 1:
                 ax.set_xlabel("sample size n", fontsize=9, color=INK_2)
         axes[a][0].set_ylabel(f"{METRIC_NAME[metric]}:\ndifference to the lasso, same C",
                               fontsize=9, color=INK_2)
     fig.tight_layout()
     legend(fig, ests, ncol=5)
-    save(fig, out, f"by_true_c_{metric}")
+    save(fig, out, name or f"by_true_c_{metric}")
 
 
 def fig_selection(means, out, p="20", c="Cresc", ests=("lasso", "MCP", "MCP-up", "adaptive")):
@@ -204,7 +207,7 @@ def fig_selection(means, out, p="20", c="Cresc", ests=("lasso", "MCP", "MCP-up",
 
 def fig_orientation(rows, out, p="20", n="1e4", c="Cresc",
                     ests=("lasso", "MCP", "MCP-up", "MCP-lla", "adaptive")):
-    """Composition of the BIC-selected graph, mean counts per graph (diagonal true C only)."""
+    """Composition of the graph selected by the score (BIC penalty), mean counts per graph (diagonal true C only)."""
     parts = (("correct", "#2a78d6", "true edge, right direction"),
              ("hedged", "#8fb8ea", "true edge, both directions kept"),
              ("reversed", "#eb6834", "true edge, reversed"),
@@ -233,7 +236,7 @@ def fig_orientation(rows, out, p="20", n="1e4", c="Cresc",
     ax.text(truth, len(ests) - 0.35, f"true edges: {truth:.0f}", fontsize=8.5, color=INK_2, ha="center")
     ax.set_yticks(ys)
     ax.set_yticklabels([STYLE[e][3] for e in ests], fontsize=9)
-    ax.set_xlabel(f"entries of the BIC-selected graph, mean per graph (p = {p}, n = {N_LABEL[n]}, "
+    ax.set_xlabel(f"entries of the selected graph (BIC penalty), mean per graph (p = {p}, n = {N_LABEL[n]}, "
                   f"{C_NAME[c]}, diagonal true C)", fontsize=9, color=INK_2)
     ax.set_xlim(0, ax.get_xlim()[1] * 1.08)
     fig.legend(handles=[Patch(facecolor=col, label=name) for _, col, name in parts], loc="lower center",
@@ -357,7 +360,7 @@ def fig_gain_by_p(paired, out, ests=("MCP", "SCAD", "MCP-up", "SCAD-up", "adapti
     save(fig, out, "gain_by_p")
 
 
-def fig_restarts(root: Path, means, out):
+def fig_restarts(root: Path, means, out, kind_filter=None, name="restarts"):
     """Wave 5b: the best of the first r randomly drawn starting graphs, from campaign_restarts.csv
     (cells with per-start supports only, i.e. wave 5), against the 10 starts of wave 2 and
     the lasso-based search on the same graphs.  Rows: how the starts are drawn; columns: n."""
@@ -368,7 +371,8 @@ def fig_restarts(root: Path, means, out):
     cells = sorted({(r["starts"], r["p"], r["c"], r["n"]) for r in rows})
     if not cells:
         return
-    kinds = sorted({k for k, _, _, _ in cells}, reverse=True)          # sparse before uniform
+    kinds = sorted({k for k, _, _, _ in cells if kind_filter is None or k in kind_filter},
+                   reverse=True)                                         # sparse before uniform
     ns = [n for n in NS if any(c[3] == n for c in cells)]
     fig, axes = plt.subplots(len(kinds), len(ns), figsize=(3.6 * len(ns) + 0.6, 3.2 * len(kinds)),
                              sharey=True, squeeze=False)
@@ -391,7 +395,7 @@ def fig_restarts(root: Path, means, out):
             ref = {r["estimator"]: f(r["search_f1"]) for r in means
                    if r["p"] == p and r["c"] == c and r["n"] == n and r["loss"] == "direct"}
             for est, label in (("search-pure", "wave 2: 10 sparse starts + empty"),
-                               ("lasso", "lasso + BIC search"), ("adaptive", "adaptive lasso + BIC search")):
+                               ("lasso", "lasso + search"), ("adaptive", "adaptive lasso + search")):
                 if est in ref and not math.isnan(ref[est]):
                     ax.axhline(ref[est], color=STYLE[est][0], lw=1.0,
                                ls=":" if est == "search-pure" else "-", zorder=2)
@@ -407,11 +411,11 @@ def fig_restarts(root: Path, means, out):
         axes[a][0].set_ylabel("F₁ of the graph the best start ends at", fontsize=9, color=INK_2)
     axes[0][0].legend(frameon=False, fontsize=7.5, loc="lower right")
     fig.tight_layout()
-    save(fig, out, "restarts")
+    save(fig, out, name)
 
 
 def fig_selection_checks(means, rows, out, n="1e4"):
-    """Waves 5a and 5c: the selection step under the BIC with the likelihood refit (p = 10) and
+    """Waves 5a and 5c: the selection step under the score with the likelihood refit (p = 10) and
     with the extended term inside the search (p = 10, 20), next to the campaign's rule."""
     ests = ("lasso", "MCP-up", "adaptive")
     fig, axes = plt.subplots(2, 2, figsize=(10.5, 6.4), sharey="row", squeeze=False,
@@ -433,12 +437,12 @@ def fig_selection_checks(means, rows, out, n="1e4"):
                     es.append(f(r[0][f"{metric}_se"]) if r else math.nan)
                 ax.errorbar(xs + dx + (0.06 if j else -0.06), ys, yerr=es, ls="none", marker=mk, ms=6,
                             color=col, mfc=mfc if mfc else col, mew=1.3, capsize=2,
-                            label=f"{label}, {'BIC-selected' if metric == 'bic_f1' else 'after the search'}")
+                            label=f"{label}, {'selected graph' if metric == 'bic_f1' else 'after the search'}")
         ax.set_xticks(xs)
         ax.set_xticklabels([STYLE[e][3] for e in ests], fontsize=8)
-        ax.set_title(f"refit behind the BIC: p = 10, {C_NAME[c]}", loc="left", fontsize=9, color=INK)
+        ax.set_title(f"refit behind the score: p = 10, {C_NAME[c]}", loc="left", fontsize=9, color=INK)
         ax.set_ylabel("F₁ (hollow: selected; filled: after the search)", fontsize=8.5, color=INK_2)
-        # ---- right: plain BIC against the extended term in the search, p = 10 and 20
+        # ---- right: the BIC penalty against the eBIC penalty in the search, p = 10 and 20
         ax = axes[a][1]
         style_axes(ax)
         labels, k = [], 0
@@ -458,14 +462,14 @@ def fig_selection_checks(means, rows, out, n="1e4"):
                 k += 1
         ax.set_xticks(range(len(labels)))
         ax.set_xticklabels(labels, fontsize=7.5)
-        ax.set_title(f"the term 4γ|E| log p in the search: {C_NAME[c]}", loc="left", fontsize=9, color=INK)
-    handles = [Line2D([], [], ls="none", marker="o", color=INK_2, mfc="none", label="least-squares refit, BIC-selected"),
+        ax.set_title(f"the eBIC term 4γ|E| log p in the search: {C_NAME[c]}", loc="left", fontsize=9, color=INK)
+    handles = [Line2D([], [], ls="none", marker="o", color=INK_2, mfc="none", label="least-squares refit, selected graph"),
                Line2D([], [], ls="none", marker="o", color=INK_2, label="least-squares refit, after the search"),
-               Line2D([], [], ls="none", marker="D", color="#b5651d", mfc="none", label="likelihood refit, BIC-selected"),
+               Line2D([], [], ls="none", marker="D", color="#b5651d", mfc="none", label="likelihood refit, selected graph"),
                Line2D([], [], ls="none", marker="D", color="#b5651d", label="likelihood refit, after the search"),
-               Line2D([], [], ls="none", marker="o", color=INK_2, label="after the search, plain BIC (γ = 0)"),
-               Line2D([], [], ls="none", marker="s", color="#7c6ab8", label="after the search, γ = 0.5"),
-               Line2D([], [], ls="none", marker="D", color="#5a3fa0", label="after the search, γ = 1")]
+               Line2D([], [], ls="none", marker="o", color=INK_2, label="after the search, BIC penalty"),
+               Line2D([], [], ls="none", marker="s", color="#7c6ab8", label="after the search, eBIC penalty, γ = 0.5"),
+               Line2D([], [], ls="none", marker="D", color="#5a3fa0", label="after the search, eBIC penalty, γ = 1")]
     fig.tight_layout()
     fig.suptitle(f"n = {N_LABEL[n]}", x=0.01, ha="left", fontsize=9, color=INK_2)
     fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=4, frameon=False, fontsize=7.5)
@@ -473,7 +477,7 @@ def fig_selection_checks(means, rows, out, n="1e4"):
 
 
 def apply_rule(records: list[dict], rule: str) -> list[dict]:
-    """Under ``rule="ebic1"`` the selected graph is the one Dettling's extended BIC picks and
+    """Under ``rule="ebic1"`` the selected graph is the one the score with Dettling's eBIC penalty picks and
     the searched graph the one the search with the term inside ends at: every ``ebic1_*``
     column is copied over its ``bic_*`` / ``search_*`` counterpart (cells without the rescored
     search get an empty ``search_*``, so that they are left out rather than mislabelled), and
@@ -499,8 +503,8 @@ def apply_rule(records: list[dict], rule: str) -> list[dict]:
     return out
 
 
-def fig_bic_vs_ebic(rows, out, ests=("lasso", "MCP-up", "adaptive")):
-    """The plain BIC against Dettling's extended BIC (gamma = 0.5, 1) as the rule that picks one
+def fig_bic_vs_ebic(rows, out, ests=("lasso", "MCP-up", "adaptive"), kinds=("diff", "edges"), name="bic_vs_ebic"):
+    """The BIC penalty against Dettling's eBIC penalty (gamma = 0.5, 1) in the score that picks one
     graph from a path: paired difference in F1 and the number of edges selected relative to the
     truth, over p at n = 1000 (left two columns) and over n at p = 20 (right column); both C.
     Where the extended term was also used inside the search (waves 5c and 6), the searched
@@ -508,13 +512,13 @@ def fig_bic_vs_ebic(rows, out, ests=("lasso", "MCP-up", "adaptive")):
     sel = [r for r in rows if r["loss"] == "direct" and r["estimator"] in ests]
     if not sel:
         return
-    fig, axes = plt.subplots(2, 3, figsize=(11.5, 6.4), squeeze=False)
+    fig, axes = plt.subplots(len(kinds), 3, figsize=(11.5, 3.2 * len(kinds)), squeeze=False)
     panels = (("C2I", "p", "1000"), ("Cresc", "p", "1000"), ("Cresc", "n", "20"))
     for b, (c, axis, fixed) in enumerate(panels):
         rr = [r for r in sel if r["c"] == c and (r["n"] == fixed if axis == "p" else r["p"] == fixed)]
         xs = sorted({int(r["p"]) for r in rr}) if axis == "p" else [n for n in NS if any(r["n"] == n for r in rr)]
         xpos = xs if axis == "p" else list(range(len(xs)))
-        for a, kind in enumerate(("diff", "edges")):
+        for a, kind in enumerate(kinds):
             ax = axes[a][b]
             style_axes(ax)
             if kind == "diff":
@@ -536,7 +540,7 @@ def fig_bic_vs_ebic(rows, out, ests=("lasso", "MCP-up", "adaptive")):
                         series(ax, xpos, ys, est, err=es)
                     else:
                         ax.plot(xpos, ys, color=col, ls=ls, lw=1.2, marker=mk, ms=4, mfc=SURFACE, zorder=3)
-                if kind == "edges":                         # the plain BIC's edge ratio, dashed, same hue
+                if kind == "edges":                         # the edge ratio with the BIC penalty, dashed, same hue
                     ys = []
                     for x in xs:
                         g = [r for r in rr if r["estimator"] == est and (int(r["p"]) == x if axis == "p" else r["n"] == x)]
@@ -557,26 +561,27 @@ def fig_bic_vs_ebic(rows, out, ests=("lasso", "MCP-up", "adaptive")):
                 ax.set_yscale("log")
             if axis == "p":
                 ax.set_xticks(xs)
-                if a == 1:
+                if a == len(kinds) - 1:
                     ax.set_xlabel("number of nodes p", fontsize=9, color=INK_2)
             else:
                 ax.set_xticks(xpos)
                 ax.set_xticklabels([N_LABEL[n] for n in xs])
-                if a == 1:
+                if a == len(kinds) - 1:
                     ax.set_xlabel("sample size n", fontsize=9, color=INK_2)
             if a == 0:
                 ax.set_title(f"{C_NAME[c]}, " + (f"n = {N_LABEL[fixed]}" if axis == "p" else f"p = {fixed}"),
                              loc="left", fontsize=9.5, color=INK)
-    axes[0][0].set_ylabel("F₁ with the extended BIC minus with the plain BIC", fontsize=8.5, color=INK_2)
-    axes[1][0].set_ylabel("selected edges / true edges (log scale)", fontsize=8.5, color=INK_2)
+    for a, kind in enumerate(kinds):
+        axes[a][0].set_ylabel("F₁ with the eBIC penalty minus with the BIC penalty" if kind == "diff"
+                              else "selected edges / true edges (log scale)", fontsize=8.5, color=INK_2)
     handles = [Line2D([], [], color=STYLE[e][0], marker=STYLE[e][1], lw=1.8, ms=6, label=STYLE[e][3]) for e in ests]
-    handles += [Line2D([], [], color=INK_2, lw=1.8, label="γ = 1, selected graph (top: F₁ difference; bottom: edge ratio)"),
-                Line2D([], [], color=INK_2, ls=":", lw=1.2, marker="s", ms=4, mfc=SURFACE, label="γ = 0.5, selected graph"),
-                Line2D([], [], color=INK_2, ls="--", lw=1.4, label="plain BIC, selected graph (bottom)"),
-                Line2D([], [], color=INK_2, ls=(0, (1, 1)), lw=1.8, marker="x", ms=5, label="γ = 1 inside the search, F₁ difference after the search (top; waves 5c, 6)")]
+    handles += [Line2D([], [], color=INK_2, lw=1.8, label="eBIC penalty, γ = 1, selected graph (top: F₁ difference; bottom: edge ratio)"),
+                Line2D([], [], color=INK_2, ls=":", lw=1.2, marker="s", ms=4, mfc=SURFACE, label="eBIC penalty, γ = 0.5, selected graph"),
+                Line2D([], [], color=INK_2, ls="--", lw=1.4, label="BIC penalty, selected graph (bottom)"),
+                Line2D([], [], color=INK_2, ls=(0, (1, 1)), lw=1.8, marker="x", ms=5, label="eBIC penalty (γ = 1) inside the search, F₁ difference after the search (top; waves 5c, 6)")]
     fig.tight_layout()
     fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=3, frameon=False, fontsize=7.5)
-    save(fig, out, "bic_vs_ebic")
+    save(fig, out, name)
 
 
 def main() -> None:
@@ -584,17 +589,19 @@ def main() -> None:
     ap.add_argument("--root", type=Path, default=ROOT / "runs" / "campaign")
     ap.add_argument("--rule", default="bic", choices=("bic", "ebic1"),
                     help="the selection rule behind the 'selected' and 'after the search' series: "
-                         "the plain BIC (default; figures/) or Dettling's extended BIC with gamma = 1 "
-                         "inside the selection and the search (figures_ebic1/; wave 5c and 6 cells)")
+                         "the score with the BIC penalty (default; figures/) or with Dettling's eBIC "
+                         "penalty, gamma = 1, inside the selection and the search (figures_ebic1/; "
+                         "wave 5c and 6 cells)")
     args = ap.parse_args()
     means = apply_rule(read(args.root / "campaign_means.csv"), args.rule)
     paired = apply_rule(read(args.root / "campaign_paired.csv"), args.rule)
     rows = apply_rule(read(args.root / "campaign_per_dataset.csv"), args.rule)
     out = args.root / ("figures" if args.rule == "bic" else "figures_ebic1")
     if args.rule == "ebic1":
-        METRIC_NAME["bic_f1"] = "F₁ of the eBIC-selected graph (γ = 1)"
-        METRIC_NAME["search_f1"] = "F₁ after the search with the eBIC (γ = 1)"
-        RULE_SHORT["bic_f1"], RULE_SHORT["search_f1"] = "eBIC-selected (γ = 1)", "after the eBIC search (γ = 1)"
+        METRIC_NAME["bic_f1"] = "F₁ of the selected graph (eBIC penalty, γ = 1)"
+        METRIC_NAME["search_f1"] = "F₁ after the search (eBIC penalty, γ = 1)"
+        RULE_SHORT["bic_f1"], RULE_SHORT["search_f1"] = ("selected (eBIC penalty, γ = 1)",
+                                                         "after the search (eBIC penalty, γ = 1)")
     for metric in ("max_f1", "bic_f1", "search_f1", "aupr"):
         fig_twobytwo(means, metric, out)
     for metric in ("max_f1", "bic_f1"):

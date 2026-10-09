@@ -416,7 +416,8 @@ That makes it the right showcase, and the test bed for fixes.
    add / delete / reverse moves, and accept a move when the criterion improves.
    - The criterion matters. The MCP objective itself fixed Example 2 but not the random design at
      $n=1000$ [scratch].
-   - So use BIC/eBIC on a refit, or a held-out loss. This is the bridge to S3.
+   - So use the score with the BIC or the eBIC penalty on a refit, or a held-out loss. This is the
+     bridge to S3.
 3. **Mnet**: MCP plus a ridge term on the off-diagonal entries (Huang et al. 2016).
    - Implementation: the gradient gains $+\lambda_2 M_{\text{off}}$, the Lipschitz constant
      $+\lambda_2$, and the prox is unchanged (Appendix A.7).
@@ -430,8 +431,8 @@ That makes it the right showcase, and the test bed for fixes.
 
 - Mnet with a moderate λ₂: hedge share up, reversed-only down, F1 between MCP and the lasso, and
   possibly better estimation error than the lasso.
-- Reversal search with BIC: fixes Example 2 at large $n$; the random design is still to be
-  determined.
+- Reversal search on the score (BIC penalty): fixes Example 2 at large $n$; the random design is
+  still to be determined.
 
 **Effort.** Example 2 reproduction: 1 h. Mnet: half a day. Reversal search: 1 day (overlaps with
 S3).
@@ -471,15 +472,15 @@ Example 2 type remain.
 
 **What.**
 
-- **Choose λ by BIC/eBIC.** The direct loss has no likelihood, so score the Gaussian
-  log-likelihood of the implied covariance $\Sigma(\hat M)$ (Varando's loss; it needs $\hat M$
-  stable). Prefer an unpenalised refit on the support:
-  $$\mathrm{BIC}=n\big[\log\det\Sigma(\hat M)+\operatorname{tr}(\Sigma(\hat M)^{-1}\hat\Sigma)\big]+\log(n)\,(p+|\hat S|).$$
-  eBIC adds $2\gamma_e\log\binom{p(p-1)}{|\hat S|}$ with $\gamma_e=0.5$ (Chen & Chen 2008). At the
-  selected λ, report F1, precision, recall, skeleton and orientation metrics.
+- **Choose λ by the score, with the BIC or the eBIC penalty.** The direct loss has no likelihood,
+  so score the Gaussian log-likelihood of the implied covariance $\Sigma(\hat M)$ (Varando's loss;
+  it needs $\hat M$ stable). Prefer an unpenalised refit on the support:
+  $$\mathrm{score}=L+\mathrm{pen}_{\mathrm{BIC}},\quad L=n\big[\log\det\Sigma(\hat M)+\operatorname{tr}(\Sigma(\hat M)^{-1}\hat\Sigma)\big],\quad \mathrm{pen}_{\mathrm{BIC}}=\log(n)\,(p+|\hat S|).$$
+  The eBIC penalty adds $2\gamma_e\log\binom{p(p-1)}{|\hat S|}$ with $\gamma_e=0.5$ (Chen & Chen
+  2008). At the selected λ, report F1, precision, recall, skeleton and orientation metrics.
 - **Caveats.**
-  - Breheny & Huang (2011, §4.3) report that AIC/BIC sometimes select local minima in the nonconvex
-    region.
+  - Breheny & Huang (2011, §4.3) report that the score with an AIC or BIC penalty sometimes selects
+    local minima in the nonconvex region.
   - With 2-cycles, the model dimension can be smaller than $p+|S|$ (identifiability; see Dettling
     et al. 2023). The cyclic-SEM paper in the project folder computes the model dimension as the
     maximal rank of a Jacobian, and it assumes *simple* graphs (no 2-cycles) to get the expected
@@ -526,8 +527,9 @@ With 40 datasets per $(p,C)$, expect paired standard errors of about 0.01–0.02
   convention is Breheny & Huang's adaptive rescaling, which is more concave here.
 - Is it acceptable to frame the S1b result around orientation and 2-cycles as a main thesis
   finding, with Example 2 and the regime map as the positive part?
-- For S3: should the score be the likelihood of $\Sigma(M)$ with BIC/eBIC? How should the
-  dimension be counted for graphs with 2-cycles? Should the neighbourhood include reversal moves?
+- For S3: should the score be the likelihood of $\Sigma(M)$ with the BIC or the eBIC penalty? How
+  should the dimension be counted for graphs with 2-cycles? Should the neighbourhood include
+  reversal moves?
 - Already open in `S1_reproduction.md` §9.2: the data behind Figure 5, and the `C_Random_Full` gap.
 
 ---
@@ -723,9 +725,10 @@ def c_star(sigma_hat, U):
 
 ```python
 def local_search(m0, score, refit, max_moves=50):
-    """Greedy search over supports. score(m): lower is better (e.g. eBIC of Sigma(m) on a refit,
-    a held-out loss, or the penalised objective). refit(support_mask, m_init): re-optimise on the
-    proposed support (e.g. unpenalised least squares on the support columns of A, diagonal included)."""
+    """Greedy search over supports. score(m): lower is better (e.g. the score of Sigma(m) with the
+    eBIC penalty on a refit, a held-out loss, or the penalised objective).
+    refit(support_mask, m_init): re-optimise on the proposed support (e.g. unpenalised least
+    squares on the support columns of A, diagonal included)."""
     cur, best = m0.copy(), score(m0)
     p = m0.shape[0]
     for _ in range(max_moves):

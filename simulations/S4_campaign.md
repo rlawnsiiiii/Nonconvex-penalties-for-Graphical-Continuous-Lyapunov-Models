@@ -1,14 +1,16 @@
-the# S4 — The campaign: every estimator with $C = 2I$ and with the rescaled $C$, at scale
+# S4 — The campaign: every estimator with $C = 2I$ and with the rescaled $C$, at scale
 
 *Results of the cluster campaign planned in
 [`../next_steps/051026/cluster_campaign_051026.md`](../next_steps/051026/cluster_campaign_051026.md)
 (the plan, the reasons, the code map). Status on 8 October 2026: waves 1 to 4 complete (one
 $p = 50$ cell, SCAD dense → sparse with the rescaled $C$, at 350 of 400 graphs, its last shards
-still running); wave 5 (the BIC with the likelihood refit and the extended BIC inside the search,
+still running); wave 5 (the score with the likelihood refit and the eBIC penalty inside the search,
 §5; 100 starting graphs for the pure search, §4a) complete on 9 October but for one shard of
 one cell. Numbers:
 `runs/campaign/campaign_{means,paired,per_dataset}.csv` from `simulations/diagnostics/campaign.py`;
-figures: `simulations/diagnostics/plot_campaign.py` → `runs/campaign/figures/`.*
+figures: `simulations/diagnostics/plot_campaign.py` → `runs/campaign/figures/`. Terms: a graph is
+selected by its score, the sum of a loss and a penalty (the BIC penalty or the eBIC penalty);
+definitions in [`../docs/SEARCH.md`](../docs/SEARCH.md) §2.*
 
 ---
 
@@ -25,20 +27,22 @@ settings of the true $C$), the answer is:
    $C$ and +0.086 with $C = 2I$. The gain grows with $p$ and with $n$: at $n = 10^3$ it rises from
    about zero at $p = 10$ to +0.044 ($C = 2I$) and +0.065 (rescaled $C$) for MCP at $p = 50$ (§6a).
 3. **The gain does not need the nonconvex penalty.** The adaptive lasso, which starts from the same
-   dense solution and prunes with a convex step, matches MCP dense → sparse in `max_f1` (differences
-   of 0.00 to 0.045, in its favour) and is better on everything else: `aupr` by +0.08 to +0.14, the
-   BIC-selected graph by +0.02 to +0.08. Over $p$ at $n = 10^3$ its `max_f1` hardly falls (0.58 at
-   $p = 10$, 0.55 to 0.57 at $p = 50$) while the lasso's falls from 0.59 to 0.43 to 0.47, so the gap
-   reaches +0.08 ($C = 2I$) and +0.13 (rescaled $C$) at $p = 50$. The message is "start from the lasso,
-   then prune"; MCP and SCAD are one way to do it, the adaptive lasso the best of the ways tried.
+   dense solution and prunes with a convex step, matches MCP dense → sparse in `max_f1` at $p = 10$
+   and 20 (paired differences −0.010 to +0.024; MCP dense → sparse slightly ahead at $p = 10$,
+   $n \ge 10^4$, the adaptive lasso ahead at $p = 20$) and is better in `aupr` (+0.07 to +0.14) and
+   in the graph selected by the score (+0.01 to +0.04). Over $p$ at $n = 10^3$ its `max_f1` hardly
+   falls (0.58 at $p = 10$, 0.55 to 0.57 at $p = 50$) while the lasso's falls from 0.59 to 0.43 to
+   0.47, so the gap reaches +0.08 ($C = 2I$) and +0.13 (rescaled $C$) at $p = 50$. The message is
+   "start from the lasso, then prune"; MCP and SCAD are one way to do it, the adaptive lasso the best
+   of the ways tried.
 4. **The gain holds for every diagonal true $C$,** known or not: `C_ID`, `C_Random_Min_Diag` and
    `C_Random_Diag` show gains of the same size. For the non-diagonal `C_Random_Full` there is none
    at $p = 10$ and a small one at $p = 20$.
 5. **The correctly specified $C$ roughly doubles the gain** (verdict 6 of `VERDICTS.md`, mechanism
-   in `docs/DENSE_START.md` §7), and it is the only setting in which the BIC-selected graph of the
+   in `docs/DENSE_START.md` §7), and it is the only setting in which the selected graph of the
    dense-start estimators clearly beats the lasso's at $n = 10^3$.
-6. **Without an oracle $\lambda$:** the BIC-selected graphs keep the ranking, with smaller gains at
-   $n = 10^3$. The BIC search then equalises almost everything: it lifts the lasso by +0.09 to +0.14
+6. **Without an oracle $\lambda$:** the graphs the score selects keep the ranking, with smaller gains at
+   $n = 10^3$. The greedy search then equalises almost everything: it lifts the lasso by +0.09 to +0.14
    at $p = 20$ and the dense-start estimators by less, so all lasso-based starts end within 0.02 of
    each other, the adaptive lasso on top. The greedy search from random starts is 0.02 to 0.07
    worse; the greedy search from the truth is 0.10 to 0.24 better, so most of the remaining gap is in the
@@ -49,25 +53,26 @@ settings of the true $C$), the answer is:
    +0.14). Its dense start is the exact fit $-\tfrac12 C\hat\Sigma^{-1}$, not the lasso's dense end;
    §6 for why that is probably the difference. The log-likelihood lasso matches the direct-loss
    lasso; the best estimators on either loss are the direct-loss dense-start ones.
-8. **At large $p$ the plain BIC over-selects badly,** and more so with the rescaled $C$: at $p = 50$,
-   $n = 10^3$ the lasso's BIC-selected graph has 313 ($C = 2I$) and 610 (rescaled $C$) edges for 123
-   true ones, the adaptive lasso's 161 and 301. The BIC-selected $F_1$ therefore falls with $p$ for
-   every estimator, fastest with the rescaled $C$, and the ranking (adaptive lasso, then MCP / SCAD
-   dense → sparse, then the lasso, then the standard paths) stays. Dettling's extended BIC with
-   $\gamma = 1$ halves the excess and is the better rule from $p \approx 30$ on at $n = 10^3$ and from
-   $p = 20$ on at $n \ge 10^4$; where the plain BIC does not over-select (small $p$, $C = 2I$,
-   $n = 10^3$) the term costs up to 0.04 (§5, figure `bic_vs_ebic`).
+8. **At large $p$ the BIC penalty is much too weak and the score selects far too many edges,** and
+   more so with the rescaled $C$: at $p = 50$, $n = 10^3$ the lasso's selected graph has 313
+   ($C = 2I$) and 610 (rescaled $C$) edges for 123 true ones, the adaptive lasso's 161 and 301. The
+   $F_1$ of the selected graph therefore falls with $p$ for every estimator, fastest with the
+   rescaled $C$, and the ranking (adaptive lasso, then MCP / SCAD dense → sparse, then the lasso,
+   then the standard paths) stays. Dettling's eBIC penalty with $\gamma = 1$ halves the excess and is
+   the better penalty from $p \approx 30$ on at $n = 10^3$ and from $p = 20$ on at $n \ge 10^4$; where
+   the BIC penalty is not too weak (small $p$, $C = 2I$, $n = 10^3$) the eBIC term costs up to 0.04
+   (§5, figure `bic_vs_ebic`).
 9. **The pure search needs many sparse starting graphs, and the right kind** (wave 5b, $p = 10$,
    rescaled $C$). With 100 sparse starts instead of 10 it gains +0.05 at $n \ge 10^4$ and ends within
    0.02 of the lasso + search and 0.01 to 0.03 below the adaptive lasso + search, at 10 to 30 times
    their cost and still not saturated; at $n = 10^3$ it gains +0.01 and stays 0.03 to 0.04 behind.
    Uniform starts, the recipe of Nowzohour et al., are far worse than sparse ones (−0.06 to −0.15
    with 100 of each): the start distribution matters more than the number (§4a).
-10. **The selection rule is confirmed, with one amendment** (waves 5a, 5c, $n = 10^4$). The BIC with
+10. **The selection rule is confirmed, with one amendment** (waves 5a, 5c, $n = 10^4$). The score with
    the maximised likelihood gives the same graphs as the least-squares refit (within 0.01, at 30 to
-   180 times the cost). Dettling's extended term *inside* the selection and the search adds +0.02 to
-   every estimator at $p = 20$ and nothing at $p = 10$, with the ranking unchanged; with the
-   over-selection of the plain BIC at large $p$ (point 8) it is the rule to use from $p = 20$ on (§5).
+   180 times the cost). Dettling's eBIC term *inside* the selection and the search adds +0.02 to
+   every estimator at $p = 20$ and nothing at $p = 10$, with the ranking unchanged; as the BIC penalty
+   is too weak at large $p$ (point 8), the eBIC penalty is the one to use from $p = 20$ on (§5).
 
 **The two headline figures.** Over $p$ at Figure 5's sample size, and over $n$ at $p = 10, 20$:
 
@@ -83,13 +88,13 @@ settings of the true $C$), the answer is:
 | `by_p`, `gain_by_p` | the six estimators over $p = 10 \dots 50$ at $n = 10^3$, both $C$; and as paired gains over the lasso | §6a | final (one $p = 50$ cell at 350 of 400 graphs) |
 | `twobytwo_max_f1`, `_aupr`, `_bic_f1`, `_search_f1` | the 2 × 2 over $n$ at $p = 10, 20$ | §2, §5 | final |
 | `by_true_c_max_f1`, `_bic_f1`, `_search_f1` | the gains per setting of the true $C$ | §3 | final |
-| `selection_p20`, `orientation_p20` | oracle $\lambda$ against BIC against search; what the selected graphs consist of | §4, §5 | final |
+| `selection_p20`, `orientation_p20` | oracle $\lambda$ against the selected graph (BIC penalty) against the search; what the selected graphs consist of | §4, §5 | final |
 | `search_ceilings` | the search from the estimators' graphs, from random starts and from the truth | §5 | final (wave 2 complete) |
 | `loglik_p10` | the log-likelihood loss | §6 | final (wave 3 complete) |
 | `restarts` | the pure search with 100 starting graphs, sparse and uniform, over $n$ | §4a | final (wave 5b complete) |
-| `selection_checks` | the BIC with the likelihood refit; the extended term inside the search | §5 | final (one cell at 350 of 400 graphs) |
-| `bic_vs_ebic` | the plain BIC against the extended BIC as the rule: $F_1$ difference and edges selected, over $p$ and $n$ | §5 | final for the selection; the search part fills with wave 6 |
-| `../runs/campaign/figures_ebic1/*` | every rule-dependent figure with the extended BIC as the rule | §5 | selection only until wave 6 is in |
+| `selection_checks` | the score with the likelihood refit; the eBIC term inside the search | §5 | final (one cell at 350 of 400 graphs) |
+| `bic_vs_ebic` | the BIC penalty against the eBIC penalty: $F_1$ difference and edges selected, over $p$ and $n$ | §5 | final for the selection; the search part fills with wave 6 |
+| `../runs/campaign/figures_ebic1/*` | every rule-dependent figure with the eBIC penalty in the score | §5 | selection only until wave 6 is in |
 
 Against the expectations written down before the run (campaign note §3.5): five of seven held,
 one was too cautious (`C_Random_Diag` gains as much as `C_ID`) and one was wrong in size (the
@@ -105,7 +110,7 @@ search helps the lasso far more than expected). Details in §7.
 | data | standardised; $n = 10^3, 10^4, \infty$ (population covariance) |
 | $C$ in the fit | `C2I`: $C = 2I$ (Dettling's pipeline); `Cresc`: $C = 2\,\mathrm{diag}(1/s_i^2)$, the rescaled $C$ (`docs/DENSE_START.md` §2) |
 | estimators, wave 1 (direct loss) | lasso; MCP and SCAD on the standard path (sparse → dense); MCP and SCAD dense → sparse (`--direction up`); MCP and SCAD by LLA (`--method lla`); adaptive lasso (`--method adaptive`). Definitions: `docs/DENSE_START.md` §3–§5 |
-| per graph and estimator | the path (100 $\lambda$); its `max_f1`, `auc`, `aupr`; the BIC-selected graph; that graph after the greedy BIC search; Dettling's eBIC selection, computed afterwards from the stored scores (`docs/SEARCH.md` §2a) |
+| per graph and estimator | the path (100 $\lambda$); its `max_f1`, `auc`, `aupr`; the graph selected by the score with the BIC penalty; that graph after the greedy search; the graph selected with Dettling's eBIC penalty, computed afterwards from the stored scores (`docs/SEARCH.md` §2a) |
 | wave 2 | the greedy search from random starts (empty graph + 10 random graphs; the method of Améndola et al. 2020, §4a) and the same search started from the true graph, $p = 10$ with both $C$, $p = 20$ with the rescaled $C$ |
 | wave 3 | log-likelihood loss, $p = 10$: lasso and MCP, both path orders, both $C$ |
 | wave 4 | $p = 15 \dots 50$ at $n = 1000$: running |
@@ -179,7 +184,7 @@ dense → sparse, rescaled $C$:
 |---|---|---|
 | `max_f1` | +0.022 / +0.045 / 0.000 | +0.024 / +0.011 / +0.002 |
 | `aupr` | +0.085 / +0.116 / +0.078 | +0.128 / +0.143 / +0.144 |
-| BIC-selected $F_1$ | +0.052 / +0.075 / +0.021 | +0.029 / +0.017 / +0.040 |
+| $F_1$ of the selected graph | +0.052 / +0.075 / +0.021 | +0.029 / +0.017 / +0.040 |
 | after the search | +0.016 / +0.023 / +0.013 | +0.004 / +0.008 / +0.012 |
 
 All but the $n = \infty$ `max_f1` entries have $z > 3$. The convex estimator is at least as good on
@@ -193,10 +198,10 @@ to a direction the moment a pair enters (`next_steps/051026/orientation_lock_in.
 
 ![](../runs/campaign/figures/orientation_p20.png)
 
-*What the BIC-selected graphs consist of, $p = 20$, $n = 10^4$, rescaled $C$, diagonal true $C$ (300
-graphs). The lasso keeps both directions of 14 true pairs and 29 false edges; the standard MCP path
-commits, and is wrong 9 times; the dense-start estimators commit and are right (orientation
-accuracy 0.89 against the lasso's 0.87) with a third to a half of the false edges.*
+*What the selected graphs (BIC penalty) consist of, $p = 20$, $n = 10^4$, rescaled $C$, diagonal
+true $C$ (300 graphs). The lasso keeps both directions of 14 true pairs and 29 false edges; the
+standard MCP path commits, and is wrong 9 times; the dense-start estimators commit and are right
+(orientation accuracy 0.89 against the lasso's 0.87) with a third to a half of the false edges.*
 
 ## 4a. The greedy search, in detail
 
@@ -207,7 +212,7 @@ differ only in the starting graph:
 
 | name in this write-up | start | where |
 |---|---|---|
-| "after the BIC search" (`search_f1` of an estimator) | the estimator's BIC-selected graph | wave 1, every cell |
+| "after the search" (`search_f1` of an estimator) | the estimator's selected graph | wave 1, every cell |
 | "greedy search from random starts" (`search-pure`) | the empty graph and 10 random graphs; best final score kept | wave 2 |
 | "greedy search from the truth" (`search-truth`) | the true graph | wave 2, as a ceiling |
 
@@ -219,7 +224,7 @@ the paper restricts to simple graphs).
 (the normal equations on the columns of the design matrix that belong to $S$; `DirectRefit`), under
 the same $C$ the paths used, then
 
-$$\mathrm{BIC}(S)=n\big[\log\det\Sigma(\hat M_S)+\operatorname{tr}\big(\Sigma(\hat M_S)^{-1}\hat\Sigma\big)\big]+\log(n)\,(p+|S|),$$
+$$\mathrm{score}(S)=L(S)+\mathrm{pen}(S),\qquad L(S)=n\big[\log\det\Sigma(\hat M_S)+\operatorname{tr}\big(\Sigma(\hat M_S)^{-1}\hat\Sigma\big)\big],\qquad \mathrm{pen}_{\mathrm{BIC}}(S)=\log(n)\,(p+|S|),$$
 
 with $\Sigma(\hat M_S)$ the stationary covariance of the refit (the solution of
 $M\Sigma+\Sigma M^\top+C=0$). This is $-2$ times the Gaussian log-likelihood plus the BIC penalty
@@ -246,14 +251,14 @@ In pseudo-code:
 
 ```
 greedy_search(S):
-    best_score <- BIC(S)
+    best_score <- score(S)
     repeat
         candidates <- {delete(e) : e in S} ∪ {reverse(e) : e in S, reverse(e) not in S}
                       ∪ {add(e) : e off-diagonal, e not in S}
-        S', score' <- the candidate with the lowest BIC (cached refits)
+        S', score' <- the candidate with the lowest score (cached refits)
         if score' < best_score:  S <- S'; best_score <- score'
         else:                    return S
-multistart(S_1 .. S_11):  return the greedy_search(S_k) with the lowest final BIC
+multistart(S_1 .. S_11):  return the greedy_search(S_k) with the lowest final score
 ```
 
 **Differences from the paper.** The paper's method and this one are written out side by side as
@@ -310,8 +315,8 @@ and the truth end on the same graphs:
 | sparse starts, $r = 100$ | 0.486 | **0.581** | **0.589** |
 | uniform starts, $r = 100$, without the empty graph | 0.413 | 0.434 | 0.429 |
 | uniform starts, $r = 100$, with the empty graph | 0.441 | 0.488 | 0.484 |
-| lasso + BIC search | 0.511 | 0.597 | 0.592 |
-| adaptive lasso + BIC search | 0.527 | 0.608 | 0.602 |
+| lasso + search | 0.511 | 0.597 | 0.592 |
+| adaptive lasso + search | 0.527 | 0.608 | 0.602 |
 | search started from the truth | 0.695 | 0.800 | 0.829 |
 
 - **At $n \ge 10^4$ the number of starting graphs was the limitation.** With 100 sparse starts the
@@ -333,7 +338,7 @@ and the truth end on the same graphs:
   the 100-start version is reported here and in verdict 24.
 
 **A start can be dead.** With the rescaled $C$ the least-squares refit of a very sparse support is
-not always stable (`docs/SEARCH.md` §2a): the empty graph then has BIC $= +\infty$ and the search
+not always stable (`docs/SEARCH.md` §2a): the empty graph then has score $= +\infty$ and the search
 cannot leave it. In wave 2 this is so for 6 to 7 % of the graphs at $p = 10$ and 24 to 25 % at
 $p = 20$ (most under `C_Random_Min_Diag` and `C_Random_Full`; never with $C = 2I$), and for the true
 support of 2 to 5 % of the graphs, almost all `C_Random_Full`. The best of the 11 starts was dead
@@ -345,21 +350,22 @@ makes its first move without a warm start. The likelihood refit of wave 5a has n
 support; on Example 2 every support with up to 7 edges was scored exhaustively and the greedy
 search compared with the global optimum from every start.
 
-## 5. Without the oracle: BIC, eBIC and the search
+## 5. Without the oracle: the score, the eBIC penalty and the search
 
 ![](../runs/campaign/figures/selection_p20.png)
 
 *$p = 20$, rescaled $C$: the same four estimators under the three ways to get one graph from a path.*
 
-- **BIC-selected graphs keep the ranking** (figure `by_true_c_bic_f1`): MCP dense → sparse minus the
-  lasso +0.05 / +0.11 / +0.09 at $p = 20$, ≈ 0 / +0.03 / +0.03 at $p = 10$; the adaptive lasso
-  +0.08 / +0.13 / +0.13 and +0.02 / +0.04 / +0.04. With $C = 2I$ the gains are a third of that.
-  Plain BIC over-selects on every path at these sizes (lasso at $p = 20$: 95, 102, 124 edges for 47
-  true ones; MCP dense → sparse 62, 68, 100; the $n = \infty$ scores use a nominal $n = 10^6$).
-- **Dettling's extended BIC** ($\gamma = 1$, his eq. 6.2) changes the selected $F_1$ by at most
+- **The graphs the score selects keep the ranking** (figure `by_true_c_bic_f1`): MCP dense → sparse
+  minus the lasso +0.05 / +0.11 / +0.09 at $p = 20$, ≈ 0 / +0.03 / +0.03 at $p = 10$; the adaptive
+  lasso +0.08 / +0.13 / +0.13 and +0.02 / +0.04 / +0.04. With $C = 2I$ the gains are a third of
+  that. The BIC penalty is too weak on every path at these sizes: the score selects too many edges
+  (lasso at $p = 20$: 95, 102, 124 edges for 47 true ones; MCP dense → sparse 62, 68, 100; the
+  $n = \infty$ scores use a nominal $n = 10^6$).
+- **Dettling's eBIC penalty** ($\gamma = 1$, his eq. 6.2) changes the selected $F_1$ by at most
   ±0.03 and the ranking not at all; its sparser choice still leaves the lasso with 80 to 93 edges at
-  $p = 20$. The path, not the rule, is what matters (`docs/SEARCH.md` §2a).
-- **The search equalises.** It lifts the lasso's BIC graph by +0.09 / +0.14 / +0.12 at $p = 20$,
+  $p = 20$. The path, not the penalty, is what matters (`docs/SEARCH.md` §2a).
+- **The search equalises.** It lifts the lasso's selected graph by +0.09 / +0.14 / +0.12 at $p = 20$,
   MCP dense → sparse by +0.06 / +0.04 / +0.03, the adaptive lasso by +0.03 / +0.03 / 0.00; afterwards
   all lasso-based starts lie within 0.02 of each other, the adaptive lasso on top (+0.01 over
   lasso + search, $z$ 3 to 5). At $p = 10$ the search adds little to anyone.
@@ -377,7 +383,7 @@ differences to lasso + search, per setting of the true $C$.*
   saturated, so this is a lower bound on the method (wave 5b runs 100). It is also by far
   the most expensive method: a median of 23,000 (p = 10) to 490,000 (p = 20, $n = \infty$) supports
   scored per graph, 9 s to 20 minutes, against 2 to 60 moves and under a minute for a search from a
-  path's BIC-selected graph. The empty graph is the best of its 11 starts in only 7 to 18 % of the
+  path's selected graph. The empty graph is the best of its 11 starts in only 7 to 18 % of the
   graphs; none of the starts ends exactly at the truth at $n = 10^3$, and at $n = \infty$ about 0.2
   of the 11 do.
 - **The greedy search started from the truth** ends 0.10 to 0.24 above the best data-driven method. With
@@ -390,17 +396,17 @@ differences to lasso + search, per setting of the true $C$.*
 
 ![](../runs/campaign/figures/selection_checks.png)
 
-*Left: the BIC-selected and the searched graph under the campaign's least-squares refit and under
-the likelihood refit (wave 5a). Right: the searched graph with the plain BIC and with Dettling's
-extended term inside the selection and the search (wave 5c). $n = 10^4$.*
+*Left: the selected and the searched graph under the campaign's least-squares refit and under
+the likelihood refit (wave 5a). Right: the searched graph with the BIC penalty and with Dettling's
+eBIC penalty inside the selection and the search (wave 5c). $n = 10^4$.*
 
-**The BIC proper changes nothing (wave 5a).** The BIC above scores a support by the likelihood
+**The score with the likelihood refit changes nothing (wave 5a).** The score above uses the likelihood
 *at the least-squares refit*, not the maximised likelihood (`docs/SEARCH.md` §2a); Améndola et al.
 and Dettling use the maximised one. The cells `direct_<lasso|MCP-up|adaptive>-ml_<C>` ($p = 10$,
 $n = 10^4$, `--refit loglik`; 400 graphs, the lasso cell with the rescaled $C$ at 350) repeat the
 selection and the search with the maximised likelihood on the same paths:
 
-| $p = 10$, $n = 10^4$, $F_1$ | BIC-selected, LS → ML | after the search, LS → ML |
+| $p = 10$, $n = 10^4$, $F_1$ | selected, LS → ML | after the search, LS → ML |
 |---|---|---|
 | lasso, $C = 2I$ / rescaled $C$ | 0.570 → 0.571 / 0.566 → 0.572 | 0.570 → 0.570 / 0.597 → 0.602 |
 | MCP dense → sparse | 0.564 → 0.563 / 0.591 → 0.594 | 0.566 → 0.565 / 0.596 → 0.605 |
@@ -408,14 +414,14 @@ selection and the search with the maximised likelihood on the same paths:
 
 Every difference is within 0.01 and within one standard error; the ranking is unchanged; the
 likelihood refit costs 30 to 180 times more (12 to 67 CPU-h per cell against 0.4 to 5). The
-least-squares refit is a valid stand-in for the BIC proper at this size.
+least-squares refit is a valid stand-in for the likelihood refit at this size.
 
-**The extended term inside the search helps at $p = 20$, not at $p = 10$ (wave 5c).** The cells
+**The eBIC term inside the search helps at $p = 20$, not at $p = 10$ (wave 5c).** The cells
 `direct_<lasso|MCP-up|adaptive>-ebic_<C>` ($p = 10, 20$, $n = 10^4$, `--ebic-gamma 0.5 1`) select and
-search once more per $\gamma$ on the same path, next to the plain BIC, with Dettling's
+search once more per $\gamma$ on the same path, next to the BIC penalty, with Dettling's eBIC term
 $4\gamma|E|\log p$:
 
-| $n = 10^4$, $F_1$ after the search: plain BIC → $\gamma = 1$ (paired $z$) | $p = 10$ | $p = 20$ |
+| $n = 10^4$, $F_1$ after the search: BIC penalty → eBIC penalty, $\gamma = 1$ (paired $z$) | $p = 10$ | $p = 20$ |
 |---|---|---|
 | lasso, $C = 2I$ / rescaled $C$ | 0.570 → 0.570 (0) / 0.597 → 0.598 (0) | 0.614 → 0.632 (6) / 0.650 → 0.666 (6) |
 | MCP dense → sparse | 0.566 → 0.562 (−1) / 0.596 → 0.602 (2) | 0.602 → 0.624 (9) / 0.658 → 0.677 (8) |
@@ -432,28 +438,29 @@ weights.
 
 ![](../runs/campaign/figures/bic_vs_ebic.png)
 
-*The plain BIC against Dettling's extended BIC as the rule that picks one graph from a path, for
-the lasso, MCP dense → sparse and the adaptive lasso. Top: paired difference in $F_1$ of the
-selected graph, $\gamma = 1$ (solid) and $\gamma = 0.5$ (dotted, hollow squares); the x-marked dotted
-lines are the difference after the search with $\gamma = 1$ inside it, where that was run (wave 5c;
-wave 6 fills the rest). Bottom: edges selected over true edges, log scale; dashed = plain BIC.
-Columns: over $p$ at $n = 10^3$ with $C = 2I$ and with the rescaled $C$; over $n$ at $p = 20$ with the
-rescaled $C$.*
+*The BIC penalty against Dettling's eBIC penalty in the score that picks one graph from a path,
+for the lasso, MCP dense → sparse and the adaptive lasso. Top: paired difference in $F_1$ of the
+selected graph, with the eBIC penalty minus with the BIC penalty, $\gamma = 1$ (solid) and
+$\gamma = 0.5$ (dotted, hollow squares); the x-marked dotted lines are the difference after the
+search with $\gamma = 1$ inside it, where that was run (wave 5c; wave 6 fills the rest). Bottom:
+edges selected over true edges, log scale; dashed = BIC penalty. Columns: over $p$ at $n = 10^3$
+with $C = 2I$ and with the rescaled $C$; over $n$ at $p = 20$ with the rescaled $C$.*
 
-**When the extended term helps, and when it hurts.** It is the right correction where the plain
-BIC over-selects, and the wrong one where it does not. Bottom row: the plain BIC picks 1.2 to 3.3
-times the true number of edges for the lasso and 0.8 to 1.6 times for the dense-start estimators
-with $C = 2I$, and up to 5 times with the rescaled $C$; $\gamma = 1$ halves the excess, and for the
-adaptive lasso with $C = 2I$ it goes below the truth (0.8). Top row, accordingly: with $C = 2I$ at
-$n = 10^3$ the extended BIC *loses* for every estimator up to $p = 25$ to $30$ (the lasso by 0.03 to
-0.04, the dense-start ones by 0.01 to 0.02) and wins from $p = 40$ on; with the rescaled $C$ it
-wins from $p = 30$ on (up to +0.05 for the adaptive lasso at $p = 50$) and loses for the lasso below;
-over $n$ at $p = 20$ it wins at $n \ge 10^4$ (+0.01 to +0.02) and loses for the lasso at $n = 10^3$.
-$\gamma = 0.5$ sits between the two rules throughout. The ranking of the estimators is the same
-under either rule everywhere. So: the extended term from $p \approx 30$ on at $n = 10^3$, and from
-$p = 20$ on at $n \ge 10^4$; below that the plain BIC, or $\gamma = 0.5$ as the compromise. Wave 6
-(`cluster/plan_091026.txt`) rescores every wave 1 cell with the term inside the search, after
-which every figure of this write-up exists under that rule in `../runs/campaign/figures_ebic1/`
+**When the eBIC term helps, and when it hurts.** It is the right correction where the BIC penalty
+is too weak and the score selects too many edges, and the wrong one where it is not. Bottom row:
+with the BIC penalty the score picks 1.2 to 3.3 times the true number of edges for the lasso and
+0.8 to 1.6 times for the dense-start estimators with $C = 2I$, and up to 5 times with the rescaled
+$C$; $\gamma = 1$ halves the excess, and for the adaptive lasso with $C = 2I$ it goes below the
+truth (0.8). Top row, accordingly: with $C = 2I$ at $n = 10^3$ the eBIC penalty *loses* for every
+estimator up to $p = 25$ to $30$ (the lasso by 0.03 to 0.04, the dense-start ones by 0.01 to 0.02)
+and wins from $p = 40$ on; with the rescaled $C$ it wins from $p = 30$ on (up to +0.05 for the
+adaptive lasso at $p = 50$) and loses for the lasso below; over $n$ at $p = 20$ it wins at
+$n \ge 10^4$ (+0.01 to +0.02) and loses for the lasso at $n = 10^3$. $\gamma = 0.5$ sits between
+the two penalties throughout. The ranking of the estimators is the same with either penalty
+everywhere. So: the eBIC penalty from $p \approx 30$ on at $n = 10^3$, and from $p = 20$ on at
+$n \ge 10^4$; below that the BIC penalty, or $\gamma = 0.5$ as the compromise. Wave 6
+(`cluster/plan_091026.txt`) rescores every wave 1 cell with the eBIC term inside the search, after
+which every figure of this write-up exists with that penalty in `../runs/campaign/figures_ebic1/`
 (`plot_campaign.py --rule ebic1`; until then those figures show the selection only).
 
 ## 6. The log-likelihood loss (wave 3, $p = 10$, complete)
@@ -503,7 +510,7 @@ log-likelihood fits are machine-dependent for single graphs (S2b §2); only the 
 
 *Figure 5's setting, $n = 10^3$, 800 graphs per cell at $p = 10, 20$ and 400 at $p = 15, 25, 30, 40,
 50$ (the SCAD dense → sparse cell with the rescaled $C$ at $p = 50$: 350). Rows: $F_1$ at the oracle
-$\lambda$, area under the precision–recall curve, $F_1$ of the BIC-selected graph.*
+$\lambda$, area under the precision–recall curve, $F_1$ of the selected graph (BIC penalty).*
 
 ![](../runs/campaign/figures/gain_by_p.png)
 
@@ -539,26 +546,26 @@ $z$ from 4 at $p = 20$ to 18 to 34 at $p = 50$.
 - **$p > n$ is no obstacle.** At $p = 40$ and $50$ the drift matrix has 1 600 and 2 500 free entries
   against $n = 10^3$ observations, the dense start is a least-squares fit on a rank-deficient design,
   and the gains are the largest of the sweep.
-- **The plain BIC over-selects at large $p$, badly, and worst with the rescaled $C$.** Mean edges of
-  the BIC-selected graph against the true number:
+- **At large $p$ the BIC penalty is much too weak and the score selects far too many edges, worst
+  with the rescaled $C$.** Mean edges of the selected graph against the true number:
 
 | $n = 10^3$, edges | $p = 10$ (23 true) | 20 (47) | 30 (73) | 40 (98) | 50 (123) |
 |---|---|---|---|---|---|
-| lasso, BIC, $C = 2I$ / rescaled $C$ | 24 / 27 | 71 / 95 | 129 / 205 | 216 / 384 | 313 / 610 |
-| adaptive lasso, BIC | 18 / 19 | 47 / 57 | 81 / 111 | 120 / 188 | 161 / 301 |
-| MCP dense → sparse, BIC | 18 / 19 | 50 / 62 | 88 / 128 | 134 / 227 | 183 / 365 |
-| lasso, eBIC $\gamma = 1$ | 20 / 23 | 53 / 80 | 92 / 155 | 129 / 282 | 164 / 440 |
-| adaptive lasso, eBIC $\gamma = 1$ | 14 / 16 | 33 / 42 | 51 / 79 | 70 / 135 | 89 / 203 |
+| lasso, BIC penalty, $C = 2I$ / rescaled $C$ | 24 / 27 | 71 / 95 | 129 / 205 | 216 / 384 | 313 / 610 |
+| adaptive lasso, BIC penalty | 18 / 19 | 47 / 57 | 81 / 111 | 120 / 188 | 161 / 301 |
+| MCP dense → sparse, BIC penalty | 18 / 19 | 50 / 62 | 88 / 128 | 134 / 227 | 183 / 365 |
+| lasso, eBIC penalty, $\gamma = 1$ | 20 / 23 | 53 / 80 | 92 / 155 | 129 / 282 | 164 / 440 |
+| adaptive lasso, eBIC penalty, $\gamma = 1$ | 14 / 16 | 33 / 42 | 51 / 79 | 70 / 135 | 89 / 203 |
 
-  The BIC-selected $F_1$ therefore falls with $p$ for every estimator (lasso 0.51 → 0.40 with
+  The $F_1$ of the selected graph therefore falls with $p$ for every estimator (lasso 0.51 → 0.40 with
   $C = 2I$, 0.51 → 0.28 with the rescaled $C$), and the dense-start estimators, which select fewer
   edges to begin with, keep their lead: +0.06 (MCP dense → sparse) and +0.10 to +0.12 (adaptive
-  lasso) at $p = 50$. Dettling's extended BIC with $\gamma = 1$ halves the excess edges and gives a
-  higher $F_1$ than the plain BIC for every estimator from $p = 25$ on (lasso 0.405 against 0.397 at
+  lasso) at $p = 50$. Dettling's eBIC penalty with $\gamma = 1$ halves the excess edges and gives a
+  higher $F_1$ than the BIC penalty for every estimator from $p = 25$ on (lasso 0.405 against 0.397 at
   $p = 50$ with $C = 2I$, 0.311 against 0.279 with the rescaled $C$; adaptive lasso 0.506 against
   0.492 and 0.444 against 0.395), without changing the ranking. Why the rescaled $C$ makes the
-  plain BIC select more edges is not worked out; the extended term inside the search (wave 5c) is
-  the pragmatic answer.
+  score with the BIC penalty select more edges is not worked out; the eBIC term inside the search
+  (wave 5c) is the pragmatic answer.
 
 ## 7. Expectations against outcome
 
@@ -571,14 +578,15 @@ Written down before the run (campaign note §3.5):
 | 3. with $C = 2I$: a tie at $n = 10^3$, at most +0.05 at large $n$ | tie at $p = 10$; at $p = 20$ up to **+0.09** |
 | 4. standard paths lose with either $C$, MCP clearly, SCAD slightly | held; SCAD ties with the rescaled $C$ at $p = 20$ |
 | 5. LLA and the adaptive lasso match dense → sparse in `max_f1`; the adaptive lasso better in `aupr` | adaptive lasso: held, and better on every data-driven metric too; LLA: held at $p = 10$, **−0.03 at $p = 20$** |
-| 6. BIC keeps the order with smaller gains at $n = 10^3$; the search adds +0.01 to +0.03 with the rescaled $C$, nothing with $C = 2I$ | first half held; the search adds **+0.09 to +0.14 to the lasso** at $p = 20$ and less to the others, with either $C$ (more with the rescaled one) |
+| 6. selection by the score keeps the order with smaller gains at $n = 10^3$; the search adds +0.01 to +0.03 with the rescaled $C$, nothing with $C = 2I$ | first half held; the search adds **+0.09 to +0.14 to the lasso** at $p = 20$ and less to the others, with either $C$ (more with the rescaled one) |
 | 7. log-likelihood: open | dense → sparse MCP does not beat the lasso in `max_f1` at finite $n$ on this loss, does in `aupr` with the rescaled $C$ and in `max_f1` at $n = \infty$ (§6) |
-| 8. larger $p$ (campaign note §3.4, wave 4): "whether dense → sparse still helps at $p = 40, 50$ with $n = 1000$ is not known" | it helps most there: the gap to the lasso grows monotonically with $p$, to +0.04 / +0.07 (MCP dense → sparse) and +0.08 / +0.13 (adaptive lasso) at $p = 50$ (§6a); the plain BIC over-selects badly at large $p$ |
+| 8. larger $p$ (campaign note §3.4, wave 4): "whether dense → sparse still helps at $p = 40, 50$ with $n = 1000$ is not known" | it helps most there: the gap to the lasso grows monotonically with $p$, to +0.04 / +0.07 (MCP dense → sparse) and +0.08 / +0.13 (adaptive lasso) at $p = 50$ (§6a); at large $p$ the BIC penalty is much too weak and the score selects far too many edges |
 
 The reading rules of §3.6 of the note: the claim "MCP / SCAD dense → sparse beat the lasso when $C$
 is specified correctly" stands ($z$ 6 to 30 for `C_ID` at $n \ge 10^4$, both $p$); it extends to a
 mildly wrong and to a wrong diagonal $C$; and "the nonconvex penalty is needed" fails, because the
-adaptive lasso does at least as well. $C$ is the bottleneck only when it is not diagonal.
+adaptive lasso does as well in `max_f1` (±0.01 at $p = 10$, ahead from $p = 20$ on) and better in
+`aupr` and the selected graph. $C$ is the bottleneck only when it is not diagonal.
 
 ## 8. What this means for the thesis
 
@@ -587,7 +595,8 @@ adaptive lasso does at least as well. $C$ is the bottleneck only when it is not 
   direction); used from a dense start they are better, for a reason that can be shown too (the
   lasso hedges, the pruning resolves the hedge). The second half is not specific to MCP / SCAD.
 - The cleanest positive statement is about the adaptive lasso: convex, deterministic, cheapest,
-  best on every metric here, with Zou's theory behind it.
+  best or tied on every metric here (MCP dense → sparse is ahead by at most 0.01 in oracle $F_1$
+  at $p = 10$, $n \ge 10^4$), with Zou's theory behind it.
 - The rescaled $C$ belongs in the simulation as the correctly specified benchmark, with the
   $C = 2I$ rows as the comparison with Dettling's pipeline as published; both are reported.
 - Open: wave 3 complete and the log-likelihood path from the lasso's dense end; wave 4 for the
@@ -598,11 +607,11 @@ adaptive lasso does at least as well. $C$ is the bottleneck only when it is not 
 | | |
 |---|---|
 | `runs/campaign/<cell>/shards/*.npz` | the raw results (gitignored; `campaign note §4.3` lists the fields) |
-| `runs/campaign/campaign_per_dataset.csv` | one row per graph and estimator: path metrics, BIC / eBIC / search graphs with their orientation breakdown |
+| `runs/campaign/campaign_per_dataset.csv` | one row per graph and estimator: path metrics, the graphs selected with the BIC penalty and with the eBIC penalty and the searched graphs, with their orientation breakdown |
 | `runs/campaign/campaign_means.csv`, `campaign_paired.csv` | the tables of this write-up |
 | `runs/campaign/campaign_baseline_check.txt` | the reproduction of the n-sweep cells |
 | `runs/campaign/figures/` | the figures above and `twobytwo_{bic_f1,search_f1,aupr}`, `by_true_c_bic_f1`; `by_p`, `gain_by_p` (§6a), `restarts` (§4a), `selection_checks`, `bic_vs_ebic` (§5) |
-| `runs/campaign/figures_ebic1/` | the rule-dependent figures with the extended BIC as the rule (`plot_campaign.py --rule ebic1`) |
+| `runs/campaign/figures_ebic1/` | the rule-dependent figures with the eBIC penalty in the score (`plot_campaign.py --rule ebic1`) |
 | `runs/campaign/campaign_restarts.csv`, `.txt` | the best of the first $r$ starting graphs, every cell of waves 2 and 5b (`simulations/diagnostics/restarts.py`) |
 | `simulations/diagnostics/campaign.py`, `plot_campaign.py` | tables and figures |
 | `simulations/diagnostics/restarts.py` → `runs/campaign/campaign_restarts.csv` | the best of the first $r$ randomly drawn starting graphs of the pure search, for every $r$ (wave 2: scores only; wave 5b: also $F_1$) |

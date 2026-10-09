@@ -20,8 +20,8 @@ was computed with the repository code.*
 **Verdict: the independent study is promising, and it changes the plan.**
 
 1. **The two studies agree wherever they overlap.** On the same 40 graphs, the two independent
-   implementations of the BIC search give the same directed $F_1$ to three decimals in 14 of 18
-   shared numbers and within 0.01 in the others (§2).
+   implementations of the greedy search (on the score) give the same directed $F_1$ to three
+   decimals in 14 of 18 shared numbers and within 0.01 in the others (§2).
 2. **It adds two levers that I did not test, and both hold up in my replication** (§4):
    - **The right $C$ after standardising.** Standardised data follow the model with
      $C = 2\,\mathrm{diag}(1/s_{ii}^2)$, not $C = 2I$. With that $C$ the true graph fits exactly for
@@ -55,11 +55,11 @@ was computed with the repository code.*
 | | my overnight run (S3b) | independent study |
 |---|---|---|
 | code | repository solvers; new `gclm.solvers.search` | own C solvers, validated against the repository on 20 datasets |
-| question | does a greedy BIC search with add / delete / reverse moves improve on the path estimators, and from which start? | why is the pilot negative, and which estimators do beat the lasso? |
+| question | does a greedy search on the score with add / delete / reverse moves improve on the path estimators, and from which start? | why is the pilot negative, and which estimators do beat the lasso? |
 | graphs | Figure 5 generator, all four $C$ settings, $p = 10$ (160 per $n$) and $p = 20$; Example 2 | Figure 5 generator, **`C_ID` only**, $p = 10$ (52–100) and $p = 20$ (24); Example 2; a strong-signal DGP without 2-cycles |
 | scales | Dettling's pipeline (standardised, $C = 2I$) and the raw covariance | Dettling's pipeline ("identity") and standardised with $C = 2\,\mathrm{diag}(1/s_{ii}^2)$ ("variance") |
-| estimators | lasso / MCP / SCAD paths (sparse → dense); BIC search from each; pure search with random restarts | 13 estimators, among them MCP dense → sparse, LLA, adaptive lasso, backward elimination with exchange moves; a trial of the S3b search |
-| tuning | BIC-selected $\lambda$ (and the oracle best-F1 $\lambda$ as reference) | oracle `max_f1` along the path, and BIC-selected graphs |
+| estimators | lasso / MCP / SCAD paths (sparse → dense); greedy search (on the score) from each; pure search with random restarts | 13 estimators, among them MCP dense → sparse, LLA, adaptive lasso, backward elimination with exchange moves; a trial of the S3b search |
+| tuning | $\lambda$ selected by the score (and the oracle best-F1 $\lambda$ as reference) | oracle `max_f1` along the path, and graphs selected by the score |
 
 The raw scale and the "variance" scale describe the same model: "variance" is the raw-scale problem
 written in the standardised variable. They differ in the lasso penalty, which is unweighted on the
@@ -68,7 +68,7 @@ raw scale and weighted by $s_j/s_i$ on the "variance" scale.
 ## 2. Where the two studies agree
 
 **The same cells, computed twice.** Directed $F_1$ on the 40 `C_ID` graphs ($p = 10$, $k = 1..4$,
-reps 0–9): the path's support at its BIC $\lambda$ → after the BIC search.
+reps 0–9): the path's support at the $\lambda$ selected by the score → after the greedy search.
 
 | | mine | independent study [IS] |
 |---|---|---|
@@ -87,7 +87,7 @@ small differences at $n = \infty$ are within what tie-breaking between equal-sco
 **The same conclusions:**
 
 - **On Dettling's pipeline the model is misspecified**, and a likelihood-based score suffers from it.
-  I saw it as "BIC prefers wrong graphs"; the independent study measures it directly: a
+  I saw it as "the score prefers wrong graphs"; the independent study measures it directly: a
   likelihood-ratio test rejects the *true* graph in 34 % of datasets at $n = 10^3$ and 75 % at
   $10^4$ [IS].
 - **The pilot's MCP and SCAD paths are the worst starting points for a search.** The search does
@@ -95,7 +95,7 @@ small differences at $n = \infty$ are within what tie-breaking between equal-sco
 - **The search is a finishing step.** Its gain depends on the start: nothing on a good start, a lot
   on a dense one.
 - **Greedy from the empty graph is poor.** It commits to the first direction it sees.
-- **On Example 2 the score, not the search, is the limit at $n \le 10^4$.** The exhaustive BIC
+- **On Example 2 the score, not the search, is the limit at $n \le 10^4$.** The exhaustive score
   optimum is not the true graph in any of 5 datasets there [IS]; my exhaustive check found the same
   on two datasets. At $n = 10^5$ and $\infty$ reversal moves recover the 5-cycle.
 - **The lasso's habit of keeping both directions is the right response to ambiguity** under
@@ -186,8 +186,8 @@ $n = 10^3 / 10^4 / \infty$ (`C_ID`, raw scale).
   [IS §12].
 - **GMC** (a nonconvex penalty with a convex objective) is only marginally better than the lasso
   [IS §10]. Forward stepwise selection and GLS-type weighting did not help.
-- **At $p = 20$** (24 graphs) the BIC-selected graphs of dense → sparse MCP have a structural
-  Hamming distance of 23.5 against 54.3 for the lasso at $n = 10^4$ [IS §11].
+- **At $p = 20$** (24 graphs) the graphs selected by the score on the dense → sparse MCP path have
+  a structural Hamming distance of 23.5 against 54.3 for the lasso at $n = 10^4$ [IS §11].
 
 ## 4. Replication with the repository's solvers
 
@@ -218,35 +218,38 @@ Hollow orange: the path of every thesis run so far. Filled: dense → sparse.
 | MCP, dense → sparse | 0.625 (+0.2) | 0.675 (+0.6) | 0.725 (+3.5) |
 | SCAD, dense → sparse | 0.626 (+0.3) | 0.692 (+2.8) | 0.723 (+3.8) |
 
-**Data-driven: directed $F_1$ at the BIC-selected $\lambda$, and after the BIC search from there:**
+**Data-driven: directed $F_1$ at the $\lambda$ selected by the score, and after the greedy search
+from there:**
 
 | | $n = 10^3$ | $n = 10^4$ | $n = \infty$ |
 |---|---|---|---|
 | **rescaled $C$** | | | |
-| lasso: BIC $\lambda$ → + search | 0.567 → 0.569 | 0.625 → 0.670 | 0.644 → 0.724 |
-| MCP sparse → dense: BIC $\lambda$ → + search | 0.514 → 0.510 | 0.566 → 0.577 | 0.534 → 0.588 |
-| MCP dense → sparse: BIC $\lambda$ → + search | 0.571 → 0.574 | **0.691 → 0.702** | **0.739 → 0.760** |
-| SCAD dense → sparse: BIC $\lambda$ | 0.571 | 0.695 | 0.737 |
+| lasso: $\lambda$ selected by the score → + search | 0.567 → 0.569 | 0.625 → 0.670 | 0.644 → 0.724 |
+| MCP sparse → dense: $\lambda$ selected by the score → + search | 0.514 → 0.510 | 0.566 → 0.577 | 0.534 → 0.588 |
+| MCP dense → sparse: $\lambda$ selected by the score → + search | 0.571 → 0.574 | **0.691 → 0.702** | **0.739 → 0.760** |
+| SCAD dense → sparse: $\lambda$ selected by the score | 0.571 | 0.695 | 0.737 |
 | **$C = 2I$** | | | |
-| lasso: BIC $\lambda$ → + search | 0.549 → 0.548 | 0.624 → 0.632 | 0.601 → 0.610 |
-| MCP dense → sparse: BIC $\lambda$ → + search | 0.555 → 0.552 | 0.621 → 0.627 | 0.619 → 0.615 |
+| lasso: $\lambda$ selected by the score → + search | 0.549 → 0.548 | 0.624 → 0.632 | 0.601 → 0.610 |
+| MCP dense → sparse: $\lambda$ selected by the score → + search | 0.555 → 0.552 | 0.621 → 0.627 | 0.619 → 0.615 |
 
 **Reading:**
 
 - **The independent study's numbers reproduce.** Its values on 52 graphs: lasso 0.633 / 0.669 /
-  0.685, MCP dense → sparse 0.648 / 0.742 / 0.777 (`max_f1`); BIC-selected 0.568 / 0.688 / 0.731,
+  0.685, MCP dense → sparse 0.648 / 0.742 / 0.777 (`max_f1`); selected graph 0.568 / 0.688 / 0.731,
   after the search 0.575 / 0.701 / 0.755. Mine on 40 graphs are within 0.02 of all of them.
 - **Both levers are needed.** With $C = 2I$ the dense → sparse path only ties the lasso up to
-  $n = 10^4$, and its BIC-selected graphs gain nothing. With the rescaled $C$ it gains +0.07 at
-  $n = 10^4$ and +0.10 at $n = \infty$, in the oracle and in the BIC-selected numbers alike.
+  $n = 10^4$, and its graphs selected by the score gain nothing. With the rescaled $C$ it gains
+  +0.07 at $n = 10^4$ and +0.10 at $n = \infty$, in the oracle numbers and in those of the selected
+  graphs alike.
 - **The pilot's direction loses on both scales.** The rescaled $C$ halves its deficit but does not
   remove it.
 - **At $n = 1000$ the gain is small:** +0.025 `max_f1` ($z = 1.2$ on 40 graphs), nothing in the
-  BIC-selected $F_1$. The independent study finds $z \approx 2$ with 52–100 graphs.
+  $F_1$ of the selected graph. The independent study finds $z \approx 2$ with 52–100 graphs.
 - **Dense → sparse MCP is the best start for the search,** and needs it least: 0.691 → 0.702 at
   $n = 10^4$. The lasso start gains more from the search (0.625 → 0.670) but ends lower.
-- **Reversed edges tell the same story.** At the BIC-selected $\lambda$ ($n = 10^4$, rescaled $C$)
-  the lasso has 1.8 reversed edges per graph, the pilot's MCP path 3.9 and MCP dense → sparse 2.2.
+- **Reversed edges tell the same story.** At the $\lambda$ selected by the score ($n = 10^4$,
+  rescaled $C$) the lasso has 1.8 reversed edges per graph, the pilot's MCP path 3.9 and MCP
+  dense → sparse 2.2.
 
 ## 5. How the pieces fit: decide the direction late
 
@@ -256,24 +259,25 @@ Hollow orange: the path of every thesis run so far. Filled: dense → sparse.
 | MCP / SCAD, sparse → dense (every thesis run so far) | when the edge enters, on first-order information | loses at every $n$, on every loss |
 | forward stepwise; greedy search from the empty graph | when the edge enters | loses, or needs many random restarts |
 | MCP / SCAD dense → sparse; LLA or adaptive lasso from a dense $\ell_1$ fit; backward elimination | when pruning an exact fit that holds both directions | wins on a correctly specified scale, more with larger $n$ |
-| BIC search started from the lasso | after the path, by the likelihood | wins on a correctly specified scale |
-| BIC search started from the pilot's MCP path | too late: the reversals are frozen | no gain |
+| greedy search (on the score) started from the lasso | after the path, by the likelihood | wins on a correctly specified scale |
+| greedy search (on the score) started from the pilot's MCP path | too late: the reversals are frozen | no gain |
 
 Two conditions sit on top of this:
 
-- **The score must be right.** A likelihood-based decision (BIC, or pruning towards an exact fit)
-  needs the correct $C$. On Dettling's pipeline it is not.
+- **The score must be right.** A likelihood-based decision (the score with the BIC penalty, or
+  pruning towards an exact fit) needs the correct $C$. On Dettling's pipeline it is not.
 - **The information must be there.** At $n = 1000$, with $N(0,1)$ weights, it mostly is not. The
   gains concentrate on sparse graphs ($k = 1, 2$) and $n \ge 10^4$.
 
-The routes end close to each other. Directed $F_1$ of BIC-selected graphs on the 40 `C_ID` graphs:
+The routes end close to each other. Directed $F_1$ of graphs selected by the score on the 40 `C_ID`
+graphs:
 
 | | $n = 10^3$ | $10^4$ | $\infty$ |
 |---|---|---|---|
-| plain lasso at its BIC $\lambda$, rescaled $C$ [IS] | 0.567 | 0.625 | 0.636 |
-| lasso + BIC search, raw scale (mine) | 0.573 | 0.715 | 0.721 |
+| plain lasso at the $\lambda$ selected by the score, rescaled $C$ [IS] | 0.567 | 0.625 | 0.636 |
+| lasso + greedy search, raw scale (mine) | 0.573 | 0.715 | 0.721 |
 | pure greedy search, 10 restarts, raw scale (mine) | 0.565 | 0.666 | 0.747 |
-| lasso + BIC search, rescaled $C$ [IS] | 0.569 | 0.670 | 0.726 |
+| lasso + greedy search, rescaled $C$ [IS] | 0.569 | 0.670 | 0.726 |
 | MCP dense → sparse (+ search), rescaled $C$ [IS] | 0.568 (0.575) | 0.688 (0.701) | 0.731 (0.755) |
 | backward elimination with exchange moves, rescaled $C$ [IS] | 0.549 | 0.713 | 0.751 |
 | *search started from the true graph (oracle), raw scale (mine)* | *0.732* | *0.865* | *0.980* |
@@ -306,8 +310,8 @@ The routes end close to each other. Directed $F_1$ of BIC-selected graphs on the
 - **Small gains at $n = 1000$,** the sample size of Figure 5: +0.02 to +0.03 `max_f1`, $z \approx 2$.
   The large gains need $n \ge 10^4$.
 - **Sparse graphs only.** For $k = 3, 4$ the lasso is as good or better.
-- **Oracle tuning in the headline tables.** With BIC the gains are smaller but have the same sign;
-  structural Hamming distance improves more clearly than $F_1$.
+- **Oracle tuning in the headline tables.** With selection by the score the gains are smaller but
+  have the same sign; structural Hamming distance improves more clearly than $F_1$.
 - **$p = 20$ rests on 24 graphs,** and the covariance losses were not run with the new options.
 - **Its literature list is partly unverified,** as it says itself.
 
@@ -339,7 +343,7 @@ The routes end close to each other. Directed $F_1$ of BIC-selected graphs on the
 **Step 2. Does it hold beyond `C_ID`?** (laptop, a few hours in the background).
 - $p = 10$, all four $C$ settings, $n = 10^3, 10^4, \infty$, 10 reps (480 datasets).
 - Lasso, MCP and SCAD, each sparse → dense and dense → sparse, with $C = 2I$ and the rescaled $C$.
-- Report `max_f1`, BIC-selected $F_1$, structural Hamming distance, skeleton and orientation.
+- Report `max_f1`, $F_1$ of the selected graph, structural Hamming distance, skeleton and orientation.
 - **This decides whether the result is a thesis result or a `C_ID` result.**
 
 **Step 3. Add the new arms to the cluster sweep** (roughly 150 CPU-h, 80 tasks).
@@ -352,8 +356,8 @@ The routes end close to each other. Directed $F_1$ of BIC-selected graphs on the
   combination is untested.
 
 **Step 4. Rerun the search study on the corrected scale** (laptop for $p = 10$, cluster for $p = 20$).
-- Starts: lasso, MCP dense → sparse, SCAD dense → sparse, each at its BIC $\lambda$; the pure search
-  as reference.
+- Starts: lasso, MCP dense → sparse, SCAD dense → sparse, each at the $\lambda$ selected by the
+  score; the pure search as reference.
 - Add what both studies found missing: restarts or exchange moves, the objective-based search as an
   arm, and the "report both directions when unsure" layer.
 - All four $C$ settings; the log-likelihood loss at $p = 10$.
@@ -365,7 +369,7 @@ The routes end close to each other. Directed $F_1$ of BIC-selected graphs on the
   finds larger gains there [IS §7].
 
 **Step 6. Reporting.**
-- Structural Hamming distance and BIC-selected graphs next to the oracle path maximum in
+- Structural Hamming distance and the graphs selected by the score next to the oracle path maximum in
   `aggregate_s1.py` / `compare_runs.py`.
 - Drop from the plan: the γ sweep, Mnet, GMC, forward stepwise, LLA from the lasso as a separate
   item (it is one of the dense → sparse family).
@@ -389,9 +393,10 @@ The routes end close to each other. Directed $F_1$ of BIC-selected graphs on the
 
 ## 9. Open points between the two studies
 
-- **BIC search or objective search?** On random graphs the independent study finds the search on
-  the MCP objective ahead of the BIC search for MCP starts (0.547 / 0.623 / 0.650 against 0.510 /
-  0.577 / 0.597) [IS §9]. On Example 2 I found the opposite. Step 4 keeps both.
+- **Search on the score or on the objective?** On random graphs the independent study finds the
+  search on the MCP objective ahead of the greedy search on the score for MCP starts (0.547 /
+  0.623 / 0.650 against 0.510 / 0.577 / 0.597) [IS §9]. On Example 2 I found the opposite. Step 4
+  keeps both.
 - **Which scale for the lasso that starts the search?** The search landscape is nearly the same on
   the raw and the rescaled scale, since the likelihood is invariant. Yet the raw-scale lasso start
   ends at 0.715 and the rescaled one at 0.670 at $n = 10^4$, although the raw lasso itself is the

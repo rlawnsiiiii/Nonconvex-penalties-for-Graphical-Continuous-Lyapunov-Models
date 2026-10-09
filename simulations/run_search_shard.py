@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Search without a penalty -- cluster shard runner (wave 2 of the campaign of
+"""Search from random graphs -- cluster shard runner (wave 2 of the campaign of
 October 2026, next_steps/051026/cluster_campaign_051026.md).
 
 The estimators of ``run_s1_shard.py`` all start from a regularisation path.  This
 runner uses no path at all.  On the datasets of Figure 5 (same seeds, so every
 result is paired with the path-based ones) it records two things:
 
-  pure    the greedy BIC search with add / delete / reverse moves, started from
+  pure    the greedy search with add / delete / reverse moves, started from
           the empty graph and from ``--restarts`` randomly drawn graphs (``--starts``:
           sparse ones, or uniform over all directed graphs); the best-scoring
           result is kept (Amendola, Dettling, Drton, Onori & Wu 2020, Section 5;
-          :func:`gclm.solvers.search.multistart_search`).  The graph and the BIC
+          :func:`gclm.solvers.search.multistart_search`).  The graph and the score
           every start ended at are stored too, so that "the best of the first r
           starts" can be read off afterwards for any r (the restart study, wave 5)
   truth   the same search started from the TRUE graph.  Not an estimator: it is
@@ -18,19 +18,22 @@ result is paired with the path-based ones) it records two things:
           score prefers another graph; if the other searches end somewhere worse
           than it does, they got stuck.
 
-The score is the Gaussian BIC of an unpenalised least-squares refit on the direct
-loss, under the volatility matrix chosen with ``--c-scale`` -- exactly the score
-that ``run_s1_shard.py --select`` uses; ``--ebic-gamma G`` adds Dettling's extended
-term ``4 G |E| log p`` to it (wave 5c), for both searches.  Numbers only, one ``.npz`` per shard:
+The score of a graph is its likelihood loss term plus the BIC penalty, under the volatility
+matrix chosen with ``--c-scale``, the score that ``run_s1_shard.py --select`` uses.  The
+model on the graph is fitted either by least squares on the direct loss (``--refit direct``,
+the default: closed form) or by maximising the Gaussian likelihood (``--refit loglik``: the
+likelihood refit, as in Amendola et al. 2020; wave 7); ``--ebic-gamma G`` adds Dettling's
+eBIC term ``4 G |E| log p``, i.e. scores with the eBIC penalty (wave 5c), for both searches.
+Numbers only, one ``.npz`` per shard:
 
   per dataset   p, k, c_choice, rep, M* (sparse), scale
   pure_*        support (packed bits, ``m_pure_support``), refit (``m_pure_i/j/v``),
-                confusion counts, orientation breakdown (order: ORIENT), BIC; per
-                start (random ones first, the empty graph last): the final BIC
+                confusion counts, orientation breakdown (order: ORIENT), score; per
+                start (random ones first, the empty graph last): the final score
                 (``pure_scores``), the final support (``m_pure_starts_support``,
                 packed, unpack with ``unpack_supports(.., restarts + 1, p)``) and
                 the number of moves made; how many starts ended at the truth
-  truth_*       the same for the search started from the truth, plus the BIC of
+  truth_*       the same for the search started from the truth, plus the score of
                 the truth itself and the moves that left it (add, delete, reverse)
 
     python simulations/run_search_shard.py --shard 0 --n-shards 16 --p 20 --reps 25 \
@@ -82,7 +85,7 @@ def _graph(prefix: str, support: np.ndarray, m: np.ndarray, m_true: np.ndarray) 
 
 
 def run_one(p, k, c_choice, rep, cfg, restarts: int, methods=METHODS, starts: str = "sparse",
-            ebic_gamma: float = 0.0) -> dict:
+            ebic_gamma: float = 0.0, refit: str = "direct", add_screen: int | None = None) -> dict:
     """Both searches on one dataset."""
     c_index = list(CChoice).index(c_choice)
     rng = np.random.default_rng([cfg.seed, p, k, c_index, rep])
@@ -112,10 +115,10 @@ def run_one(p, k, c_choice, rep, cfg, restarts: int, methods=METHODS, starts: st
                 start_graphs.append(g)
         start_graphs.append(np.zeros((p, p), dtype=bool))         # the empty graph, last
         # max_steps: a guard only, as in run_s1_shard.select_graph (the search stops by
-        # itself when no move lowers the BIC)
-        best, results = multistart_search(sigma_hat, c_est, cfg.n_obs, start_graphs, loss="direct",
+        # itself when no move lowers the score)
+        best, results = multistart_search(sigma_hat, c_est, cfg.n_obs, start_graphs, loss=refit,
                                           max_steps=p * (p - 1), ebic_gamma=ebic_gamma,
-                                          ebic_form=EBIC_FORM)
+                                          ebic_form=EBIC_FORM, add_screen=add_screen)
         row.update(_graph("pure", best.support, best.m, m_true))
         row.update({
             "pure_score": best.score,
@@ -130,10 +133,10 @@ def run_one(p, k, c_choice, rep, cfg, restarts: int, methods=METHODS, starts: st
 
     if "truth" in methods:
         t1 = time.perf_counter()
-        scorer = Scorer(sigma_hat, c_est, cfg.n_obs, "direct", ebic_gamma, EBIC_FORM)
+        scorer = Scorer(sigma_hat, c_est, cfg.n_obs, refit, ebic_gamma, EBIC_FORM)
         truth_score, _ = scorer(truth)
-        res = greedy_search(sigma_hat, c_est, cfg.n_obs, truth, scorer=scorer,
-                            max_steps=p * (p - 1))
+        res = greedy_search(sigma_hat, c_est, cfg.n_obs, truth, scorer=scorer, loss=refit,
+                            max_steps=p * (p - 1), add_screen=add_screen)
         kinds = [move[0] for move in res.moves]
         row.update(_graph("truth", res.support, res.m, m_true))
         row.update({
@@ -168,7 +171,14 @@ def build_parser() -> argparse.ArgumentParser:
                     help="random starting graphs: sparse (edge probability ~ U[0, 0.3], "
                          "default) or uniform (every entry with probability 1/2)")
     ap.add_argument("--ebic-gamma", type=float, default=0.0, metavar="G",
-                    help="add Dettling's extended term 4 G |E| log p to the score (default 0)")
+                    help="add Dettling's eBIC term 4 G |E| log p to the score, i.e. use the eBIC "
+                         "penalty (default 0)")
+    ap.add_argument("--refit", default="direct", choices=["direct", "loglik"],
+                    help="how the model on a graph is fitted for its score: least squares on the "
+                         "direct loss (default) or the maximised Gaussian likelihood (slow)")
+    ap.add_argument("--add-screen", type=int, default=None, metavar="N",
+                    help="with --refit loglik: score only the N add moves with the largest "
+                         "gradient per step (default: all of them)")
     return ap
 
 
@@ -194,14 +204,15 @@ def main() -> None:
     out = args.out_dir / f"shard_{args.shard:04d}_of_{args.n_shards:04d}.npz"
     print(f"shard {args.shard}/{args.n_shards}: {len(tasks)} datasets "
           f"[n={cfg.n_obs}, c_scale={cfg.c_scale}, methods={args.methods}, "
-          f"restarts={args.restarts}, starts={args.starts}, ebic_gamma={args.ebic_gamma}] -> {out}",
+          f"restarts={args.restarts}, starts={args.starts}, ebic_gamma={args.ebic_gamma}, "
+          f"refit={args.refit}, add_screen={args.add_screen}] -> {out}",
           flush=True)
 
     store: dict[str, list] = {}
     t0 = time.time()
     for n, (p, k, c, r) in enumerate(tasks, 1):
         row = run_one(p, k, c, r, cfg, args.restarts, tuple(args.methods), args.starts,
-                      args.ebic_gamma)
+                      args.ebic_gamma, args.refit, args.add_screen)
         for key, val in row.items():
             store.setdefault(key, []).append(val)
         if n % 10 == 0 or n == len(tasks):
@@ -225,7 +236,8 @@ def main() -> None:
         "c_choices": [c.value for c in cfg.c_choices],
         "methods": list(args.methods), "restarts": args.restarts, "starts": args.starts,
         "restart_seed": RESTART_SEED, "max_density": MAX_DENSITY, "score": "bic",
-        "refit": "direct", "ebic_gamma": args.ebic_gamma, "ebic_form": EBIC_FORM,
+        "refit": args.refit, "add_screen": args.add_screen,
+        "ebic_gamma": args.ebic_gamma, "ebic_form": EBIC_FORM,
     })
     payload["c_choice_names"] = np.array([c.value for c in CChoice])
     payload["provenance_json"] = json.dumps({

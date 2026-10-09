@@ -110,6 +110,28 @@ the same trick as in `gclm`'s `DGELYP`, and it is what makes an iteration $O(p^3
   $B_0=-\tfrac12\hat R^{-1}$. It is not unique: $M_0+W\hat\Sigma^{-1}$ for any skew-symmetric $W$
   gives the same $\Sigma$ — the fibre of the map $M\mapsto\Sigma(M)$ has dimension $p(p-1)/2$,
   exactly as the null space of Dettling's design $A(\hat\Sigma)$ (S1_reproduction.md §2.3).
+- **The lasso's dense end** is another point of that fibre: as $\lambda\to 0$ the lasso picks the
+  exact fit with the smallest $\ell_1$ norm, which has $p(p-1)/2$ off-diagonal entries at zero
+  (`tests/test_covloss_dense_start.py`). The same point is the dense end of the *direct* loss's
+  lasso path, since both losses have the same exact fits.
+
+### 3.1 Two more dense starts (wave 7 of the campaign, October 2026)
+
+- **Dense → sparse from the lasso** (`covloss_path(direction="up", start="lasso")`, runner
+  `--direction up --up-start lasso`): MCP / SCAD walked up the grid from the lasso's dense end
+  instead of from $M_0$. This is how the direct loss's dense → sparse paths start
+  (docs/DENSE_START.md). For the lasso itself the start makes no difference (both starts reach the
+  same point at $\lambda_{\min}$); for MCP it does, because MCP is nearly flat at $\lambda_{\min}$ and
+  keeps whichever exact fit it starts from: dense from $M_0$, half-sparse from the lasso.
+- **Adaptive lasso** (`adaptive_covloss_path`, runner `--loss loglik --method adaptive`): weights
+  $w_{ij}=\max_{kl}|\tilde M_{kl}|/|\tilde M_{ij}|$ from the lasso's dense end $\tilde M$ of the same
+  loss, entries with $\tilde M_{ij}=0$ excluded (a weight of $10^{12}$: an infinite weight would make
+  the objective NaN), its own grid below $\lambda_{\max}^w=\max_{ij}|\nabla L(M_D)_{ij}|/w_{ij}$,
+  sparse → dense from $M_D$; as `adaptive_lasso_path` on the direct loss.
+
+Neither path is reset to $M_D$ at $\lambda_{\max}$, unlike the direct loss's dense → sparse path:
+MCP leaves entries beyond $\gamma\lambda$ unshrunk, so the largest entries survive even there, as
+on the existing exact-fit start.
 
 ## 4. Why a first-order method is not enough, and the solver
 

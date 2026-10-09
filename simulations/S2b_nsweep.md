@@ -371,7 +371,8 @@ Per cell, means over the four sample sizes (`nsweep_audit.csv`):
 ## 6. Caveats
 
 - **Oracle tuning.** `max_f1` and the best-F1 estimates use the true graph to choose $\lambda$;
-  `auc` and `aupr` summarise the whole path. BIC-tuned comparisons are in S3b.
+  `auc` and `aupr` summarise the whole path. Comparisons at the $\lambda$ selected by the score
+  are in S3b.
 - **$p \le 20$ and 25 reps.** The effects are large against the standard errors (0.003–0.007), but
   larger $p$ was not run.
 - **Machine dependence of the covariance losses** (§2): trust the means, not single datasets.

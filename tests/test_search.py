@@ -1,5 +1,5 @@
 """The greedy search of gclm.solvers.search (S3b, docs/SEARCH.md): refits on a
-fixed support, the BIC, the neighbourhood, and the search itself on Example 2,
+fixed support, the score, the neighbourhood, and the search itself on Example 2,
 where the answer is known."""
 
 from __future__ import annotations
@@ -11,8 +11,8 @@ import pytest
 
 from gclm.data.examples import example2_cycle
 from gclm.lyapunov import design_matrix, solve_lyapunov
-from gclm.solvers.search import (N_INF, CovRefit, DirectRefit, bic, bic_along_path, greedy_search,
-                                 log_binom, multistart_search, neighbours, random_support)
+from gclm.solvers.search import (N_INF, CovRefit, DirectRefit, Scorer, bic, bic_along_path, bic_direct,
+                                 greedy_search, log_binom, multistart_search, neighbours, random_support)
 
 C5 = 2.0 * np.eye(5)
 OFF5 = ~np.eye(5, dtype=bool)
@@ -51,7 +51,7 @@ def test_bic_counts_parameters_and_rejects_unstable(cycle):
     base = bic(m, sigma, C5, 1000, k)
     assert bic(m, sigma, C5, 1000, k + 1) - base == pytest.approx(math.log(1000))
     assert bic(m, sigma, C5, 1000, k, ebic_gamma=0.5) - base == pytest.approx(log_binom(20, k))
-    # Dettling's form of the term: 4 gamma k log p
+    # Dettling's form of the eBIC term: 4 gamma k log p
     assert bic(m, sigma, C5, 1000, k, ebic_gamma=0.5, ebic_form="dettling") - base == \
         pytest.approx(2.0 * k * math.log(5))
     with pytest.raises(ValueError):
@@ -140,3 +140,54 @@ def test_a_support_whose_refit_cannot_be_computed_scores_inf_and_the_search_goes
     assert bic(fitted, sigma, C5, 1000, int(truth.sum())) == math.inf
     res = greedy_search(sigma, C5, 1000, truth, scorer=S.Scorer(sigma, C5, 1000))
     assert np.isinf(res.score) and res.moves == []        # no finite neighbour: it stops
+
+
+# --------------------------------------------------------------------------- #
+# the direct-loss score (docs/SEARCH.md Section 2)
+# --------------------------------------------------------------------------- #
+
+
+def _noisy(sigma, seed=1):
+    e = 0.02 * np.random.default_rng(seed).standard_normal(sigma.shape)
+    return sigma + e @ e.T + 0.01 * np.eye(sigma.shape[0])
+
+
+def test_direct_loss_score_is_n_log_rss_plus_the_bic_penalty(cycle):
+    m, sigma, truth = cycle
+    sigma_hat, k, n = _noisy(sigma), int(truth.sum()), 1000
+    fitted = DirectRefit(sigma_hat, C5).fit(truth)
+    r = fitted @ sigma_hat + sigma_hat @ fitted.T + C5
+    big_n = 5 * 6 / 2                                   # distinct equations of the Lyapunov system
+    expected = big_n * math.log(float(np.sum(r * r)) / big_n) + math.log(n) * (5 + k)
+    base = bic_direct(fitted, sigma_hat, C5, n, k)
+    assert base == pytest.approx(expected)
+    assert bic_direct(fitted, sigma_hat, C5, n, k + 1) - base == pytest.approx(math.log(n))
+    assert bic_direct(fitted, sigma_hat, C5, n, k, ebic_gamma=0.5) - base == pytest.approx(log_binom(20, k))
+    assert bic_direct(fitted, sigma_hat, C5, n, k, ebic_gamma=0.5, ebic_form="dettling") - base == \
+        pytest.approx(2.0 * k * math.log(5))
+    assert bic_direct(fitted, sigma_hat, C5, math.inf, k) == pytest.approx(bic_direct(fitted, sigma_hat, C5, N_INF, k))
+    assert bic_direct(np.eye(5), sigma_hat, C5, n, 0) == math.inf          # unstable: not a GCLM
+    # the scorer refits by least squares and applies the same formula
+    assert Scorer(sigma_hat, C5, n, "direct", score="direct").score(truth) == pytest.approx(expected)
+
+
+def test_direct_loss_score_ties_exact_fits_so_the_penalty_decides(cycle):
+    """At the population covariance the true graph and its supergraphs fit exactly: their RSS is
+    rounding noise, floored at RSS_FLOOR ||C||^2, so they differ by the penalty alone and the
+    search started at the truth stays there."""
+    m, sigma, truth = cycle
+    sc = Scorer(sigma, C5, math.inf, "direct", score="direct")
+    extra = truth.copy()
+    i, j = (int(a[0]) for a in np.nonzero(OFF5 & ~truth))
+    extra[i, j] = True
+    assert sc.score(extra) - sc.score(truth) == pytest.approx(math.log(N_INF))
+    res = greedy_search(sigma, C5, math.inf, truth, scorer=sc)
+    assert np.array_equal(res.support, truth) and res.moves == []
+
+
+def test_direct_loss_score_needs_the_least_squares_refit(cycle):
+    m, sigma, truth = cycle
+    with pytest.raises(ValueError):
+        Scorer(sigma, C5, 1000, "loglik", score="direct")
+    with pytest.raises(ValueError):
+        Scorer(sigma, C5, 1000, "direct", score="rss")

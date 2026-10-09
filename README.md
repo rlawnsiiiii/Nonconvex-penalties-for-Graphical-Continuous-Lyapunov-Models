@@ -37,7 +37,7 @@ tests/                       pytest; the `r` marker needs Rscript + glmnet/ncvre
 
 ```bash
 pip install -e ".[dev]"
-pytest                       # 380 tests; R-backed ones skip if Rscript is absent
+pytest                       # 392 tests; R-backed ones skip if Rscript is absent
 pytest -m "not r"            # skip the R validation explicitly
 
 python simulations/run_m0.py --reps 100          # reproduces Figure 3

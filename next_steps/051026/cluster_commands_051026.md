@@ -8,12 +8,12 @@ Work through the blocks from top to bottom; what to expect is written under each
 
 | wave | what | cells per $n$ | tasks per $n$ |
 |---|---|---|---|
-| 1 | direct loss, $p = 10, 20$: lasso; MCP / SCAD (standard, dense → sparse, LLA); adaptive lasso; each with $C = 2I$ and the rescaled $C$; path, BIC-selected graph, graph after the BIC search | 16 | 128 |
-| 2 | search without a penalty, and search started from the true graph | 3 | 20 |
+| 1 | direct loss, $p = 10, 20$: lasso; MCP / SCAD (standard, dense → sparse, LLA); adaptive lasso; each with $C = 2I$ and the rescaled $C$; path, graph selected by the score, graph after the greedy search on the score | 16 | 128 |
+| 2 | search from random graphs, and search started from the true graph | 3 | 20 |
 | 3 | log-likelihood loss, $p = 10$: lasso and MCP, both path orders, both $C$ | 8 | 56 |
-| 4 | larger $p$ for the thesis figure: $p = 15, 25, 30, 40, 50$ at $n = 1000$; lasso, MCP, SCAD (standard), MCP / SCAD dense → sparse, adaptive lasso; both $C$; BIC but no search | 12 per $p$ | 112 ($p \le 30$), 224 ($p = 40, 50$) |
+| 4 | larger $p$ for the thesis figure: $p = 15, 25, 30, 40, 50$ at $n = 1000$; lasso, MCP, SCAD (standard), MCP / SCAD dense → sparse, adaptive lasso; both $C$; selection by the score but no search | 12 per $p$ | 112 ($p \le 30$), 224 ($p = 40, 50$) |
 
-| 5 | three checks of the selection step: (a) the BIC with the maximised likelihood (`-ml` cells, $p = 10$); (b) 100 randomly drawn starting graphs for the pure search, sparse and uniform (`search100s`, `search100u`); (c) the extended BIC term inside the selection and the search (`-ebic` cells, $p = 10, 20$) and in the pure search (`searche1`) | 18 | 48 + 48 (+ 32) + 64 + 20 |
+| 5 | three checks of the selection step: (a) the score with the maximised likelihood (`-ml` cells, $p = 10$); (b) 100 randomly drawn starting graphs for the pure search, sparse and uniform (`search100s`, `search100u`); (c) the eBIC term inside the selection and the search (`-ebic` cells, $p = 10, 20$) and in the pure search (`searche1`) | 18 | 48 + 48 (+ 32) + 64 + 20 |
 
 Sample sizes: $n = 1000$, $10^4$, $\infty$. LRZ runs 96 of your tasks at a time and accepts about
 200 queued or running.
@@ -282,10 +282,10 @@ bash cluster/submit_campaign.sh --wave 4 --fill --time 24:00:00   # after the jo
 
 ## 11. LRZ: wave 5 (three checks of the selection step), by hand; block 12 does it automatically
 
-Wave 5a repeats the selection and the search of three estimators with the BIC proper (the maximised
+Wave 5a repeats the selection and the search of three estimators with the score proper (the maximised
 likelihood behind the score, `--refit loglik`); wave 5b runs the pure search from 100 randomly drawn
 starting graphs instead of 10 (sparse ones as in wave 2, and uniform ones); wave 5c runs the
-selection and the search with the extended BIC term ($\gamma = 0.5, 1$) next to the plain BIC on the
+selection and the search with the eBIC term ($\gamma = 0.5, 1$) next to the BIC penalty on the
 same path, and the pure search with $\gamma = 1$. Cells `direct_<estimator>-ml_<C>_n<n>`,
 `search100s_p10_Cresc_n<n>`, `search100u_p10_Cresc_n<n>`, the optional `search30s_p20_Cresc_n<n>`,
 `direct_<estimator>-ebic_<C>_n<n>` and `searche1_p<p>_<C>_n<n>`. Nothing of this is submitted yet;
@@ -349,9 +349,9 @@ pkill -f feed_queue.sh                                       # stop it
 - Expect the whole plan to take two to three days of queueing; `--status` of each wave still
   works at any time.
 
-## 13. LRZ: the extended BIC everywhere (wave 6) and 300 starting graphs, 9 October
+## 13. LRZ: the eBIC penalty everywhere (wave 6) and 300 starting graphs, 9 October
 
-Wave 6 rescores every wave 1 cell with the extended term inside the selection and the search,
+Wave 6 rescores every wave 1 cell with the eBIC term inside the selection and the search,
 from the stored supports (no path is recomputed; `simulations/rescore_shard.py`), so that every
 figure can be drawn under that rule; the plan also adds 300 starting graphs for the pure search
 and the $p = 20$ pure search with the term. The plan file `cluster/plan_091026.txt` has the order;
@@ -366,10 +366,38 @@ sleep 5 && tail -3 logs/feed_queue.log
   300-start cells, 16 for the $p = 20$ pure search. About 400 CPU-h in all, a day of queueing.
 - On the laptop afterwards: the `rsync` lines of block 9, then
   `python simulations/diagnostics/campaign.py`, `python3 simulations/diagnostics/plot_campaign.py`
-  (the plain-BIC figures, including `bic_vs_ebic`) and
+  (the figures with the BIC penalty, including `bic_vs_ebic`) and
   `python3 simulations/diagnostics/plot_campaign.py --rule ebic1` (every rule-dependent figure
-  with the extended BIC as the rule, into `runs/campaign/figures_ebic1/`), and
+  with the eBIC penalty in the score, into `runs/campaign/figures_ebic1/`), and
   `python simulations/diagnostics/restarts.py` for the 300-start curves.
+
+## 14. LRZ: waves 7 and 8, the log-likelihood loss up to $p = 20$ and the likelihood refit, 10 October
+
+Wave 7 is (a) the log-likelihood loss over $p = 10$ and $20$ with both $C$ and five estimators,
+selection and search with the least-squares refit. Wave 8 is (b) the stored paths scored again
+with the likelihood refit, with the search at $p = 10$ and the selection only at $p = 20$, and
+(c) the search from 100 random graphs with the likelihood refit at $p = 10$. Every part runs at
+$n = 10^4$ and $n = 1000$. The reasons for each part are in `next_steps/091026/next_steps_091026.md`
+§2. The plan also carries the lines of `plan_091026.txt`, so one feeder runs everything. On the
+cluster, after `git pull`, stop the wave 6 feeder if it still runs (its jobs keep running and its
+cells are skipped as already submitted):
+
+```bash
+pgrep -fl feed_queue.sh; ssh cm4login1 pgrep -fl feed_queue.sh; ssh cm4login2 pgrep -fl feed_queue.sh
+ssh cm4login1 pkill -f feed_queue.sh; ssh cm4login2 pkill -f feed_queue.sh                          # only if one runs
+bash cluster/submit_campaign.sh --wave 7 --n 1e4 --dry-run | tail -1   # would submit 244 tasks in 14 cells
+nohup bash cluster/feed_queue.sh cluster/plan_101026.txt > logs/feed.out 2>&1 &
+sleep 5 && tail -3 logs/feed_queue.log
+```
+
+- The plan runs (a) at $n = 10^4$, (c) at both sample sizes, (a) at $n = 1000$; then it waits until
+  no wave 7 job is left, because (b) scores wave 7's paths again, and runs (b) at both sample sizes.
+- About 4,000 CPU-h in all by estimate, about two days; $p = 30$ is left out for cost. The first
+  lines give a complete picture at $n = 10^4$, so the feeder can be stopped after them
+  (`pkill -f feed_queue.sh`).
+- On the laptop afterwards: the `rsync` lines of block 9, then
+  `python simulations/diagnostics/campaign.py` and `python simulations/diagnostics/restarts.py`,
+  and tell me; the figures for the new cells are still to be written.
 
 ---
 
@@ -388,6 +416,9 @@ sleep 5 && tail -3 logs/feed_queue.log
 | wave 5c, pure search with $\gamma = 1$, three sample sizes | 60 | about 170 | 2 to 4 hours |
 | wave 6, rescoring of wave 1, one sample size | 128 | about 50 | 1 to 2 hours |
 | wave 5b, 300 starting graphs, three sample sizes | 48 | about 120 | 2 to 3 hours |
+| wave 7 (a), $p = 10, 20$, one sample size | 244 | about 700 (estimate) | 8 to 12 hours |
+| wave 8 (b), one sample size | 348, or 300 at $n = 10^4$ | about 770 (estimate) | about half a day |
+| wave 8 (c), 100 starts, one sample size | 64 | about 640 (estimate) | about a day; one graph per task |
 
 - Each task takes about 1 to 3 hours (limit 12 h; wave 3: 24 h).
 - The first results (wave 1 at $n = 1000$) are back a few hours after block 5.

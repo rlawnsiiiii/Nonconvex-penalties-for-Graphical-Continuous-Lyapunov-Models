@@ -13,36 +13,48 @@
 #           lasso / MCP / SCAD (standard path), MCP-up / SCAD-up (dense -> sparse),
 #           MCP-lla / SCAD-lla (local linear approximation from the lasso),
 #           adaptive (adaptive lasso), each with C2I and Cresc.  Every cell records
-#           the path, the BIC-selected graph and the graph after the BIC search.
-#   wave 2  search without a penalty and search started from the truth:
+#           the path, the graph selected by the score and the graph after the greedy search.
+#   wave 2  search from random graphs and search started from the truth:
 #           p = 10 with C2I and Cresc, p = 20 with Cresc.  3 cells per n.
 #   wave 3  log-likelihood loss, p = 10, 400 graphs per cell.  8 cells per n:
 #           lasso / MCP in both path orders (-up = dense -> sparse), C2I and Cresc.
-#           Path and BIC-selected graph.
+#           Path and the graph selected by the score.
 #   wave 4  larger p for the thesis figure: p = 15, 25, 30, 40, 50 at n = 1000
 #           (Figure 5's setting), 400 graphs per cell.  12 cells per p: lasso / MCP /
 #           SCAD (standard path), MCP-up / SCAD-up, adaptive, with C2I and Cresc.
-#           Path and BIC-selected graph, no search (too slow at this size).  Cells
+#           Path and the graph selected by the score, no search (too slow at this size).  Cells
 #           are named <...>_p<p>_n1000; --p selects the sizes.  --n is 1000 unless
 #           given (e.g. --n inf --only Cresc for the population version of a subset).
 #   wave 5  two checks of the selection step, p = 10 (decided on 7 October):
-#           (a) the BIC with the maximised likelihood instead of the least-squares
+#           (a) the score with the maximised likelihood instead of the least-squares
 #               refit (--refit loglik), with the search, for lasso / MCP-up / adaptive
 #               and both C: cells direct_<estimator>-ml_<C>, 6 per n;
 #           (b) the pure search with 100 random starting graphs instead of 10, drawn
 #               sparse as before or uniformly (--starts), rescaled C: cells
 #               search100s_p10_Cresc and search100u_p10_Cresc; and, optional and
 #               expensive, 30 sparse starts at p = 20 on 5 replicates (search30s_p20_Cresc);
-#           (c) the extended BIC term (Dettling's 4 gamma |E| log p, gamma = 0.5 and 1)
-#               inside the selection and the search, next to the plain BIC on the same
+#           (c) the eBIC term (Dettling's 4 gamma |E| log p, gamma = 0.5 and 1)
+#               inside the selection and the search, next to the BIC penalty on the same
 #               path (--ebic-gamma), for lasso / MCP-up / adaptive, p = 10 and 20, both C:
 #               cells direct_<estimator>-ebic_<C>; and the pure search scored with
 #               gamma = 1: searche1_p10_C2I, searche1_p10_Cresc, searche1_p20_Cresc;
 #           and (9 October) 300 sparse starting graphs at p = 10: search300s_p10_Cresc.
-#   wave 6  (9 October) every wave 1 cell rescored with the extended BIC (gamma = 1)
+#   wave 6  (9 October) every wave 1 cell rescored with the eBIC penalty (gamma = 1)
 #           inside the selection and the search, from its stored supports: no path is
 #           recomputed (simulations/rescore_shard.py).  Cells rescore1_<source cell>, the
 #           source's shard count; campaign.py overlays them on the source cell's rows.
+#   wave 7  (10 October) (a) the log-likelihood loss over p = 10 and 20, both C, with the
+#           selection and the search of waves 1 to 4 (least-squares refit): lasso, MCP sparse ->
+#           dense, MCP dense -> sparse from the exact fit and from the lasso solution, adaptive
+#           lasso.  At p = 10 only the two that wave 3 lacks (loglik_<estimator>_<C>); at p = 20
+#           all five (loglik_<estimator>_<C>_p20).  p = 30 is left out for cost for now.
+#   wave 8  (10 October) the likelihood refit.  (b) The stored paths rescored with the Gaussian
+#           likelihood maximised on every graph (simulations/rescore_shard.py --refit loglik):
+#           selection and search at p = 10 (the log-likelihood cells of waves 3 and 7, the
+#           direct-loss cells of wave 1), the selection only at p = 20 (wave 7's cells);
+#           cells <loss>_<estimator>-ml_<C>[_p<p>].  Run it after wave 7 is complete.
+#           (c) The search from 100 random graphs, the empty graph and the truth with the
+#           likelihood refit, p = 10 (search100sml_p10_<C>).
 #
 # From ~/repo on the login node (nothing needs to be activated first):
 #     bash cluster/submit_campaign.sh --wave 1 --list            # the cells of a wave
@@ -85,7 +97,7 @@ SHARDS=""
 #     name | job tag | runner | shards | time limit | runner arguments (without --n-obs)
 # Shards are sized so that a task takes about 1 to 3 hours (costs measured in the
 # n-sweep, in the timing pilots of the campaign note, Section 3.4, and in the
-# rehearsal of Section 4.5).  In wave 1 the BIC search costs more per graph at
+# rehearsal of Section 4.5).  In wave 1 the greedy search costs more per graph at
 # p = 20 than a lasso path, so even the cheap paths get 4 shards; the standard
 # MCP / SCAD paths get 8; a dense -> sparse path costs 2 to 5 standard paths,
 # hence 16.  Wave 4 scales the shards with p (a path costs about p^3: 36 s per
@@ -181,7 +193,68 @@ cells() {
         echo "rescore1_direct_SCAD-lla_${c}|6Sl${ci}|$run|4|12:00:00|$s6 --source-cell direct_SCAD-lla_${c}"
         echo "rescore1_direct_adaptive_${c}|6ad${ci}|$run|4|12:00:00|$s6 --source-cell direct_adaptive_${c}"
       done ;;
-    *) echo "unknown wave: $1 (1, 2, 3, 4, 5 or 6)" >&2; return 2 ;;
+    7)
+      # (a) the log-likelihood loss over p, selection and search with the least-squares refit as
+      # in waves 1 to 4.  p = 10: the two estimators wave 3 lacks; p = 20: all five.
+      # Shards per estimator (lasso, MCP, MCP-up, MCP-up-lasso, adaptive) keep a task under ~6 h.
+      local s7 p pc sh
+      for c in C2I Cresc; do
+        if [ "$c" = C2I ]; then cs=identity; ci=i; else cs=variance; ci=r; fi
+        s7="--loss loglik --reps 25 --select search --c-scale $cs"
+        if [ "$c" = C2I ]; then sh=(8 8); else sh=(16 16); fi
+        echo "loglik_MCP-up-lasso_${c}|7ML${ci}1|$run|${sh[0]}|24:00:00|$s7 --p 10 --penalty MCP --direction up --up-start lasso"
+        echo "loglik_adaptive_${c}|7ad${ci}1|$run|${sh[1]}|24:00:00|$s7 --p 10 --method adaptive"
+        for p in 20; do        # p = 30 left out for cost (10 October); its shards were
+          pc=${p:0:1}          # C2I (32 32 32 48 32), Cresc (48 40 64 100 56)
+          case "$c$p" in
+            C2I20) sh=(8 8 12 16 16) ;;
+            Cresc20) sh=(24 24 24 32 32) ;;
+          esac
+          echo "loglik_lasso_${c}_p${p}|7la${ci}${pc}|$run|${sh[0]}|24:00:00|$s7 --p $p --penalty lasso"
+          echo "loglik_MCP_${c}_p${p}|7Ms${ci}${pc}|$run|${sh[1]}|24:00:00|$s7 --p $p --penalty MCP"
+          echo "loglik_MCP-up_${c}_p${p}|7Mu${ci}${pc}|$run|${sh[2]}|24:00:00|$s7 --p $p --penalty MCP --direction up"
+          echo "loglik_MCP-up-lasso_${c}_p${p}|7ML${ci}${pc}|$run|${sh[3]}|24:00:00|$s7 --p $p --penalty MCP --direction up --up-start lasso"
+          echo "loglik_adaptive_${c}_p${p}|7ad${ci}${pc}|$run|${sh[4]}|24:00:00|$s7 --p $p --method adaptive"
+        done
+      done ;;
+    8)
+      # (b) the likelihood refit behind the score on stored paths (rescore_shard.py --refit
+      # loglik; one task per source shard, so the shard counts are the sources'): selection and
+      # search at p = 10, the selection only at p = 20.  Needs the source cells complete.
+      run=simulations/rescore_shard.py
+      local r8s="--refit loglik --select search" r8b="--refit loglik --select bic" e p pc sh
+      for c in C2I Cresc; do
+        if [ "$c" = C2I ]; then ci=i; sh=(8 8); else ci=r; sh=(16 16); fi
+        echo "loglik_lasso-ml_${c}|8ll${ci}1|$run|8|24:00:00|$r8s --source-cell loglik_lasso_${c}"
+        echo "loglik_lasso-up-ml_${c}|8lu${ci}1|$run|8|24:00:00|$r8s --source-cell loglik_lasso-up_${c}"
+        echo "loglik_MCP-ml_${c}|8lM${ci}1|$run|4|24:00:00|$r8s --source-cell loglik_MCP_${c}"
+        echo "loglik_MCP-up-ml_${c}|8lU${ci}1|$run|8|24:00:00|$r8s --source-cell loglik_MCP-up_${c}"
+        echo "loglik_MCP-up-lasso-ml_${c}|8lL${ci}1|$run|${sh[0]}|24:00:00|$r8s --source-cell loglik_MCP-up-lasso_${c}"
+        echo "loglik_adaptive-ml_${c}|8la${ci}1|$run|${sh[1]}|24:00:00|$r8s --source-cell loglik_adaptive_${c}"
+        echo "direct_lasso-ml_${c}|8dl${ci}1|$run|4|24:00:00|$r8s --p 10 --source-cell direct_lasso_${c}"
+        echo "direct_MCP-up-ml_${c}|8dU${ci}1|$run|16|24:00:00|$r8s --p 10 --source-cell direct_MCP-up_${c}"
+        echo "direct_adaptive-ml_${c}|8da${ci}1|$run|4|24:00:00|$r8s --p 10 --source-cell direct_adaptive_${c}"
+        for p in 20; do        # p = 30 left out for cost (10 October); its shards were
+          pc=${p:0:1}          # C2I (32 32 32 48 32), Cresc (48 40 64 100 56)
+          case "$c$p" in
+            C2I20) sh=(8 8 12 16 16) ;;
+            Cresc20) sh=(24 24 24 32 32) ;;
+          esac
+          local i=0
+          for e in lasso MCP MCP-up MCP-up-lasso adaptive; do
+            local code
+            case "$e" in lasso) code=ll ;; MCP) code=lM ;; MCP-up) code=lU ;; MCP-up-lasso) code=lL ;; adaptive) code=la ;; esac
+            echo "loglik_${e}-ml_${c}_p${p}|8${code}${ci}${pc}|$run|${sh[$i]}|24:00:00|$r8b --source-cell loglik_${e}_${c}_p${p}"
+            i=$((i + 1))
+          done
+        done
+      done
+      # (c) the search from 100 random sparse graphs and the empty graph, and from the truth,
+      # with the likelihood refit (Amendola et al.'s procedure), p = 10
+      run=simulations/run_search_shard.py
+      echo "search100sml_p10_C2I|8si|$run|32|24:00:00|--p 10 --reps 2 --c-scale identity --methods pure truth --restarts 100 --starts sparse --refit loglik --add-screen 20"
+      echo "search100sml_p10_Cresc|8sr|$run|32|24:00:00|--p 10 --reps 2 --c-scale variance --methods pure truth --restarts 100 --starts sparse --refit loglik --add-screen 20" ;;
+    *) echo "unknown wave: $1 (1 to 8)" >&2; return 2 ;;
   esac
 }
 
@@ -190,7 +263,7 @@ n_code() { case "$1" in 1000) echo 3 ;; 1e4) echo 4 ;; 1e5) echo 5 ;; inf) echo 
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --wave) WAVE=${2:?--wave needs 1 to 6}; shift 2 ;;
+    --wave) WAVE=${2:?--wave needs 1 to 8}; shift 2 ;;
     --dry-run) DRY=1; shift ;;
     --fill) FILL=1; shift ;;
     --status) STATUS=1; shift ;;
@@ -208,11 +281,11 @@ while [ $# -gt 0 ]; do
         --p) PS=("${vals[@]}") ;;
         --only) ONLY=("${vals[@]}") ;;
       esac ;;
-    -h|--help) sed -n '2,66p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,/^set -euo pipefail/p' "$0" | sed '$d'; exit 0 ;;
     *) echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
-[ -n "$WAVE" ] || { echo "--wave is required (1 to 6); see --help" >&2; exit 2; }
+[ -n "$WAVE" ] || { echo "--wave is required (1 to 8); see --help" >&2; exit 2; }
 if [ "$WAVE" = 4 ]; then
   [ "$NS_GIVEN" -eq 1 ] || NS=(1000)          # Figure 5's sample size unless --n says otherwise
   for p in "${PS[@]}"; do

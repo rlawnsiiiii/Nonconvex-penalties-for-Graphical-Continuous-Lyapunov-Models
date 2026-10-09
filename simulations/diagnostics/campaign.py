@@ -10,10 +10,11 @@ and writes into ``<root>``:
 
   campaign_per_dataset.csv   one row per (cell, graph).  For an estimator cell: the
                              path metrics of Figure 5 (max_f1, auc, aupr, max_acc; lambda
-                             chosen knowing the truth), the BIC-selected graph (bic_*),
-                             the graph Dettling's extended BIC with gamma = 0.5 / 1 picks
-                             (ebic05_* / ebic1_*, computed here from the stored scores)
-                             and the BIC-selected graph after the BIC search (search_*).  For a
+                             chosen knowing the truth), the graph selected by the score
+                             with the BIC penalty (bic_*), the graph selected with
+                             Dettling's eBIC penalty, gamma = 0.5 / 1 (ebic05_* / ebic1_*,
+                             computed here from the stored scores) and the selected graph
+                             after the greedy search (search_*; BIC penalty).  For a
                              wave 2 cell the two searches are two rows, estimators
                              "search-pure" and "search-truth", in the search_* columns.
   campaign_means.csv         means and standard errors per (loss, estimator, C, n, p)
@@ -56,15 +57,16 @@ BASELINE = ROOT / "runs" / "nsweep_p10-20"
 #: <loss>_<estimator>_<C>_n<n>, or with _p<p> before _n<n> for the wave 4 cells (one p each)
 CELL = re.compile(r"^(?P<loss>direct|loglik|frobenius)_(?P<estimator>[A-Za-z-]+)_(?P<c>C2I|Cresc)(?:_p(?P<p_label>[0-9]+))?_n(?P<n>[0-9e]+|inf)$")
 #: wave 2 cells (search_p10_Cresc) and the restart cells of wave 5 (search100s_p10_Cresc:
-#: 100 sparse starts; search100u_...: 100 uniform starts; searche1_...: the extended BIC with
+#: 100 sparse starts; search100u_...: 100 uniform starts; searche1_...: the eBIC penalty with
 #: gamma = 1 in the score); the variant becomes part of the estimator label ("search-pure-100s")
-#: wave 6: a source cell rescored with the extended term inside the selection and the search
+#: wave 6: a source cell rescored with the eBIC term inside the selection and the search
 #: (simulations/rescore_shard.py); its shards overlay the source cell's rows, matched by file name
 RESCORE_CELL = re.compile(r"^rescore(?P<gamma>[0-9]+)_(?P<source>.+)$")
 SEARCH_CELL = re.compile(r"^search(?P<variant>[0-9a-z]+)?_p(?P<p>[0-9]+)_(?P<c>C2I|Cresc)_n(?P<n>[0-9e]+|inf)$")
 PATH_METRICS = ("max_f1", "aupr", "auc", "max_acc")
-#: Dettling's extended BIC (his eq. 6.2): BIC + 4 gamma |E| log p, for these gammas.  Computed
-#: offline from the stored BIC of every support of the path; column prefix "ebic<gamma>"
+#: Dettling's eBIC penalty (his eq. 6.2): pen_eBIC = pen_BIC + 4 gamma |E| log p, for these
+#: gammas.  Computed offline from the stored score (BIC penalty) of every support of the path;
+#: column prefix "ebic<gamma>"
 EBIC_GAMMAS = (0.5, 1.0)
 #: the columns reported in the tables: path metrics, then the data-driven graphs
 REPORT = ("max_f1", "aupr", "auc", "bic_f1", "ebic05_f1", "ebic1_f1", "search_f1", "ebic1_search_f1",
@@ -72,11 +74,12 @@ REPORT = ("max_f1", "aupr", "auc", "bic_f1", "ebic05_f1", "ebic1_f1", "search_f1
 ID = ("p", "k", "c_choice", "rep")
 #: the order of the estimators in the tables: reference first, then the standard
 #: paths, then the three that start from the lasso, then the same with the
-#: likelihood refit behind the BIC (wave 5a, "-ml"), then the searches without a path
-ORDER = ("lasso", "lasso-up", "MCP", "SCAD", "MCP-up", "SCAD-up", "MCP-lla", "SCAD-lla",
-         "adaptive", "lasso-ml", "MCP-up-ml", "adaptive-ml",
-         "search-pure", "search-pure-100s", "search-pure-100u", "search-pure-30s", "search-pure-e1",
-         "search-truth", "search-truth-e1")
+#: likelihood refit behind the score (wave 5a, "-ml"), then the searches without a path
+ORDER = ("lasso", "lasso-up", "MCP", "SCAD", "MCP-up", "MCP-up-lasso", "SCAD-up", "MCP-lla", "SCAD-lla",
+         "adaptive", "lasso-ml", "lasso-up-ml", "MCP-ml", "MCP-up-ml", "MCP-up-lasso-ml", "adaptive-ml",
+         "search-pure", "search-pure-100s", "search-pure-100u", "search-pure-30s", "search-pure-300s",
+         "search-pure-e1", "search-pure-ml", "search-pure-100sml", "search-truth", "search-truth-e1",
+         "search-truth-ml", "search-truth-100sml")
 
 
 def graph_metrics(conf: np.ndarray, orient: np.ndarray, prefix: str) -> dict:
@@ -106,9 +109,10 @@ def graph_metrics(conf: np.ndarray, orient: np.ndarray, prefix: str) -> dict:
 
 
 def ebic_selection(d, i: int, gamma: float) -> dict:
-    """The graph Dettling's extended BIC picks on the path of dataset ``i`` of shard ``d``:
-    his eq. (6.2), ``(|E| + p) log n + 4 gamma |E| log p + L``, where the stored ``bic_scores``
-    already hold ``L + (|E| + p) log n``.  Decoded from the stored supports; no refit."""
+    """The graph selected with Dettling's eBIC penalty on the path of dataset ``i`` of shard ``d``:
+    the score of his eq. (6.2), ``(|E| + p) log n + 4 gamma |E| log p + L``, where the stored
+    ``bic_scores`` already hold ``L + (|E| + p) log n`` (the score with the BIC penalty).
+    Decoded from the stored supports; no refit."""
     p, n_lambda = int(d["p"][i]), len(d["lambdas"][i])
     scores = d["bic_scores"][i] + 4.0 * gamma * d["nnz"][i] * math.log(p)
     idx = int(np.argmin(scores))
@@ -255,15 +259,18 @@ def means_table(rows: list[dict]) -> list[dict]:
 def paired_table(rows: list[dict]) -> list[dict]:
     """Every estimator against two references on the same graphs: the lasso with
     the same loss, C, n and p ("same_c"), and Dettling's lasso, C = 2I ("dettling").
-    Per true-C setting and pooled ("all")."""
+    Per true-C setting and pooled ("all").  An estimator whose score uses the likelihood
+    refit ("-ml", waves 5a and 8) is compared with the lasso under the same refit
+    ("lasso-ml"), so that the selected and searched graphs are judged by the same rule."""
     by = defaultdict(dict)                       # (loss, c, n, p, estimator) -> graph id -> row
     for r in rows:
         by[(r["loss"], r["c"], r["n"], r["p"], r["estimator"])][tuple(r[k] for k in ID)] = r
     out = []
     for (loss, c, n, p, est), cell in sorted(by.items(), key=lambda kv: (
             kv[0][0], n_key(kv[0][2]), kv[0][3], kv[0][1], estimator_key(kv[0][4]))):
-        for ref_name, ref_key in (("same_c", (loss, c, n, p, "lasso")),
-                                  ("dettling", (loss, "C2I", n, p, "lasso"))):
+        ref_est = "lasso-ml" if est.endswith("-ml") else "lasso"
+        for ref_name, ref_key in (("same_c", (loss, c, n, p, ref_est)),
+                                  ("dettling", (loss, "C2I", n, p, ref_est))):
             ref = by.get(ref_key)
             if ref is None or ref is cell:
                 continue
@@ -275,7 +282,7 @@ def paired_table(rows: list[dict]) -> list[dict]:
                        "reference": ref_name, "true_c": setting}
                 for col in REPORT:
                     # an estimator's searched graph is compared with the reference's
-                    # BIC-selected graph when the reference has no search of its own
+                    # selected graph when the reference has no search of its own
                     ref_col = col if any(col in ref[g] for g in ids) else col.replace("search_", "bic_")
                     x = [cell[g].get(col, math.nan) for g in ids]
                     y = [ref[g].get(ref_col, math.nan) for g in ids]

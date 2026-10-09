@@ -28,7 +28,7 @@ with the repository drivers before they go into the thesis. The notes of the day
   penalties. Code, tests and a submission script were added to the repository; submission started
   today with a canary (§5).
 - **Next.** Move the reversal search into the repository, then compare with $\lambda$ chosen by
-  BIC: lasso + reversal search vs. MCP + reversal search vs. the lasso alone (§6).
+  the score: lasso + reversal search vs. MCP + reversal search vs. the lasso alone (§6).
 
 ---
 
@@ -142,7 +142,7 @@ the smallest off-diagonal $\ell_1$ norm (the lasso's limit as $\lambda\to0$):
   continuation path. The spectrum:
   - $\ell_1$: easy to compute, hedges well, but can target the wrong graph;
   - continuous MCP/SCAD on a path: the right target, but unreachable by coordinate-wise moves;
-  - $\ell_0$/BIC with reversal moves: the right target, and reachable.
+  - $\ell_0$ (the score with the BIC penalty) with reversal moves: the right target, and reachable.
 
 ---
 
@@ -196,7 +196,7 @@ $$F(M) = \tfrac12\|M\hat\Sigma + \hat\Sigma M^\top + C\|_F^2 + \textstyle\sum_{i
 
 the most. It repeats this for at most six rounds.
 
-- **Score:** the MCP objective at that $\lambda$, not BIC.
+- **Score:** the MCP objective at that $\lambda$, not the score with the BIC penalty.
 - **$\lambda$:** the best of the inspected ones, i.e. oracle tuning, like `max_f1`.
 - **Moves:** reversals only.
 - **"Truth's basin"** is MCP re-solved from $M^*$. It uses the truth, so it shows what the objective
@@ -210,8 +210,8 @@ the most. It repeats this for at most six rounds.
   $1/\gamma$; here it is below, so the objective has several local minima.
 
 Open questions:
-1. Does the gain come from MCP, or from the reversal move plus an edge-counting score? Lasso + BIC
-   reversal search is untested.
+1. Does the gain come from MCP, or from the reversal move plus an edge-counting score? Lasso +
+   reversal search on the score (BIC penalty) is untested.
 2. What happens when $\lambda$ is chosen from the data?
 3. Does any of this carry over to random graphs?
 
@@ -492,8 +492,8 @@ discussed the same day (new results, checked against `files/s1_nsweep_p10.csv`) 
 3. **Reversal search into the repository** (planned in `simulations/S3b_reversal_search.md`):
    - the solver, with tests (Example 2 at $n=\infty$ is turned into $M^*$; the objective never
      increases) and documentation;
-   - then the fair comparison, with $\lambda$ chosen by BIC: lasso + BIC reversal search, MCP + the
-     same search, and the lasso alone;
+   - then the fair comparison, with $\lambda$ chosen by the score: lasso + reversal search on the
+     score, MCP + the same search, and the lasso alone;
    - run it first on the Example 2 $n$-sweep, then on random graphs at $n=\infty$, on both the raw
      and the standardised scale;
    - on the cluster, as one more option of the shard runner.
@@ -505,7 +505,7 @@ discussed the same day (new results, checked against `files/s1_nsweep_p10.csv`) 
 5. **For the 10–11 October meeting:**
    - Framing: orientation is the hard part of GCLM structure learning. Nonconvexity helps as the
      score of a discrete search (Example 2), not as a penalty on a continuation path.
-   - Is BIC tuning required?
+   - Is tuning by the score (BIC penalty) required?
    - Should 2-cycles stay in the DGP?
 
 ---

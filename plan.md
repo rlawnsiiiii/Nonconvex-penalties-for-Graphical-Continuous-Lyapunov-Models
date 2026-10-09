@@ -33,10 +33,6 @@ Thesis - Joon Kim
 - Registration
     - -> contact Prof. MD around Oct 10-11
 
-- Score-based search with e.g. BIC 
-    - initialize random graphs, define neighborhood of graphs (define perturbations - how many edge changes e.g.?), compute BIC for newer graphs, greedily pick the best graph according to BIC, paper- not many local optima, thomas nagler - asymptotics for diverging number of parameters sparsity
-
-
 ### Simulations
 
 - for compute :  student clusters?  maybe at LRZ?  If needed contact our group member Stephan Haug <haug@tum.de>

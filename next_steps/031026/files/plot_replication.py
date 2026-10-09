@@ -2,7 +2,7 @@
 """Figure for the replication of the independent study's central claims
 (replicate_dense_to_sparse.csv -> replication_dense_to_sparse.{png,pdf}).
 
-Rows: the oracle path maximum (max_f1) and the directed F1 of the BIC-selected graph.
+Rows: the oracle path maximum (max_f1) and the directed F1 of the graph selected by the score (BIC penalty).
 Columns: the two volatility matrices fitted to the standardised data.
 Encoding as elsewhere in the repository (lasso blue circle, MCP orange square, SCAD aqua
 triangle); hollow + thin = the path used in every thesis run so far (sparse -> dense),
@@ -38,7 +38,7 @@ SERIES = [("lasso", "lasso", "#2a78d6", "o", True),
 NS = ("1000", "10000", "inf")
 N_LABEL = {"1000": "10³", "10000": "10⁴", "inf": "∞"}
 SCALES = (("variance", "rescaled C = 2·diag(1/s²)"), ("identity", "C = 2I (Dettling's pipeline)"))
-METRICS = (("max_f1", "maximum F1 along the path\n(oracle λ)"), ("bic_f1", "directed F1 of the\nBIC-selected graph"))
+METRICS = (("max_f1", "maximum F1 along the path\n(oracle λ)"), ("bic_f1", "directed F1 of the\nselected graph (BIC penalty)"))
 
 
 def main() -> None:

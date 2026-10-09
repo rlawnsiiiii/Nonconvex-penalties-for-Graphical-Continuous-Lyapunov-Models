@@ -55,8 +55,9 @@ the lasso on every metric, by a margin that grows with $n$ up to $10^5$:
 
 The gain sits in the sparse graphs ($k = 1, 2$: +0.04 to +0.12 at $n = 1000$, +0.14 to +0.23 at
 $n = 10^5$); for $k = 4$, where two thirds of the edges are undetectable at $n = 1000$, the lasso
-is best or within 0.01 of the best. With BIC tuning instead of the oracle path maximum the picture is the same and the
-structural Hamming distance drops from 17 to 13 ($n = 10^3$) and from 16 to 10.5–11.7 ($n = 10^4$).
+is best or within 0.01 of the best. With selection by the score (BIC penalty) instead of the oracle
+path maximum the picture is the same and the structural Hamming distance drops from 17 to 13
+($n = 10^3$) and from 16 to 10.5–11.7 ($n = 10^4$).
 
 **Three further results.**
 
@@ -67,9 +68,9 @@ on the standardized scale with the matching $C$; on the other hand the lasso the
 recovers perfectly on the raw scale. The raw-scale conclusions of that example do not carry over to the
 pipeline of Figure 5.
 
-*The BIC search of S3b is a cheap finishing step, and the start matters more than the search (§9).* From the
-minimum-$\ell_1$ exact fit it lifts $F_1$ by 0.13 to 0.22; from the MCP pilot's graph by at most 0.07; from
-dense → sparse estimators by at most 0.03. Delete and reverse moves are enough at $n \le 10^4$.
+*The greedy search of S3b (on the score) is a cheap finishing step, and the start matters more than the search
+(§9).* From the minimum-$\ell_1$ exact fit it lifts $F_1$ by 0.13 to 0.22; from the MCP pilot's graph by at most
+0.07; from dense → sparse estimators by at most 0.03. Delete and reverse moves are enough at $n \le 10^4$.
 
 *A nonconvex penalty with a convex objective (GMC) is only marginally better than the lasso (§10),* and
 reporting both directions of pairs whose direction the data cannot tell (§12) gains 0.02–0.03 $F_1$ for the
@@ -81,7 +82,7 @@ and $n \gtrsim 10^4$. Not as a replacement for the lasso on the pilot's path, at
 
 **What I would change first** (details in §13): add `--c-scale variance` and `--direction up` to
 the remaining LRZ cells (both are in the patch that comes with this memo and leave the defaults
-bit-identical); report skeleton and orientation separately and add BIC-selected graphs; and treat
+bit-identical); report skeleton and orientation separately and add the graphs selected by the score; and treat
 "dense-to-sparse" as the definition of the nonconvex estimators.
 
 ![max F1 against n](independent_study/figures/f1_vs_n.png)
@@ -124,16 +125,16 @@ Experiments (`e0` … `e11` in the folder; `analyze.py` prints the tables):
 | E0 | does the true graph fit the model that is being fitted? | 100 drift matrices × $n \in \{10^3, 10^4\}$ |
 | E1 | formulation × penalty × $n$, and MCP started at the truth | 52 × $n \in \{10^3, 10^4, 10^5, \infty\}$ |
 | E2 | how much information does each true edge carry? | 100 (and two strong-signal variants) |
-| E3 | all estimators above, both formulations, path metrics and BIC | 100 × 4 sample sizes |
+| E3 | all estimators above, both formulations, path metrics and selection by the score | 100 × 4 sample sizes |
 | E5 | $\gamma$ sweep for the pilot's estimators | 52 × $n \in \{10^3, \infty\}$ |
-| E6 | orient-or-abstain on BIC-selected graphs | 100 × $n \in \{10^3, 10^4\}$ (52 for strong signals) |
+| E6 | orient-or-abstain on graphs selected by the score | 100 × $n \in \{10^3, 10^4\}$ (52 for strong signals) |
 | E7 | path direction × solver × penalty | 52 × 4 sample sizes (52 × 3 for strong signals) |
 | E3′ | E3 with strong signals and no 2-cycles | 52 × $n \in \{10^3, 10^4, \infty\}$ |
 | E4 | E3 (reduced) at $p = 20$ | 24 × $n \in \{10^3, 10^4, \infty\}$ |
 | E8 | GMC penalty (Selesnick 2017) | 52 × $n \in \{10^3, 10^4, \infty\}$ |
 | E9 | minimum-$\ell_1$ exact solution at the population level | 100 drift matrices |
 | E10 | Dettling's Example 2 (path and 5-cycle), all estimators | 1002 datasets |
-| E11 | trial of the BIC search of `S3b_reversal_search.md` | 40 graphs × $n \in \{10^3, 10^4, \infty\}$ |
+| E11 | trial of the greedy search (on the score) of `S3b_reversal_search.md` | 40 graphs × $n \in \{10^3, 10^4, \infty\}$ |
 
 ## 2. After standardization, $C = 2I$ is the wrong model
 
@@ -173,9 +174,10 @@ How much does it matter? For the lasso, almost nothing: `max_f1` 0.620 vs 0.621 
 0.680 vs 0.688 at $n = \infty$ (E3). This is Dettling's robustness finding, and it is why the
 reproduction of Figure 5 was unaffected. For anything that commits to a sparse fit it matters
 more as $n$ grows: under `identity` the best estimators of §5 stop at `max_f1` ≈ 0.73 for
-$n = \infty$, under `variance` they reach 0.78–0.81, and BIC, which compares likelihoods of a
-wrong model, stops improving: BIC-selected $F_1$ barely changes from $10^4$ to $10^5$ under `identity`
-(`mcp_up` 0.625 → 0.641, lasso 0.619 → 0.611) but keeps improving under `variance` (0.683 → 0.724) (§5).
+$n = \infty$, under `variance` they reach 0.78–0.81, and selection by the score (BIC penalty), which
+compares likelihoods of a wrong model, stops improving: $F_1$ of the selected graph barely changes from
+$10^4$ to $10^5$ under `identity` (`mcp_up` 0.625 → 0.641, lasso 0.619 → 0.611) but keeps improving
+under `variance` (0.683 → 0.724) (§5).
 
 One consequence for the write-up: on the raw scale the lasso's orientation is biased towards
 "the high-variance node is the parent" (§3), and in this DGP that is true for 65 % of the edges,
@@ -356,13 +358,13 @@ $10^{-11}$).
 ## 5. Bake-off
 
 E3, 100 drift matrices. Paired $z$ against the lasso on the same formulation in brackets;
-`bic_*` is the graph selected by BIC along each path, each candidate support refitted by Gaussian
-maximum likelihood as in Dettling's equation (6.2) with $\gamma = 0$; `shd` counts a reversed
-edge once.
+`bic_*` is the graph selected by the score along each path, each candidate support refitted by Gaussian
+maximum likelihood as in Dettling's equation (6.2) with $\gamma = 0$ (the BIC penalty); `shd` counts a
+reversed edge once.
 
 **$n = 1,000$** (100 drift matrices)
 
-| method | `max_f1` identity | `max_f1` variance | `aupr` variance | `sk_f1` variance | BIC `f1` identity | BIC `f1` variance | BIC `shd` identity | BIC `shd` variance |
+| method | `max_f1` identity | `max_f1` variance | `aupr` variance | `sk_f1` variance | `bic_f1` identity | `bic_f1` variance | `bic_shd` identity | `bic_shd` variance |
 |---|---|---|---|---|---|---|---|---|
 | `lasso` | 0.620 | 0.621 | 0.526 | 0.793 | 0.551 | 0.549 | 16.0 | 17.1 |
 | `mcp_mapg` | 0.527 (-9.0) | 0.553 (-6.6) | 0.480 (-5.5) | 0.784 (-1.2) | 0.469 (-7.0) | 0.482 (-5.9) | 16.3 (+1.0) | 17.0 (-0.3) |
@@ -380,7 +382,7 @@ edge once.
 
 **$n = 10^4$** (100 drift matrices)
 
-| method | `max_f1` identity | `max_f1` variance | `aupr` variance | `sk_f1` variance | BIC `f1` identity | BIC `f1` variance | BIC `shd` identity | BIC `shd` variance |
+| method | `max_f1` identity | `max_f1` variance | `aupr` variance | `sk_f1` variance | `bic_f1` identity | `bic_f1` variance | `bic_shd` identity | `bic_shd` variance |
 |---|---|---|---|---|---|---|---|---|
 | `lasso` | 0.664 | 0.667 | 0.559 | 0.843 | 0.619 | 0.620 | 16.2 | 15.9 |
 | `mcp_mapg` | 0.552 (-9.7) | 0.595 (-6.6) | 0.516 (-4.3) | 0.831 (-1.6) | 0.481 (-11.9) | 0.530 (-6.6) | 18.1 (+4.9) | 16.9 (+1.9) |
@@ -415,7 +417,7 @@ edge once.
 | `scad_swap` | 0.678 (+0.2), 0% | 0.762 (+5.9), 8% | 0.684 (+0.5), 1% | 0.794 (+7.6), 18% |
 
 Reading. (i) Under the pilot's formulation at $n = 1000$ nothing beats the lasso on `max_f1` —
-the backward estimators tie with it (0.62) — but they order the edges better (`aupr` 0.58–0.60 for `bwd`, `adalasso_bp` and `thr_bp` against 0.52; not for `bwd_swap`, 0.53) and BIC selects better graphs from their paths (structural Hamming distance 14.2–14.8
+the backward estimators tie with it (0.62) — but they order the edges better (`aupr` 0.58–0.60 for `bwd`, `adalasso_bp` and `thr_bp` against 0.52; not for `bwd_swap`, 0.53) and the score selects better graphs from their paths (structural Hamming distance 14.2–14.8
 against 16.0). (ii) With the rescaled $C$ the backward estimators are ahead on every column at
 every $n$. (iii) Among them the differences are small next to the gap to the lasso. Backward
 elimination with exchange moves is the best at $n \ge 10^4$ and the only one that recovers a
@@ -500,7 +502,7 @@ Two readings. First, strong signals and no 2-cycles raise every estimator, but t
 lasso** in the cells in which it lost before ($-5.7$ against the lasso for MCP at $n = \infty$). With the
 information limit removed, that loss is the path, not the sample. Second, the **gain of the dense-to-sparse
 estimators is larger** than in the thesis DGP (MCP dense → sparse over the lasso: +0.11 against +0.07 at
-$n = 10^4$, +0.13 against +0.09 at $n = \infty$), and BIC-selected graphs
+$n = 10^4$, +0.13 against +0.09 at $n = \infty$), and the graphs selected by the score
 have a structural Hamming distance of 8.4–9.7 against 14.7 for the lasso at $n = 10^4$. At $k = 4$ (about 30 edges and 10 diagonal entries for 55 equations) the problem is
 still too close to saturation for any estimator to improve much on the lasso.
 
@@ -565,27 +567,27 @@ Four things stand out.
 4. **Forward stepwise selection gets worse with $n$** (path, `raw`: 0.49, 0.41, 0.32 at $n = 10^3, 10^4, 10^5$):
    its early commitments are, as in §4, made on first-order evidence.
 
-> **Added 5 October 2026 (not part of the original memo): the repository's BIC search on Example 2**
+> **Added 5 October 2026 (not part of the original memo): the repository's greedy search (on the score) on Example 2**
 > (`simulations/S3b_reversal_search.md` §9.1; raw scale, 10 datasets per $n$). The searches started
 > from the lasso, MCP and SCAD paths recover the 5-cycle exactly from $n = 10^5$ on; the plain paths
 > never do.
 >
 > ![Example 2, exact recovery](../../../runs/s3b_search/figures/example2_exact_direct_bic.png)
 
-## 9. Trying out S3b (the BIC search with reversal moves)
+## 9. Trying out S3b (the greedy search on the score with reversal moves)
 
-`simulations/S3b_reversal_search.md` (written 2 October, "plan, nothing implemented yet") proposes a greedy BIC
-search with delete, reverse and add moves, started from the lasso, MCP, SCAD or the empty graph. I implemented its
-direct-loss arm outside the repository (`s3b.py`: least-squares refit on the support, the BIC of §2 of the plan with
-$p + \lvert S\rvert$ parameters, unstable refits scored $+\infty$, nominal $n = 10^6$ at $n = \infty$, at most 200
-greedy steps, all candidate moves evaluated) to try it before the repository version is built.
+`simulations/S3b_reversal_search.md` (written 2 October, "plan, nothing implemented yet") proposes a greedy search on
+the score with delete, reverse and add moves, started from the lasso, MCP, SCAD or the empty graph. I implemented its
+direct-loss arm outside the repository (`s3b.py`: least-squares refit on the support, the score of §2 of the plan with
+$p + \lvert S\rvert$ parameters in the BIC penalty, unstable refits scored $+\infty$, nominal $n = 10^6$ at $n = \infty$,
+at most 200 greedy steps, all candidate moves evaluated) to try it before the repository version is built.
 
 **Phase-0 checks** (Example 2, $p = 5$, 5 datasets per $n$; `s3b_checks.py`, `s3b_refit_check.py`):
 
 - The refit on the true support returns $M^\ast$ to $10^{-14}$ (path and cycle).
-- The exhaustive BIC optimum over all supports of up to 7 edges (140 000 refits each) is the true support in 1 of 1
+- The exhaustive score optimum over all supports of up to 7 edges (140 000 refits each) is the true support in 1 of 1
   datasets at $n = \infty$, in 3 of 5 and 2 of 5 (path / cycle) at $n = 10^5$, and in **0 of 5 at $n = 10^3$ and
-  $10^4$**. At $n \le 10^4$ the BIC optimum is a smaller or reversed graph; the true support scores 0.5–11 nats
+  $10^4$**. At $n \le 10^4$ the score optimum is a smaller or reversed graph; the true support scores 0.5–11 nats
   worse. The score, not the search, is the limit there.
 - Greedy search from any non-empty start reaches that exhaustive optimum in 3–5 of 5 datasets (on the path 4 of 5 at
   $n = 10^3$ and 5 of 5 at $10^4$, on the cycle 5 of 5 / 3 of 5, 4 of 5 at $n = 10^5$); from the empty graph it
@@ -604,12 +606,12 @@ graphs, repo seeds). Directed F1 of the start, after the search, paired $z$ of t
 |---|---|---|---|
 | empty graph | 0.000 → 0.462 (+17.4); 18.6 → 14.9 | 0.000 → 0.520 (+17.0); 18.6 → 15.3 | 0.000 → 0.561 (+16.5); 18.6 → 18.6 |
 | min-ℓ₁ exact fit (dense) | 0.438 → 0.586 (+4.5); 30.9 → 12.6 | 0.468 → 0.687 (+5.9); 30.0 → 11.7 | 0.595 → 0.729 (+5.5); 20.5 → 13.1 |
-| lasso (BIC λ) | 0.567 → 0.569 (+0.1); 16.6 → 12.7 | 0.625 → 0.670 (+2.6); 15.7 → 11.8 | 0.636 → 0.726 (+4.4); 17.5 → 13.4 |
-| MCP path, pilot (BIC λ) | 0.514 → 0.510 (-0.2); 16.2 → 13.9 | 0.566 → 0.577 (+0.7); 15.8 → 13.9 | 0.532 → 0.597 (+2.6); 21.2 → 19.3 |
-| SCAD path, pilot (BIC λ) | 0.522 → 0.509 (-0.7); 16.6 → 14.0 | 0.564 → 0.574 (+0.6); 15.4 → 13.5 | 0.557 → 0.593 (+1.9); 19.9 → 18.5 |
-| MCP dense → sparse (BIC λ) | 0.568 → 0.575 (+0.6); 13.6 → 12.8 | 0.688 → 0.701 (+1.8); 11.6 → 10.9 | 0.731 → 0.755 (+1.9); 12.9 → 11.9 |
-| adaptive lasso, BP weights (BIC λ) | 0.596 → 0.592 (-0.3); 12.9 → 12.5 | 0.696 → 0.705 (+1.2); 11.5 → 11.0 | 0.721 → 0.751 (+2.1); 13.1 → 12.2 |
-| backward + swaps (BIC λ) | 0.549 → 0.555 (+0.6); 13.4 → 13.0 | 0.713 → 0.714 (+0.3); 10.5 → 10.5 | 0.751 → 0.750 (-0.1); 11.7 → 11.8 |
+| lasso (λ selected by the score) | 0.567 → 0.569 (+0.1); 16.6 → 12.7 | 0.625 → 0.670 (+2.6); 15.7 → 11.8 | 0.636 → 0.726 (+4.4); 17.5 → 13.4 |
+| MCP path, pilot (λ selected by the score) | 0.514 → 0.510 (-0.2); 16.2 → 13.9 | 0.566 → 0.577 (+0.7); 15.8 → 13.9 | 0.532 → 0.597 (+2.6); 21.2 → 19.3 |
+| SCAD path, pilot (λ selected by the score) | 0.522 → 0.509 (-0.7); 16.6 → 14.0 | 0.564 → 0.574 (+0.6); 15.4 → 13.5 | 0.557 → 0.593 (+1.9); 19.9 → 18.5 |
+| MCP dense → sparse (λ selected by the score) | 0.568 → 0.575 (+0.6); 13.6 → 12.8 | 0.688 → 0.701 (+1.8); 11.6 → 10.9 | 0.731 → 0.755 (+1.9); 12.9 → 11.9 |
+| adaptive lasso, BP weights (λ selected by the score) | 0.596 → 0.592 (-0.3); 12.9 → 12.5 | 0.696 → 0.705 (+1.2); 11.5 → 11.0 | 0.721 → 0.751 (+2.1); 13.1 → 12.2 |
+| backward + swaps (λ selected by the score) | 0.549 → 0.555 (+0.6); 13.4 → 13.0 | 0.713 → 0.714 (+0.3); 10.5 → 10.5 | 0.751 → 0.750 (-0.1); 11.7 → 11.8 |
 
 *pilot formulation (`identity`): directed F1 of the start → after the search (paired $z$ of the change), and SHD*
 
@@ -617,34 +619,34 @@ graphs, repo seeds). Directed F1 of the start, after the search, paired $z$ of t
 |---|---|---|---|
 | empty graph | 0.000 → 0.495 (+25.1); 18.6 → 14.3 | 0.000 → 0.537 (+24.1); 18.6 → 15.5 | 0.000 → 0.549 (+32.0); 18.6 → 19.1 |
 | min-ℓ₁ exact fit (dense) | 0.421 → 0.534 (+3.5); 32.1 → 14.0 | 0.455 → 0.611 (+5.1); 30.9 → 13.8 | 0.546 → 0.608 (+4.1); 23.4 → 18.1 |
-| lasso (BIC λ) | 0.549 → 0.548 (-0.1); 15.2 → 13.1 | 0.624 → 0.632 (+0.6); 15.6 → 13.3 | 0.597 → 0.614 (+2.3); 19.6 → 17.8 |
-| MCP path, pilot (BIC λ) | 0.488 → 0.517 (+2.1); 15.4 → 14.0 | 0.477 → 0.490 (+1.0); 17.9 → 16.6 | 0.448 → 0.468 (+1.5); 24.2 → 23.4 |
-| SCAD path, pilot (BIC λ) | 0.503 → 0.506 (+0.2); 15.7 → 13.8 | 0.518 → 0.524 (+0.3); 17.1 → 15.4 | 0.473 → 0.484 (+1.3); 23.1 → 22.2 |
-| MCP dense → sparse (BIC λ) | 0.555 → 0.554 (-0.1); 13.3 → 13.2 | 0.616 → 0.623 (+1.2); 13.3 → 13.2 | 0.628 → 0.616 (-2.2); 17.8 → 17.9 |
-| adaptive lasso, BP weights (BIC λ) | 0.555 → 0.554 (-0.1); 13.7 → 13.3 | 0.631 → 0.620 (-1.4); 13.2 → 13.5 | 0.626 → 0.621 (-0.9); 17.3 → 17.4 |
-| backward + swaps (BIC λ) | 0.503 → 0.506 (+0.4); 14.1 → 14.1 | 0.593 → 0.585 (-0.8); 13.4 → 13.5 | 0.637 → 0.629 (-1.9); 16.3 → 16.5 |
+| lasso (λ selected by the score) | 0.549 → 0.548 (-0.1); 15.2 → 13.1 | 0.624 → 0.632 (+0.6); 15.6 → 13.3 | 0.597 → 0.614 (+2.3); 19.6 → 17.8 |
+| MCP path, pilot (λ selected by the score) | 0.488 → 0.517 (+2.1); 15.4 → 14.0 | 0.477 → 0.490 (+1.0); 17.9 → 16.6 | 0.448 → 0.468 (+1.5); 24.2 → 23.4 |
+| SCAD path, pilot (λ selected by the score) | 0.503 → 0.506 (+0.2); 15.7 → 13.8 | 0.518 → 0.524 (+0.3); 17.1 → 15.4 | 0.473 → 0.484 (+1.3); 23.1 → 22.2 |
+| MCP dense → sparse (λ selected by the score) | 0.555 → 0.554 (-0.1); 13.3 → 13.2 | 0.616 → 0.623 (+1.2); 13.3 → 13.2 | 0.628 → 0.616 (-2.2); 17.8 → 17.9 |
+| adaptive lasso, BP weights (λ selected by the score) | 0.555 → 0.554 (-0.1); 13.7 → 13.3 | 0.631 → 0.620 (-1.4); 13.2 → 13.5 | 0.626 → 0.621 (-0.9); 17.3 → 17.4 |
+| backward + swaps (λ selected by the score) | 0.503 → 0.506 (+0.4); 14.1 → 14.1 | 0.593 → 0.585 (-0.8); 13.4 → 13.5 | 0.637 → 0.629 (-1.9); 16.3 → 16.5 |
 
 The reading, with the plan's hypotheses in brackets:
 
 - **[H1] The search helps where the start is poor, and not where it is good.** From the dense minimum-$\ell_1$ exact
-  fit it adds +0.15 F1 at $n = 10^3$ and +0.22 at $n = 10^4$ (`variance`); from the lasso at its BIC $\lambda$ it
-  adds nothing at $n = 10^3$ (+0.002), +0.045 at $n = 10^4$ and +0.09 at $n = \infty$ (while the SHD falls by
-  3–5 at every $n$). From the estimators of §5, which already prune a dense start with a better rule, it adds
-  at most +0.03 and nothing for backward elimination with exchange moves — the latter is already a swap search.
+  fit it adds +0.15 F1 at $n = 10^3$ and +0.22 at $n = 10^4$ (`variance`); from the lasso at the $\lambda$ selected
+  by the score it adds nothing at $n = 10^3$ (+0.002), +0.045 at $n = 10^4$ and +0.09 at $n = \infty$ (while the SHD
+  falls by 3–5 at every $n$). From the estimators of §5, which already prune a dense start with a better rule, it
+  adds at most +0.03 and nothing for backward elimination with exchange moves — the latter is already a swap search.
 - **[H2] Starting from MCP or SCAD is not better than starting from the lasso — it is worse.** The pilot's paths
   give the worst non-trivial starts (start F1 0.51–0.57 at $n \le 10^4$, 0.53–0.56 at $n = \infty$; only the dense minimum-$\ell_1$ fit starts lower at finite $n$) and the search
-  does not repair them (+0.01 at $n = 10^4$): the wrong directions are committed, as §4 predicts, and a BIC
-  search with single moves does not see a better graph one move away. With a dense-to-sparse start nonconvexity
+  does not repair them (+0.01 at $n = 10^4$): the wrong directions are committed, as §4 predicts, and a greedy search
+  on the score with single moves does not see a better graph one move away. With a dense-to-sparse start nonconvexity
   does pay (0.69 at $n = 10^4$, 0.73 at $n = \infty$ before the search), but that is §4's finding, not the search's.
-- **[H3] BIC against the penalised objective.** For the MCP start, a reversal search on the MCP objective at the
+- **[H3] The score against the penalised objective.** For the MCP start, a reversal search on the MCP objective at the
   start's $\lambda$ reaches 0.547 / 0.623 / 0.650 (`variance`, $n = 10^3 / 10^4 / \infty$) against 0.510 / 0.577 /
-  0.597 for the BIC search from the same start, and 0.514 / 0.566 / 0.532 for the start. The objective search is
-  ahead at every $n$ in this ablation, and it is the only move in this table that helps MCP at $n = 10^3$.
-  The BIC search needs the additional moves and a finite-sample score that the estimates of the pilot path do not
-  support.
+  0.597 for the greedy search on the score from the same start, and 0.514 / 0.566 / 0.532 for the start. The
+  objective search is ahead at every $n$ in this ablation, and it is the only move in this table that helps MCP at
+  $n = 10^3$. The greedy search on the score needs the additional moves and a finite-sample score that the estimates
+  of the pilot path do not support.
 - **Moves.** Delete + reverse alone does as well as all three moves at $n \le 10^4$ (0.570, 0.673 against 0.569,
   0.670 from the lasso start, `variance`); the add move matters only at $n = \infty$ (0.706 without, 0.726
-  with). eBIC($\gamma = 0.5$) is within 0.01 of BIC.
+  with). The eBIC penalty ($\gamma = 0.5$) is within 0.01 of the BIC penalty.
 - **The empty graph is a poor start** (F1 0.46–0.56 even at $n = \infty$, 0 % exact at $n \le 10^4$): the greedy
   forward steps commit to the strongest first-order effects, the same failure as `fwd` in §5.
 - **Scale.** On the raw scale (correct $C$) the gains from the lasso start are larger (0.566 → 0.715 at
@@ -670,12 +672,12 @@ problem has one global minimum and no path-direction problem by construction. It
 "is there a nonconvex penalty that avoids the pilot's failure?". I implemented it for the direct Lyapunov loss
 (forward–backward iterations followed by a primal–dual active-set refinement to exact KKT; at $\theta = 0$ it agrees with
 LARS to $10^{-11}$, and objective-perturbation checks pass) and ran it on the same 52 drift matrices as E5 and E7.
-Numbers are `max_f1` (paired $z$ against the lasso), then BIC-selected $F_1$:
+Numbers are `max_f1` (paired $z$ against the lasso), then $F_1$ of the selected graph:
 
 
-`identity`: `max_f1` (paired $z$ vs lasso); BIC-selected $F_1$ in the last two columns
+`identity`: `max_f1` (paired $z$ vs lasso); $F_1$ of the selected graph (BIC penalty) in the last two columns
 
-| method | n = 10³ | n = 10⁴ | n = ∞ | BIC F1, 10³ | BIC F1, 10⁴ |
+| method | n = 10³ | n = 10⁴ | n = ∞ | selected F1, 10³ | selected F1, 10⁴ |
 |---|---|---|---|---|---|
 | lasso | 0.617 | 0.661 | 0.677 | 0.550 | 0.622 |
 | gmc_0.5 | 0.621 (+1.9) | 0.671 (+3.2) | 0.684 (+1.9) | 0.565 | 0.627 |
@@ -683,9 +685,9 @@ Numbers are `max_f1` (paired $z$ against the lasso), then BIC-selected $F_1$:
 | mcp_mapg | 0.530 (-6.3) | 0.543 (-6.9) | 0.558 (-7.5) | 0.474 | 0.469 |
 | mcp_up | 0.623 (+0.5) | 0.679 (+1.2) | 0.732 (+4.3) | 0.539 | 0.616 |
 
-`variance`: `max_f1` (paired $z$ vs lasso); BIC-selected $F_1$ in the last two columns
+`variance`: `max_f1` (paired $z$ vs lasso); $F_1$ of the selected graph (BIC penalty) in the last two columns
 
-| method | n = 10³ | n = 10⁴ | n = ∞ | BIC F1, 10³ | BIC F1, 10⁴ |
+| method | n = 10³ | n = 10⁴ | n = ∞ | selected F1, 10³ | selected F1, 10⁴ |
 |---|---|---|---|---|---|
 | lasso | 0.633 | 0.669 | 0.685 | 0.555 | 0.625 |
 | gmc_0.5 | 0.636 (+1.3) | 0.678 (+3.1) | 0.725 (+3.8) | 0.557 | 0.633 |
@@ -696,7 +698,7 @@ Numbers are `max_f1` (paired $z$ against the lasso), then BIC-selected $F_1$:
 GMC: share of path points with exact KKT {'gmc_0.5': 0.988, 'gmc_0.8': 0.962}; median seconds per path {'gmc_0.5': 0.41, 'gmc_0.8': 0.93, 'lasso': 0.02, 'mcp_mapg': 0.12, 'mcp_up': 0.37}.
 
 GMC is a small, consistent improvement over the lasso and nothing like the gain of dense → sparse MCP: at
-$\theta = 0.8$ it adds 0.01 to 0.04 in `max_f1` ($z$ between 2.4 and 4.3; $\theta = 0.5$ at $n = 10^3$ on `variance` is the weakest cell, $z = 1.3$), and its BIC-selected $F_1$ is within
+$\theta = 0.8$ it adds 0.01 to 0.04 in `max_f1` ($z$ between 2.4 and 4.3; $\theta = 0.5$ at $n = 10^3$ on `variance` is the weakest cell, $z = 1.3$), and the $F_1$ of its selected graph is within
 0.015 of the lasso's. That fits the mechanism: the convexity constraint keeps the penalty close to the lasso, so it
 inherits the lasso's bias and its failure to separate the directions of weakly identified edges. It is 20 to 50
 times slower than the lasso per path (median 0.4 s and 0.9 s against 0.02 s) and some of the $\lambda$'s hit my
@@ -706,12 +708,12 @@ a negative-to-marginal result.
 
 ## 11. $p = 20$
 
-E4 repeats the bake-off at $p = 20$ (24 drift matrices, 6 per $k$; reduced method list, no exchange-move searches, BIC-selected
-graphs for $n \le 10^4$; the $\ell_0$-type searches would be too slow for the budget). Same DGP, same seeds scheme; the
+E4 repeats the bake-off at $p = 20$ (24 drift matrices, 6 per $k$; reduced method list, no exchange-move searches, graphs selected
+by the score for $n \le 10^4$; the $\ell_0$-type searches would be too slow for the budget). Same DGP, same seeds scheme; the
 parameter count per equation is now far from saturation for small $k$. `max_f1` (paired $z$ against the lasso on the
-same formulation), and BIC-selected $F_1$ / SHD for $n = 10^4$:
+same formulation), and $F_1$ / SHD of the selected graph for $n = 10^4$:
 
-| | `identity` $n = 10^3$ | `variance` $n = 10^3$ | `identity` $10^4$ | `variance` $10^4$ | `variance` $\infty$ | BIC $F_1$ / SHD, `variance` $10^4$ |
+| | `identity` $n = 10^3$ | `variance` $n = 10^3$ | `identity` $10^4$ | `variance` $10^4$ | `variance` $\infty$ | selected graph: $F_1$ / SHD, `variance` $10^4$ |
 |---|---|---|---|---|---|---|
 | lasso | 0.571 | 0.564 | 0.652 | 0.646 | 0.702 | 0.568 / 54.3 |
 | MCP, sparse → dense (pilot) | 0.474 (−6.8) | 0.499 (−5.0) | 0.529 (−7.8) | 0.593 (−2.4) | 0.598 (−5.9) | 0.490 / 56.0 |
@@ -724,7 +726,7 @@ same formulation), and BIC-selected $F_1$ / SHD for $n = 10^4$:
 
 The picture of $p = 10$ holds and is sharper. The pilot's path loses to the lasso at every $n$ on `identity` (−6.8 to
 −10.2) and still on `variance` for MCP (−2.4 to −5.9). The dense-to-sparse estimators win in all 24 cells by
-$z$ between +0.8 and +8.6, and on the well-specified scale the BIC-selected graphs of the adaptive lasso and of dense →
+$z$ between +0.8 and +8.6, and on the well-specified scale the selected graphs of the adaptive lasso and of dense →
 sparse MCP have a structural Hamming distance of 23.5–23.7 against 54.3 for the lasso at $n = 10^4$ (the lasso's SHD
 is more than twice theirs). At $n = \infty$ on `variance` the best estimators recover 12–29 % of the 24 supports exactly; the lasso
 and the pilot's path recover none. Forward stepwise, which was unremarkable at $p = 10$, becomes competitive on
@@ -735,12 +737,12 @@ not stronger evidence than those at $p = 10$.
 ## 12. Orient or abstain
 
 §3 says that the direction of many edges cannot be read from the data. Directed $F_1$ then rewards reporting such an
-edge in *both* directions (the lasso does this by accident). E6 tests it explicitly. Starting from the BIC-selected
-graph of an estimator, every committed edge is reversed and refitted by maximum likelihood, with
+edge in *both* directions (the lasso does this by accident). E6 tests it explicitly. Starting from an estimator's graph
+selected by the score (BIC penalty), every committed edge is reversed and refitted by maximum likelihood, with
 $LR_e = n\,[\mathrm{dev}(\text{reversed}) - \mathrm{dev}(\text{selected})]$. If $LR_e < -\tau$ the edge is flipped; if
 $\lvert LR_e\rvert \le \tau$ the pair is reported in both directions ("abstain"); otherwise the direction is kept.
 $\tau \in \{2, 4\}$. 100 drift matrices (thesis DGP), 52 for strong signals without 2-cycles. `variance` scale; $F_1$
-of the BIC graph → after flipping → after flipping and abstaining ($\tau = 4$):
+of the selected graph → after flipping → after flipping and abstaining ($\tau = 4$):
 
 | estimator | $n = 10^3$ | $n = 10^4$ | accuracy of committed / abstained pairs, $n = 10^3$ |
 |---|---|---|---|
@@ -769,23 +771,23 @@ the repo's. I did not run the S2 covariance losses with `direction="up"`: the op
 with its own "dense fit" start, and it is untested.
 
 **2. Report what the data support, not one number.** Skeleton $F_1$ and orientation accuracy among committed
-edges separately, and BIC-selected graphs next to the oracle path maximum (§5, §9). The oracle maximum
-flatters estimators with long, flat paths, and the BIC numbers are what a user would get.
+edges separately, and the graphs selected by the score next to the oracle path maximum (§5, §9). The oracle maximum
+flatters estimators with long, flat paths, and the numbers of the selected graphs are what a user would get.
 
 **3. Use a DGP in which direction is identifiable (§7).** Dettling's $N(0,1)$ weights with 2-cycles give an
 oracle orientation accuracy of 0.77 at $n = 1000$ and only 41 % of edges with $nD > 10$. A second DGP with a
 magnitude floor on $\lvert M_{ij}\rvert$ and no 2-cycles would separate "the estimator is weak" from "the
 information is not there".
 
-**4. S3 (reversal search): start dense, search with the BIC, do not start from the MCP pilot path (§9).**
+**4. S3 (reversal search): start dense, search on the score, do not start from the MCP pilot path (§9).**
 My trial of `S3b_reversal_search.md` (direct-loss arm, delete/reverse/add, greedy best improvement) says the
 search is a cheap finishing step and that the *start* matters more than the search: from the minimum-$\ell_1$
-exact fit it gains +0.13 to +0.22 $F_1$ (corrC); from the lasso BIC graph +0.00 to +0.09; from the MCP pilot graph
-up to +0.07; from dense → sparse estimators at most +0.03. Delete + reverse moves are enough at
-$n \le 10^4$. Search on the penalised objective at a fixed $\lambda$ beat the BIC search for MCP starts
-(0.547 / 0.623 / 0.650 against 0.510 / 0.577 / 0.597 at $n = 10^3 / 10^4 / \infty$), so I would keep it as an
-arm. In the $p = 5$ exhaustive check, greedy search missed the exhaustive optimum once in five at $n = 10^5$; restarts or exchange
-moves are the first thing to add.
+exact fit it gains +0.13 to +0.22 $F_1$ (corrC); from the lasso graph selected by the score +0.00 to +0.09; from the
+MCP pilot graph up to +0.07; from dense → sparse estimators at most +0.03. Delete + reverse moves are enough at
+$n \le 10^4$. Search on the penalised objective at a fixed $\lambda$ beat the greedy search on the score for MCP
+starts (0.547 / 0.623 / 0.650 against 0.510 / 0.577 / 0.597 at $n = 10^3 / 10^4 / \infty$), so I would keep it as an
+arm. In the $p = 5$ exhaustive check, greedy search missed the exhaustive optimum once in five at $n = 10^5$;
+restarts or exchange moves are the first thing to add.
 
 **5. Theory that this study points to.** (i) *First-order non-identifiability of direction:* make the §3
 expansion precise (the first-order covariance depends on $d_iB_{ij} + d_jB_{ji}$ only) and turn it into a
@@ -799,7 +801,7 @@ it is zero on the non-identifiable directions and any finite $\gamma$ violates t
 
 **6. Things that did not help, so nobody has to try them again:** GLS-type weighting of the direct loss;
 GMC (convex objective, nonconvex penalty; §10: a small gain over the lasso, far below dense → sparse MCP); forward stepwise; the
-exchange-move search on the penalised objective at $n = 1000$; BIC-search from the empty graph (0.46–0.56).
+exchange-move search on the penalised objective at $n = 1000$; the greedy search on the score from the empty graph (0.46–0.56).
 
 **7. For the meeting on 10–11 October.** Questions for Dettling: was $C$ rescaled in his standardized
 experiments, and did the examples with $C = 2I$ rely on the variance ordering (Theorem 3 of his thesis,
@@ -827,11 +829,11 @@ citing from what I know and the exact statement should be looked up before it go
 | Zhang, Wainwright, Jordan 2017 | lower bounds for polynomial-time sparse estimation | from memory |
 | Selesnick 2017 | generalized minimax-concave (GMC) penalty, convex objective | abstract checked |
 | Hazimeh & Mazumder 2020 | coordinate descent + local search for $\ell_0$ | from memory |
-| Chen & Chen 2008 | extended BIC | from memory |
+| Chen & Chen 2008 | extended BIC (here: the eBIC penalty) | from memory |
 | Nandy, Hauser, Maathuis 2018 (ARGES) | greedy search over equivalence classes; why search has local optima | from memory |
 | Reisach, Seiler, Weichwald 2021 | var-sortability, the effect of standardization on benchmarks | from memory |
 | Lipton et al. 2014 | $F_1$-optimal thresholding (cited in the 2 October plans) | not checked |
-| Heckerman 1995; Chickering 2002 | BIC-based greedy search in DAG models (S3b) | not checked |
+| Heckerman 1995; Chickering 2002 | greedy search in DAG models on a score with the BIC penalty (S3b) | not checked |
 | Aragam & Zhou 2015; Candès, Wakin, Boyd 2008; Foucart & Rauhut | other references of the 2 October plans | not checked |
 | van Seeventer & Salehkaleybar 2026; Recke & Hansen 2026 | reported by a search agent as related work on cyclic models | **unverified**; do not cite before reading |
 
@@ -854,8 +856,8 @@ bit-identical to the original on the pilot's datasets, but that is a check by my
   per $k$, reduced method set). Conclusions about $k = 4$ rest on a model close to the identifiability
   boundary and I would not extrapolate them.
 - "Oracle" numbers (`max_f1`, `auc`, `aupr`) use the true graph to pick the best point on the path, as in the repo.
-  BIC-selected numbers are given where the point of the comparison is practical use.
-- The extended-BIC / BIC selection skips candidate points whose least-squares refit is unstable (non-Hurwitz
+  Numbers for the graphs selected by the score are given where the point of the comparison is practical use.
+- Selection by the score (eBIC or BIC penalty) skips candidate points whose least-squares refit is unstable (non-Hurwitz
   or non-positive-definite $\Sigma$). Those points are scored as $+\infty$.
 - The LARS implementation of scikit-learn stops early on this problem, so the lasso path uses a FISTA fallback in
   the cases where LARS ends before $\lambda_{\min}$.

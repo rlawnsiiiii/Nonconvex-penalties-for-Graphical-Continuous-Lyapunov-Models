@@ -22,12 +22,12 @@ next_steps/051026/cluster_campaign_051026.md) each dataset additionally gets
   supports_packed  the off-diagonal support at every lambda (np.packbits; decode
                    with :func:`unpack_supports`), and ``scale``, the standard
                    deviations the data were divided by
-  bic_*            the Gaussian BIC of every support of the path after an
-                   unpenalised least-squares refit (gclm.solvers.search), the
-                   index of the best one, its confusion counts and its
-                   orientation breakdown (order: ORIENT)
-  search_*         (``search`` only) the graph reached from the BIC-selected
-                   support by the greedy BIC search with add / delete / reverse
+  bic_*            the likelihood score (BIC penalty) of every support of the
+                   path after an unpenalised least-squares refit
+                   (gclm.solvers.search), the index of the best one, its
+                   confusion counts and its orientation breakdown (order: ORIENT)
+  search_*         (``search`` only) the graph reached from the selected support
+                   by the greedy search on the score with add / delete / reverse
                    moves: its support (``m_search_support``, packed like one
                    lambda of ``supports_packed``), its unpenalised refit
                    ``m_search_i/j/v`` (sparse), counts, score, moves
@@ -65,7 +65,8 @@ from gclm.config import S1Config, parse_n_obs
 from gclm.data.simulate import C_SCALES, CChoice, draw_instance, estimation_volatility
 from gclm.objective.direct import direct_loss, lambda_max
 from gclm.objective.penalties import penalty_weights
-from gclm.solvers.path import (adaptive_lasso_path, covloss_path, lambda_grid, lasso_path,
+from gclm.solvers.path import (UP_STARTS, adaptive_covloss_path, adaptive_lasso_path, covloss_path,
+                               lambda_grid, lasso_path,
                                lla_path)
 from gclm.objective.direct import objective
 from gclm.metrics import confusion, orientation_breakdown
@@ -74,16 +75,16 @@ from gclm.solvers.search import Scorer, bic_along_path, greedy_search
 
 METHODS = ("path", "lla", "adaptive")
 SELECT = ("none", "bic", "search")
-#: how a support is refitted for the BIC: least squares on the direct loss (closed form, the
+#: how a support is refitted for the score: least squares on the direct loss (closed form, the
 #: campaign's default) or the maximised Gaussian likelihood (iterative; 200 to 1000 times slower)
 REFITS = ("direct", "loglik")
-#: the form of the extended-BIC term used by --ebic-gamma: Dettling's 4 gamma |E| log p (his
+#: the form of the eBIC term used by --ebic-gamma: Dettling's 4 gamma |E| log p (his
 #: eq. 6.2), the same rule campaign.py applies offline to the path (columns ebic05_*, ebic1_*)
 EBIC_FORM = "dettling"
 
 
 def ebic_tag(gamma: float) -> str:
-    """Field prefix of one extended-BIC gamma: 0.5 -> ``ebic05``, 1 -> ``ebic1``."""
+    """Field prefix of one gamma of the eBIC penalty: 0.5 -> ``ebic05``, 1 -> ``ebic1``."""
     return f"ebic{gamma:g}".replace(".", "")
 #: order of the entries of ``bic_orient`` / ``search_orient`` (gclm.metrics.orientation_breakdown)
 ORIENT = ("correct", "reversed", "hedged", "both", "half", "missed_single", "missed_double",
@@ -120,7 +121,17 @@ def check_method(cfg: S1Config) -> None:
     """The combinations of ``method`` with the other settings that are implemented."""
     if cfg.method not in METHODS:
         raise ValueError(f"unknown method {cfg.method!r}; expected one of {METHODS}")
+    if cfg.up_start not in UP_STARTS:
+        raise ValueError(f"unknown up_start {cfg.up_start!r}; expected one of {UP_STARTS}")
+    if cfg.up_start != "exact" and (cfg.loss == "direct" or cfg.direction != "up" or cfg.method != "path"):
+        raise ValueError("up_start chooses where a covariance-loss dense -> sparse path starts: "
+                         "it needs --direction up and --loss loglik or frobenius (the direct "
+                         "loss's dense -> sparse path always starts from the lasso)")
     if cfg.method == "path":
+        return
+    if cfg.method == "adaptive" and cfg.loss != "direct":
+        if cfg.penalty != "lasso":
+            raise ValueError("method 'adaptive' is the adaptive lasso: leave --penalty at lasso")
         return
     if cfg.loss != "direct" or cfg.solver != "fista" or cfg.penalize_diagonal:
         raise ValueError(f"method {cfg.method!r} is implemented for the direct loss with the "
@@ -147,22 +158,22 @@ def select_graph(supports, sigma_hat, c_est, n_obs, m_true, search: bool,
                  ebic_gamma: float = 0.0) -> dict:
     """What one gets from the path without knowing the truth.
 
-    Every support of the path is refitted without penalty and scored by the
-    Gaussian BIC of the implied covariance, under the same ``C`` the path was
+    Every support of the path is refitted without penalty and given the likelihood
+    score (BIC penalty) of the implied covariance, under the same ``C`` the path was
     fitted with (:class:`gclm.solvers.search.Scorer`; the same rule for every loss
     and penalty, so that only the paths differ).  ``refit="direct"``: least squares
     on the direct loss (closed form; the campaign's default).  ``refit="loglik"``:
-    the maximised Gaussian likelihood on the support, i.e. the BIC proper, as in
+    the maximised Gaussian likelihood on the support, i.e. the likelihood refit, as in
     Amendola et al. 2020 and in Dettling's eq. 6.1 (wave 5; an iterative refit,
     about 0.05 s per support at p = 10 against microseconds for least squares).
-    The best-scoring support is the BIC-selected graph.  With ``search`` it is then
+    The best-scoring support is the selected graph.  With ``search`` it is then
     the start of :func:`gclm.solvers.search.greedy_search`; ``add_screen`` limits
     the add moves scored per step to the ones with the largest gradient (only
     meaningful with the likelihood refit; ``None`` scores them all, which at p = 10
     costs 15 to 60 s per graph and keeps the search identical in its moves to the
-    least-squares one).  ``ebic_gamma > 0`` adds Dettling's extended term
-    ``4 gamma |S| log p`` to every score (:data:`EBIC_FORM`; wave 5c), for the
-    selection and the search alike.
+    least-squares one).  ``ebic_gamma > 0`` adds Dettling's eBIC term
+    ``4 gamma |S| log p`` to every score, i.e. scores with the eBIC penalty
+    (:data:`EBIC_FORM`; wave 5c), for the selection and the search alike.
     """
     t0 = time.perf_counter()
     if refit not in REFITS:
@@ -174,9 +185,9 @@ def select_graph(supports, sigma_hat, c_est, n_obs, m_true, search: bool,
            "bic_evaluations": scorer.evaluations, "bic_conf": conf, "bic_orient": orient}
     if search:
         t1 = time.perf_counter()
-        # Every accepted move lowers the BIC, so the search ends by itself.  The cap
+        # Every accepted move lowers the score, so the search ends by itself.  The cap
         # only guards against a runaway; it is set well above the library's default
-        # of 200, because a dense BIC-selected graph at p = 20 can need more than a
+        # of 200, because a dense selected graph at p = 20 can need more than a
         # hundred deletions (the number of moves made is stored in search_moves).
         p = len(m_true)
         res = greedy_search(sigma_hat, c_est, n_obs, supports[ib], scorer=scorer,
@@ -201,10 +212,10 @@ def run_one(p, k, c_choice, rep, cfg, select: str = "none", refit: str = "direct
             add_screen: int | None = None, ebic_gammas=()):
     """One dataset -> a dict of arrays.  No metric is reduced away here.
 
-    ``ebic_gammas``: besides the plain BIC (always recorded), select and search once
-    more per gamma with the extended BIC on the same path; those fields carry the
-    prefix ``ebic<gamma>_`` (``m_ebic<gamma>_...`` for the stored matrices), so that
-    with and without the term are paired graph by graph.
+    ``ebic_gammas``: besides the score with the BIC penalty (always recorded), select
+    and search once more per gamma with the eBIC penalty on the same path; those fields
+    carry the prefix ``ebic<gamma>_`` (``m_ebic<gamma>_...`` for the stored matrices), so
+    that with and without the eBIC term are paired graph by graph.
     """
     rng = np.random.default_rng([cfg.seed, p, k, list(CChoice).index(c_choice), rep])
     t0 = time.perf_counter()
@@ -248,12 +259,18 @@ def run_one(p, k, c_choice, rep, cfg, select: str = "none", refit: str = "direct
     else:
         if cfg.penalize_diagonal:
             raise ValueError("the covariance losses leave the diagonal unpenalised")
-        lmax = covariance.lambda_max(sigma_hat, c_est, cfg.loss)
-        lams = lambda_grid(lmax, n_lambda=n_l, ratio=cfg.lambda_ratio)
-        path = covloss_path(
-            sigma_hat, c_est, cfg.loss, lambdas=lams, penalty=cfg.penalty,
-            gamma=cfg.gamma, direction=cfg.direction, tol=cfg.tol,
-        )
+        if cfg.method == "adaptive":
+            # its own weights and therefore its own grid, as on the direct loss
+            path = adaptive_covloss_path(sigma_hat, c_est, cfg.loss, n_lambda=n_l,
+                                         ratio=cfg.lambda_ratio, tol=cfg.tol)
+            lams, lmax = path.lambdas, float(path.lambdas[-1])
+        else:
+            lmax = covariance.lambda_max(sigma_hat, c_est, cfg.loss)
+            lams = lambda_grid(lmax, n_lambda=n_l, ratio=cfg.lambda_ratio)
+            path = covloss_path(
+                sigma_hat, c_est, cfg.loss, lambdas=lams, penalty=cfg.penalty,
+                gamma=cfg.gamma, direction=cfg.direction, tol=cfg.tol, start=cfg.up_start,
+            )
         obj, kkt = path.objective, path.kkt
         iters, newton = path.iterations, path.newton_steps
 
@@ -328,6 +345,10 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--loss", default=None, choices=["direct", "loglik", "frobenius"],
                     help="direct: Dettling's loss (default); loglik / frobenius: "
                          "Varando's losses on Sigma(M) (docs/LIKELIHOOD.md)")
+    ap.add_argument("--up-start", default=None, choices=list(UP_STARTS),
+                    help="covariance losses with --direction up: start the dense -> sparse path "
+                         "from the exact fit (default, Varando & Hansen) or from the lasso solution "
+                         "of the same loss at the smallest lambda")
     ap.add_argument("--direction", default=None, choices=["down", "up"],
                     help="path order (default: down): for the covariance losses, and for "
                          "MCP/SCAD on the direct loss (up = dense to sparse)")
@@ -339,19 +360,19 @@ def build_parser() -> argparse.ArgumentParser:
                          "(MCP/SCAD by local linear approximation from the lasso) or "
                          "adaptive (adaptive lasso)")
     ap.add_argument("--select", default="none", choices=list(SELECT),
-                    help="also record the BIC-selected graph of the path (bic) and the "
-                         "graph the greedy BIC search reaches from it (search), plus the "
+                    help="also record the graph of the path selected by the score (bic) and "
+                         "the graph the greedy search reaches from it (search), plus the "
                          "support at every lambda; default none = the original output")
     ap.add_argument("--refit", default="direct", choices=list(REFITS),
-                    help="refit behind the BIC: least squares on the direct loss (default) "
-                         "or the maximised Gaussian likelihood (the BIC proper; slow)")
+                    help="refit behind the score: least squares on the direct loss (default) "
+                         "or the maximised Gaussian likelihood (the likelihood refit; slow)")
     ap.add_argument("--add-screen", type=int, default=None, metavar="N",
                     help="with --refit loglik and --select search: score only the N add "
                          "moves with the largest gradient per step (default: all of them)")
     ap.add_argument("--ebic-gamma", type=float, nargs="+", default=[], metavar="G",
-                    help="with --select: besides the plain BIC, also select (and search) with "
-                         "Dettling's extended BIC, 4 G |E| log p, for each G > 0; fields "
-                         "ebic<G>_* (e.g. ebic05_, ebic1_)")
+                    help="with --select: besides the BIC penalty, also select (and search) with "
+                         "Dettling's eBIC penalty (eBIC term 4 G |E| log p) for each G > 0; "
+                         "fields ebic<G>_* (e.g. ebic05_, ebic1_)")
     return ap
 
 
@@ -373,6 +394,7 @@ def config_from_args(args: argparse.Namespace) -> S1Config:
         direction=args.direction or base.direction,
         c_scale=args.c_scale or base.c_scale,
         method=args.method or base.method,
+        up_start=args.up_start or base.up_start,
     )
     check_method(cfg)
     return cfg
@@ -384,7 +406,7 @@ def main() -> None:
     if not 0 <= args.shard < args.n_shards:
         ap.error(f"--shard must be in 0..{args.n_shards - 1}, got {args.shard}")
     if any(g <= 0 for g in args.ebic_gamma) or len(set(args.ebic_gamma)) < len(args.ebic_gamma):
-        ap.error("--ebic-gamma takes distinct positive values (0 is the plain BIC, always recorded)")
+        ap.error("--ebic-gamma takes distinct positive values (0 is the BIC penalty, always recorded)")
     if args.ebic_gamma and args.select == "none":
         ap.error("--ebic-gamma needs --select bic or search")
     try:
@@ -432,7 +454,7 @@ def main() -> None:
         **{f: getattr(cfg, f) for f in (
             "n_rep", "n_obs", "n_lambda", "lambda_ratio", "penalize_diagonal",
             "metrics_include_diagonal", "standardize", "metzler", "seed",
-            "solver", "loss", "direction", "penalty", "convention", "tol", "c_scale",
+            "solver", "loss", "direction", "up_start", "penalty", "convention", "tol", "c_scale",
             "method")},
         "select": args.select, "refit": args.refit, "add_screen": args.add_screen,
         "ebic_gammas": list(args.ebic_gamma), "ebic_form": EBIC_FORM,

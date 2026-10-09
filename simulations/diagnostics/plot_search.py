@@ -11,7 +11,7 @@ Reads the row files of search_study.py and draws, for each of them:
     python simulations/diagnostics/plot_search.py [--in runs/s3b_search]
 
 Methods and their encoding (hue = where the method comes from; filled = with search):
-  plain lasso / MCP / SCAD at the BIC-selected lambda     hollow marker, thin line
+  plain lasso / MCP / SCAD at the lambda the score selects hollow marker, thin line
   lasso / MCP / SCAD + search                             filled marker, thick line
   pure greedy search (random restarts)                    violet diamond, thick line
   lasso at the oracle best-F1 lambda (Dettling's max_f1)  grey x, thin line
@@ -44,7 +44,7 @@ SURFACE = "#fcfcfb"
 PEN = {"lasso": ("#2a78d6", "o"), "MCP": ("#eb6834", "s"), "SCAD": ("#1baf7a", "^")}
 PURE = ("#4a3aa7", "D")
 ORACLE = ("#8a8984", "x")
-SERIES = ([(f"path_{p}_bic", f"{p}, no search (BIC λ)", PEN[p][0], PEN[p][1], False) for p in PEN]
+SERIES = ([(f"path_{p}_bic", f"{p}, no search (selected λ)", PEN[p][0], PEN[p][1], False) for p in PEN]
           + [(f"search_{p}", f"{p} + search", PEN[p][0], PEN[p][1], True) for p in PEN]
           + [("search_pure", "pure greedy search", PURE[0], PURE[1], True),
              ("path_lasso_oracle", "lasso, oracle best-F1 λ (Dettling's max_f1)", ORACLE[0], ORACLE[1], False),
@@ -150,7 +150,7 @@ def fig_graphs(rows, label, select: dict, out, title):
     if not sub:
         return
     by = {r["method"]: r for r in sub}
-    order = [("path_lasso_bic", "plain lasso (BIC λ)"), ("search_lasso", "lasso + search"),
+    order = [("path_lasso_bic", "plain lasso (selected λ)"), ("search_lasso", "lasso + search"),
              ("search_MCP", "MCP + search"), ("search_SCAD", "SCAD + search"),
              ("search_pure", "pure greedy search")]
     order = [(m, t) for m, t in order if m in by]
@@ -194,8 +194,8 @@ OVERVIEW = [("path_lasso_oracle", "lasso, oracle λ (Dettling)", ORACLE[0], ORAC
 
 
 def fig_overview(inp: Path, out: Path):
-    """Paired difference in directed F1 to plain lasso at its BIC lambda, per setting
-    (rows) and method (dots), from every *_summary.csv (direct loss, BIC)."""
+    """Paired difference in directed F1 to plain lasso at the lambda its score selects, per
+    setting (rows) and method (dots), from every *_summary.csv (direct loss)."""
     rows = []
     for f in sorted(inp.glob("*_summary.csv")):
         label = f.stem.replace("_summary", "").replace("random_direct_", "")
@@ -232,7 +232,7 @@ def fig_overview(inp: Path, out: Path):
     ax.set_yticks(range(len(names)))
     ax.set_yticklabels([count_label(n) for n in names], fontsize=8.5)
     ax.invert_yaxis()
-    ax.set_xlabel("directed F1 minus plain lasso at its BIC λ (paired mean; [graphs])", fontsize=9, color=INK_2)
+    ax.set_xlabel("directed F1 minus plain lasso at its selected λ (paired mean; [graphs])", fontsize=9, color=INK_2)
     ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=3, frameon=False, fontsize=8.5)
     fig.tight_layout()
     save(fig, out, "overview_f1_vs_plain_lasso")

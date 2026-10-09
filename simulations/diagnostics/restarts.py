@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The restart study (wave 5b of the campaign, next_steps/051026/cluster_campaign_051026.md
-Section 3.4): how many randomly drawn starting graphs does the pure greedy BIC search need?
+Section 3.4): how many randomly drawn starting graphs does the pure greedy search need?
 
 Reads the cells of ``run_search_shard.py`` (``<root>/search*_p<p>_<C>_n<n>/shards``; the wave 2
 cells with 10 starts and the wave 5 cells with 100) and, for every r on a grid up to the number
@@ -8,11 +8,11 @@ of random starts R of the cell, takes the best-scoring result of the FIRST r ran
 without and with the empty graph added, the latter being the estimator exactly as wave 2 ran it
 when r = 10.  Per cell and r it reports
 
-  score_reached   share of graphs whose best BIC over all R + 1 starts is already reached
+  score_reached   share of graphs whose best score over all R + 1 starts is already reached
                   within the first r random starts (the saturation check of S4 Section 4a)
   f1_mean, f1_se  mean directed F1 of the graph that best-of-r ends at (needs the per-start
                   supports, stored from wave 5 on; wave 2 cells give the score column only)
-  empty_dead      share of graphs whose empty start has BIC = +inf (least-squares refit of the
+  empty_dead      share of graphs whose empty start has score = +inf (least-squares refit of the
                   diagonal support unstable; it happens with the rescaled C only)
 
 Writes ``<root>/campaign_restarts.csv`` (long format) and prints one table per cell.  Numbers
@@ -39,7 +39,9 @@ sys.path.insert(0, str(ROOT / "simulations"))
 from gclm.metrics import confusion  # noqa: E402
 from run_s1_shard import unpack_supports  # noqa: E402
 
-CELL = re.compile(r"^search(?P<variant>[0-9]+[su])?_p(?P<p>[0-9]+)_(?P<c>C2I|Cresc)_n(?P<n>[0-9e]+|inf)$")
+#: the search cells with random starts: wave 2 (search_...), 100 / 300 sparse or uniform starts
+#: (search100s_..., search100u_...), and 100 sparse starts with the likelihood refit (search100sml_...)
+CELL = re.compile(r"^search(?P<variant>[0-9]+[su](?:ml)?)?_p(?P<p>[0-9]+)_(?P<c>C2I|Cresc)_n(?P<n>[0-9e]+|inf)$")
 GRID = (1, 2, 3, 5, 10, 20, 30, 50, 100)
 COLUMNS = ("cell", "p", "c", "n", "starts", "R", "r", "with_empty", "n_graphs", "f1_mean", "f1_se",
            "score_reached", "empty_dead")

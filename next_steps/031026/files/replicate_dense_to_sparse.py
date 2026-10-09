@@ -7,7 +7,7 @@ independent study (next_steps/021026/independent_study):
   2. MCP run dense -> sparse (started from the lasso solution at the smallest lambda and
      walked up to lambda_max) beats the lasso, while the pilot's sparse -> dense path loses.
 
-and the combination with the BIC search of S3b (gclm.solvers.search): which start is best?
+and the combination with the greedy search (on the score) of S3b (gclm.solvers.search): which start is best?
 
 Same datasets as S1 / S3a / S3b (repo seeds), p = 10 by default.  Nothing in src/ is changed:
 "up" is implemented here with solve_fista, exactly as in the study's library_patch.diff.

@@ -20,15 +20,15 @@
 #
 #   sbatch [--array=...] cluster/campaign_array.sbatch <runner.py> <run dir> [runner args...]
 #
-#   <runner.py>   simulations/run_s1_shard.py      (an estimator: path, BIC, search)
-#                 simulations/run_search_shard.py  (search without a penalty)
+#   <runner.py>   simulations/run_s1_shard.py      (an estimator: path, selected graph, search)
+#                 simulations/run_search_shard.py  (search from random graphs)
 #   <run dir>     the cell's folder; shards go to <run dir>/shards
 #
 # Each array task is one core and writes one .npz of numbers; no plots.  Arguments,
 # not environment variables: with --export=NONE the job inherits no environment.
 #
-# Memory: the direct-loss solver is matrix-free (70 MB at p = 50); the BIC refits
-# hold the p^2 x p^2 Gram matrix once (50 MB at p = 50).  2G is generous.
+# Memory: the direct-loss solver is matrix-free (70 MB at p = 50); the refits behind
+# the score hold the p^2 x p^2 Gram matrix once (50 MB at p = 50).  2G is generous.
 
 set -euo pipefail
 module load slurm_setup

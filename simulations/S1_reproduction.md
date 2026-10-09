@@ -861,7 +861,7 @@ Run outputs backing §8 are committed under [`results/`](results/).
   pilot in the same document. The losses are nonconvex and nearly flat along $p(p-1)/2$
   directions, which makes both the solver and the definition of the estimator a matter of
   record there.
-- **S3** (score-based search with BIC) — see `plan.md`; not started.
+- **S3** (score-based search with the BIC penalty) — see `plan.md`; not started.
 
 ---
 

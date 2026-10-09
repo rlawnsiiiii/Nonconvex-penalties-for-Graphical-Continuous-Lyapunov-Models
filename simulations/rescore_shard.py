@@ -1,18 +1,32 @@
 #!/usr/bin/env python3
-"""Rescore an existing cell with the extended BIC -- cluster shard runner (wave 6 of the
-campaign of October 2026, next_steps/051026/cluster_campaign_051026.md Section 3.4).
+"""Rescore an existing cell: the selection and the greedy search redone on the stored paths,
+with the eBIC penalty (wave 6) or with the maximised likelihood behind the score (wave 8) --
+cluster shard runner for the campaign of October 2026
+(next_steps/051026/cluster_campaign_051026.md Section 3.4).
+
+Two modes:
+
+  --ebic-gamma G...   (wave 6) the eBIC term 4 G |E| log p inside the selection and the
+                      search, written as overlay fields ebic<G>_* next to the source cell's own
+                      (see below);
+  --refit loglik      (wave 8) the model on each graph fitted by maximising the Gaussian
+                      likelihood instead of least squares on the direct loss: the likelihood refit.
+                      The output is a complete cell of its own (``<loss>_<estimator>-ml_...``):
+                      every field of the source shard, with the selection (bic_*) and the search
+                      (search_*, m_search_*) replaced.  ``--p`` keeps only the data sets of the
+                      given sizes (the likelihood search is affordable at p = 10 only).
 
 Every cell of ``run_s1_shard.py --select`` stores the support of every estimate of its path.
 This runner reads those supports, rebuilds the data set from its seed (same generator, same
 sample size, same C as the source cell: identical to the bit), and runs the selection and the
-greedy search once more with Dettling's extended term ``4 gamma |E| log p`` inside the score
+greedy search once more with Dettling's eBIC term ``4 gamma |E| log p`` inside the score
 (``run_s1_shard.select_graph(..., ebic_gamma=gamma)``), for each ``--ebic-gamma``.  The paths are
 not recomputed, which is most of a cell's cost; the output has the fields that
 ``run_s1_shard.py --ebic-gamma`` would have added (``ebic<gamma>_bic_*``, ``ebic<gamma>_search_*``,
 ``m_ebic<gamma>_search_*``), one file per source shard with the same name, so that
 ``simulations/diagnostics/campaign.py`` can overlay them on the source cell's rows.
 
-As a check that the data set was rebuilt exactly, the plain BIC scores are recomputed and
+As a check that the data set was rebuilt exactly, the scores (BIC penalty) are recomputed and
 compared with the stored ones (``rebuilt_exact`` per data set; the runner stops on a mismatch).
 
     python simulations/rescore_shard.py --shard 0 --n-shards 4 --n-obs 1e4 \
@@ -44,6 +58,8 @@ from gclm.data.simulate import CChoice, draw_instance, estimation_volatility  # 
 from run_s1_shard import RAGGED, ebic_tag, select_graph, unpack_supports  # noqa: E402
 
 SELECT = ("bic", "search")
+#: fields of a shard that are not one entry per data set
+NOT_PER_DATASET = ("config_json", "c_choice_names", "provenance_json")
 
 
 def n_label(n_obs: str) -> str:
@@ -69,14 +85,14 @@ def rescore_file(src: Path, gammas, select: str) -> dict:
         n_l = len(d["lambdas"][i])
         supports = list(unpack_supports(d["supports_packed"][i], n_l, p))
         row = {"p": p, "k": k, "c_choice": ci, "rep": rep}
-        # the plain BIC, recomputed: must reproduce the stored scores (same data, same refit)
+        # recomputed with the BIC penalty: must reproduce the stored scores (same data, same refit)
         plain = select_graph(supports, sigma_hat, c_est, n_obs, m_true, search=False)
         stored = np.asarray(d["bic_scores"][i], float)
         same = np.allclose(plain["bic_scores"], stored, rtol=1e-8, atol=1e-6, equal_nan=True)
         row["rebuilt_exact"] = bool(same)
         if not same:
             raise RuntimeError(f"{src.name} data set {i} (p={p} k={k} C={names[ci]} rep={rep}): the "
-                               f"recomputed BIC scores differ from the stored ones; the data set was "
+                               f"recomputed scores differ from the stored ones; the data set was "
                                f"not rebuilt as the source cell saw it")
         for gamma in gammas:
             tag = ebic_tag(gamma)
@@ -100,6 +116,59 @@ def rescore_file(src: Path, gammas, select: str) -> dict:
     return payload
 
 
+def _rebuild(d, i: int, cfg: dict, n_obs):
+    """Data set ``i`` of a source shard, rebuilt from its seed: (p, m_true, sigma_hat, c_est,
+    supports of the path)."""
+    p, k, ci, rep = (int(d[key][i]) for key in ("p", "k", "c_choice", "rep"))
+    rng = np.random.default_rng([cfg["seed"], p, k, ci, rep])
+    m_true, _, _, sigma_hat, scale = draw_instance(
+        p, k, n_obs, list(CChoice)[ci], rng, metzler=cfg["metzler"],
+        standardize=cfg["standardize"], return_scale=True)
+    c_est = estimation_volatility(scale, cfg["c_scale"])
+    supports = list(unpack_supports(d["supports_packed"][i], len(d["lambdas"][i]), p))
+    return p, m_true, sigma_hat, c_est, supports
+
+
+def refit_file(src: Path, refit: str, select: str, p_keep=()) -> dict:
+    """Refit mode: a complete shard with the selection and the search redone with ``refit``."""
+    d = np.load(src, allow_pickle=True)
+    cfg = json.loads(str(d["config_json"]))
+    n_obs = cfg["n_obs"]
+    n_obs = math.inf if n_obs in ("inf", "Infinity") or (isinstance(n_obs, float) and math.isinf(n_obs)) else float(n_obs)
+    keep = [i for i in range(len(d["p"])) if not p_keep or int(d["p"][i]) in p_keep]
+    stale = ("bic_", "search_", "m_search_", "select_seconds", "rebuilt_exact", "ebic", "m_ebic")
+    payload = {key: d[key][keep] for key in d.files
+               if key not in NOT_PER_DATASET and not key.startswith(stale)}
+    new: dict[str, list] = {}
+    for i in keep:
+        p, m_true, sigma_hat, c_est, supports = _rebuild(d, i, cfg, n_obs)
+        # check that the data set was rebuilt as the source cell saw it: its own scores
+        own = select_graph(supports, sigma_hat, c_est, n_obs, m_true, search=False,
+                           refit=cfg.get("refit", "direct"))
+        if not np.allclose(own["bic_scores"], np.asarray(d["bic_scores"][i], float),
+                           rtol=1e-8, atol=1e-6, equal_nan=True):
+            raise RuntimeError(f"{src.name} data set {i}: the recomputed scores differ from the "
+                               f"stored ones; the data set was not rebuilt as the source cell saw it")
+        out = select_graph(supports, sigma_hat, c_est, n_obs, m_true, search=select == "search",
+                           refit=refit)
+        out["rebuilt_exact"] = True
+        for key, val in out.items():
+            new.setdefault(key, []).append(val)
+    for key, vals in new.items():
+        if key.startswith(RAGGED):
+            arr = np.empty(len(vals), dtype=object)
+            for j, v in enumerate(vals):
+                arr[j] = v
+        else:
+            arr = np.array(vals)
+        payload[key] = arr
+    payload["c_choice_names"] = d["c_choice_names"]
+    cfg.update({"select": select, "refit": refit, "add_screen": None, "ebic_gammas": [],
+                "p_values": sorted({int(d["p"][i]) for i in keep})})
+    payload["config_json"] = json.dumps(cfg)
+    return payload
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser()
     ap.add_argument("--shard", type=int, required=True)
@@ -107,8 +176,13 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument("--n-obs", required=True, help="the source cell's sample size label: 1000, 1e4 or inf")
     ap.add_argument("--source-cell", required=True, help="e.g. direct_lasso_Cresc (without _n<n>)")
+    ap.add_argument("--refit", default="direct", choices=["direct", "loglik"],
+                    help="loglik: redo the selection and the search with the maximised likelihood "
+                         "behind the score; writes a complete cell (refit mode, wave 8)")
+    ap.add_argument("--p", type=int, nargs="+", default=[],
+                    help="refit mode: keep only the data sets with these p")
     ap.add_argument("--ebic-gamma", type=float, nargs="+", default=[1.0], metavar="G",
-                    help="gammas of the extended term 4 G |E| log p (default 1)")
+                    help="gammas of the eBIC term 4 G |E| log p (default 1)")
     ap.add_argument("--select", default="search", choices=list(SELECT),
                     help="selection only, or selection and the greedy search (default)")
     return ap
@@ -136,12 +210,20 @@ def main() -> None:
         ap.error(f"the source shard {src} has not been written")
     args.out_dir.mkdir(parents=True, exist_ok=True)
     out = args.out_dir / src.name
-    print(f"rescoring {src} with gamma {args.ebic_gamma}, select={args.select} -> {out}", flush=True)
     t0 = time.time()
-    payload = rescore_file(src, args.ebic_gamma, args.select)
-    payload["config_json"] = json.dumps({"source_cell": args.source_cell, "n_obs": args.n_obs,
-                                         "source_shard": src.name, "ebic_gammas": list(args.ebic_gamma),
-                                         "ebic_form": "dettling", "select": args.select, "refit": "direct"})
+    if args.refit != "direct":
+        print(f"refitting {src} with refit={args.refit}, select={args.select}, p={args.p or 'all'} -> {out}",
+              flush=True)
+        payload = refit_file(src, args.refit, args.select, tuple(args.p))
+        payload["source_json"] = json.dumps({"source_cell": args.source_cell, "source_shard": src.name})
+    else:
+        if args.p:
+            ap.error("--p only in refit mode (--refit loglik): an overlay must line up with its source")
+        print(f"rescoring {src} with gamma {args.ebic_gamma}, select={args.select} -> {out}", flush=True)
+        payload = rescore_file(src, args.ebic_gamma, args.select)
+        payload["config_json"] = json.dumps({"source_cell": args.source_cell, "n_obs": args.n_obs,
+                                             "source_shard": src.name, "ebic_gammas": list(args.ebic_gamma),
+                                             "ebic_form": "dettling", "select": args.select, "refit": "direct"})
     payload["provenance_json"] = json.dumps({
         "host": socket.gethostname(), "python": sys.version.split()[0], "numpy": np.__version__,
         "platform": platform.platform(), "shard": args.shard, "n_shards": args.n_shards,

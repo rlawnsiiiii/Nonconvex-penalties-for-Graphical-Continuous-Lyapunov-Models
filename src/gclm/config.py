@@ -69,17 +69,22 @@ class S1Config:
     # (Varando's order), for the direct loss with MCP/SCAD from the lasso solution
     # at the smallest lambda.  Irrelevant for the direct lasso (convex).
     direction: str = "down"
+    # Where a covariance-loss dense -> sparse path starts (direction "up"; the direct loss's
+    # always starts from the lasso): "exact" = the exact fit -C Sigma_hat^-1 / 2 (Varando &
+    # Hansen), "lasso" = the lasso solution of the same loss at the smallest lambda.
+    up_start: str = "exact"
     # The volatility matrix used for estimation: "identity" (2 I, Dettling's
     # pipeline, every run before the campaign of October 2026) or "variance"
     # (2 diag(1 / s_i^2) with s_i the standard deviations the data were divided by:
     # the model "C = 2 I on the measurement scale", the "rescaled C" --
     # gclm.data.simulate.estimation_volatility).
     c_scale: str = "identity"
-    # How the path is computed (direct loss).  "path": warm-started continuation
-    # in the order given by `direction` (gclm.solvers.path.lasso_path).  "lla":
-    # MCP / SCAD by two local-linear-approximation steps from the lasso solution at
-    # each lambda (lla_path).  "adaptive": adaptive lasso with weights from the dense
-    # end of the lasso path (adaptive_lasso_path; `penalty` must be "lasso").
+    # How the path is computed.  "path": warm-started continuation in the order given
+    # by `direction` (gclm.solvers.path.lasso_path / covloss_path).  "lla" (direct loss
+    # only): MCP / SCAD by two local-linear-approximation steps from the lasso solution at
+    # each lambda (lla_path).  "adaptive": adaptive lasso with weights from the dense end
+    # of the lasso path of the same loss (adaptive_lasso_path / adaptive_covloss_path;
+    # `penalty` must be "lasso").
     method: str = "path"
     penalty: str = "lasso"          # "lasso" | "MCP" | "SCAD"  (docs/NONCONVEX.md)
     gamma: float | None = None      # concavity; None -> 3 (MCP) / 3.7 (SCAD)

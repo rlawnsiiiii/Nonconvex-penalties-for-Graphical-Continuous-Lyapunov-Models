@@ -77,7 +77,7 @@ def test_loader_reads_estimator_and_search_cells(tiny_campaign):
         ("direct", "search-pure", "Cresc", "1000"): 16, ("direct", "search-truth", "Cresc", "1000"): 16}
     assert all(r["p"] == 5 and "p_label" not in r for r in by[("direct", "adaptive", "Cresc", "1000")])
     for r in by[("direct", "MCP-up", "Cresc", "1000")]:
-        assert 0.0 <= r["bic_f1"] <= r["max_f1"] <= 1.0          # the best of the path bounds its BIC choice
+        assert 0.0 <= r["bic_f1"] <= r["max_f1"] <= 1.0          # the best of the path bounds its selected graph
         assert 0.0 <= r["search_f1"] <= 1.0 and r["p"] == 5
     assert all("max_f1" not in r for r in by[("direct", "search-pure", "Cresc", "1000")])
 
@@ -102,7 +102,7 @@ def test_means_and_paired_differences(tiny_campaign):
     assert paired[("MCP-up", "Cresc", "same_c", "C_ID")]["pairs"] == 4
     assert ("lasso", "Cresc", "same_c", "all") not in paired
     assert ("lasso", "Cresc", "dettling", "all") in paired
-    # a wave 2 row is compared with the lasso's BIC-selected graph
+    # a wave 2 row is compared with the lasso's selected graph
     d = [r["search_f1"] - lasso["Cresc"][key(r)]["search_f1"] for r in rows if r["estimator"] == "search-pure"]
     assert math.isclose(paired[("search-pure", "Cresc", "same_c", "all")]["search_f1_diff"], np.mean(d), abs_tol=1e-12)
 

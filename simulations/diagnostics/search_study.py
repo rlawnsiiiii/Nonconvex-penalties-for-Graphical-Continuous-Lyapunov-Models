@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""S3b -- greedy BIC search with add / delete / reverse moves, started from the
+"""S3b -- greedy search on the score with add / delete / reverse moves, started from the
 lasso / MCP / SCAD paths or (pure search, Amendola et al. 2020) from random graphs.
 
 Commands (numbers only; plots: plot_search.py; write-up: simulations/S3b_reversal_search.md):
@@ -17,16 +17,16 @@ Commands (numbers only; plots: plot_search.py; write-up: simulations/S3b_reversa
     python simulations/diagnostics/search_study.py random --loss direct --p 10 20 --n 1000 10000 inf --workers 6
     python simulations/diagnostics/search_study.py summarize
 
-Methods per dataset, loss and score (BIC, or eBIC with gamma_e = 1 = the paper's
-"increased penalty" adapted to directed graphs):
-  path_<pen>_bic          the path's support at its BIC-selected lambda, no search
+Methods per dataset, loss and score (BIC penalty, or eBIC penalty with gamma_e = 1 =
+the paper's "increased penalty" adapted to directed graphs):
+  path_<pen>_bic          the path's support at the lambda selected by the score, no search
   path_<pen>_oracle       the path's support at its best-F1 lambda (oracle), no search
   search_<pen>            greedy search started from path_<pen>_bic          <- the three penalised methods
   search_<pen>_oracle     greedy search started from path_<pen>_oracle       (if --oracle-starts)
   search_pure             best of greedy searches from R random graphs + the empty graph  <- the pure method
   search_truth            greedy search started from the true support (oracle reference)
   objsearch_<pen>         (Example 2, direct loss, MCP/SCAD) reversal-only search on the
-                          penalised objective at the BIC-selected lambda -- the ablation
+                          penalised objective at the lambda selected by the score -- the ablation
 """
 
 from __future__ import annotations
@@ -398,7 +398,8 @@ MAIN_METHODS = ("path_lasso_oracle", "path_lasso_bic", "path_MCP_bic", "path_SCA
 
 def cmd_summarize(args):
     """Means per (group, n, loss, score, method) and paired differences against
-    plain lasso at its BIC lambda and at its oracle best-F1 lambda (Dettling's max_f1)."""
+    plain lasso at the lambda selected by the score and at its oracle best-F1 lambda
+    (Dettling's max_f1)."""
     for f in sorted(args.out.glob("*_rows.csv")):
         rows = list(csv.DictReader(f.open()))
         if not rows:
@@ -448,7 +449,7 @@ def cmd_summarize(args):
                 if (r["group"], r["n"], r["loss"], r["score"]) == (g, n, loss, score) and r["method"] in MAIN_METHODS:
                     print(f"   {r['method']:<20} F1 {r['f1']:.3f}  exact {r['exact']:.2f}  skel {r['skeleton_f1']:.3f}"
                           f"  rev {r['reversed']:.2f}  hedged {r['hedged']:.2f}  edges {r['edges']:.1f}"
-                          f"  vs plain lasso(BIC) {r['f1_minus_path_lasso_bic']:+.3f} (z {r['z_vs_path_lasso_bic']:+.1f})"
+                          f"  vs plain lasso(score) {r['f1_minus_path_lasso_bic']:+.3f} (z {r['z_vs_path_lasso_bic']:+.1f})"
                           f"  vs Dettling oracle {r['f1_minus_path_lasso_oracle']:+.3f}  [{r['datasets']}]")
         print(f"wrote {target}")
 

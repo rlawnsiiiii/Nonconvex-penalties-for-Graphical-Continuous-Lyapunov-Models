@@ -1,6 +1,6 @@
-# Plan for cluster/feed_queue.sh, 9 October 2026: the extended BIC inside the search for every
+# Plan for cluster/feed_queue.sh, 9 October 2026: the eBIC penalty inside the search for every
 # wave 1 cell (rescoring from the stored supports, wave 6), 300 starting graphs for the pure
-# search, the p = 20 pure search with the extended term, then the repairs.
+# search, the p = 20 pure search with the eBIC term, then the repairs.
 --wave 6 --n 1e4                               # 128 tasks, about 50 CPU-h
 --wave 6 --n inf                               # 128 tasks
 --wave 6 --n 1000                              # 128 tasks

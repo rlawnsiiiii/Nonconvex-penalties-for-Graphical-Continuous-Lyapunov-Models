@@ -458,7 +458,7 @@ share of the top-60 lambdas at which the up path has the lower / higher objectiv
 | scad γ=100.0 | 0.676 (-5.4) | 0.695 (-6.8) | 0.723 (-8.2) | 0.767 (-3.1) |
 
 
-## E6  orient-or-abstain on the BIC-selected graph   (e6_p10_dettling.jsonl, 100 instances)
+## E6  orient-or-abstain on the graph selected by the score (BIC penalty)   (e6_p10_dettling.jsonl, 100 instances)
 
 | n | form | method | tau | base_f1 | flip_f1 | final_f1 | base_shd | flip_shd | flips | abstained | committed | acc_committed | acc_abstained |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -771,7 +771,7 @@ exact recovery of the support at some point of the path (corrC):
 | thr_bp | 0.585 (+1.0) | 0.646 (+4.8) | 0.710 (+6.7) | 0.787 (+7.0) | 0.729 (+2.8) | 0.861 (+6.2) |
 | bwd | 0.588 (+0.8) | 0.641 (+3.6) | 0.737 (+4.7) | 0.815 (+8.1) | 0.777 (+6.4) | 0.881 (+7.1) |
 
-## E6  orient-or-abstain on the BIC-selected graph   (e6_p10_unif_no2c.jsonl, 52 instances)
+## E6  orient-or-abstain on the graph selected by the score (BIC penalty)   (e6_p10_unif_no2c.jsonl, 52 instances)
 
 | n | form | method | tau | base_f1 | flip_f1 | final_f1 | base_shd | flip_shd | flips | abstained | committed | acc_committed | acc_abstained |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -1026,7 +1026,7 @@ share of the top-60 lambdas at which the up path has the lower / higher objectiv
 | mcp_swap | 0.573 (0%) | 0.636 (2%) | 0.624 (10%) | 0.572 (0%) |
 | fwd | 0.536 (3%) | 0.487 (0%) | 0.400 (0%) | 0.475 (0%) |
 | fwd_swap | 0.590 (0%) | 0.566 (1%) | 0.438 (0%) | 0.470 (0%) |
-## E11  S3b trial: BIC search with delete / reverse / add moves (40 graphs, p = 10, C_ID)
+## E11  S3b trial: greedy search on the score (BIC penalty) with delete / reverse / add moves (40 graphs, p = 10, C_ID)
 
 
 ### n = 1000, corr2I: directed F1 of the start, and after the search (paired z of search - start)
@@ -1035,14 +1035,14 @@ share of the top-60 lambdas at which the up path has the lower / higher objectiv
 |---|---|---|---|---|---|---|
 | empty graph | 0.000 | 0.495 | +0.495 (+25.1) | 18.6 | 14.3 | 0.00 |
 | min-l1 exact fit (dense) | 0.421 | 0.534 | +0.113 (+3.5) | 32.1 | 14.0 | 0.00 |
-| lasso, BIC lambda | 0.549 | 0.548 | -0.002 (-0.1) | 15.2 | 13.1 | 0.00 |
+| lasso, lambda selected by the score | 0.549 | 0.548 | -0.002 (-0.1) | 15.2 | 13.1 | 0.00 |
 | lasso, best-F1 lambda (oracle) | 0.622 | 0.580 | -0.043 (-2.1) | 15.3 | 12.8 | 0.00 |
-| MCP path (pilot), BIC lambda | 0.488 | 0.517 | +0.029 (+2.1) | 15.4 | 14.0 | 0.00 |
+| MCP path (pilot), lambda selected by the score | 0.488 | 0.517 | +0.029 (+2.1) | 15.4 | 14.0 | 0.00 |
 | MCP path (pilot), best-F1 lambda (oracle) | 0.542 | 0.523 | -0.019 (-1.2) | 15.1 | 13.8 | 0.00 |
-| SCAD path (pilot), BIC lambda | 0.503 | 0.506 | +0.003 (+0.2) | 15.7 | 13.8 | 0.00 |
-| MCP dense-to-sparse, BIC lambda | 0.555 | 0.554 | -0.001 (-0.1) | 13.3 | 13.2 | 0.00 |
-| adaptive lasso (BP weights), BIC lambda | 0.555 | 0.554 | -0.001 (-0.1) | 13.7 | 13.3 | 0.00 |
-| backward + swaps, BIC lambda | 0.503 | 0.506 | +0.003 (+0.4) | 14.1 | 14.1 | 0.00 |
+| SCAD path (pilot), lambda selected by the score | 0.503 | 0.506 | +0.003 (+0.2) | 15.7 | 13.8 | 0.00 |
+| MCP dense-to-sparse, lambda selected by the score | 0.555 | 0.554 | -0.001 (-0.1) | 13.3 | 13.2 | 0.00 |
+| adaptive lasso (BP weights), lambda selected by the score | 0.555 | 0.554 | -0.001 (-0.1) | 13.7 | 13.3 | 0.00 |
+| backward + swaps, lambda selected by the score | 0.503 | 0.506 | +0.003 (+0.4) | 14.1 | 14.1 | 0.00 |
 
 ### n = 1000, corrC: directed F1 of the start, and after the search (paired z of search - start)
 
@@ -1050,14 +1050,14 @@ share of the top-60 lambdas at which the up path has the lower / higher objectiv
 |---|---|---|---|---|---|---|
 | empty graph | 0.000 | 0.462 | +0.462 (+17.4) | 18.6 | 14.9 | 0.00 |
 | min-l1 exact fit (dense) | 0.438 | 0.586 | +0.149 (+4.5) | 30.9 | 12.6 | 0.00 |
-| lasso, BIC lambda | 0.567 | 0.569 | +0.002 (+0.1) | 16.6 | 12.7 | 0.00 |
+| lasso, lambda selected by the score | 0.567 | 0.569 | +0.002 (+0.1) | 16.6 | 12.7 | 0.00 |
 | lasso, best-F1 lambda (oracle) | 0.637 | 0.576 | -0.061 (-3.4) | 14.8 | 12.5 | 0.00 |
-| MCP path (pilot), BIC lambda | 0.514 | 0.510 | -0.004 (-0.2) | 16.2 | 13.9 | 0.00 |
+| MCP path (pilot), lambda selected by the score | 0.514 | 0.510 | -0.004 (-0.2) | 16.2 | 13.9 | 0.00 |
 | MCP path (pilot), best-F1 lambda (oracle) | 0.587 | 0.526 | -0.060 (-3.2) | 14.1 | 13.6 | 0.00 |
-| SCAD path (pilot), BIC lambda | 0.522 | 0.509 | -0.012 (-0.7) | 16.6 | 14.0 | 0.00 |
-| MCP dense-to-sparse, BIC lambda | 0.568 | 0.575 | +0.007 (+0.6) | 13.6 | 12.8 | 0.00 |
-| adaptive lasso (BP weights), BIC lambda | 0.596 | 0.592 | -0.004 (-0.3) | 12.9 | 12.5 | 0.00 |
-| backward + swaps, BIC lambda | 0.549 | 0.555 | +0.005 (+0.6) | 13.4 | 13.0 | 0.00 |
+| SCAD path (pilot), lambda selected by the score | 0.522 | 0.509 | -0.012 (-0.7) | 16.6 | 14.0 | 0.00 |
+| MCP dense-to-sparse, lambda selected by the score | 0.568 | 0.575 | +0.007 (+0.6) | 13.6 | 12.8 | 0.00 |
+| adaptive lasso (BP weights), lambda selected by the score | 0.596 | 0.592 | -0.004 (-0.3) | 12.9 | 12.5 | 0.00 |
+| backward + swaps, lambda selected by the score | 0.549 | 0.555 | +0.005 (+0.6) | 13.4 | 13.0 | 0.00 |
 
 ### n = 1000, raw2I: directed F1 of the start, and after the search (paired z of search - start)
 
@@ -1065,14 +1065,14 @@ share of the top-60 lambdas at which the up path has the lower / higher objectiv
 |---|---|---|---|---|---|---|
 | empty graph | 0.000 | 0.539 | +0.539 (+23.6) | 18.6 | 13.3 | 0.00 |
 | min-l1 exact fit (dense) | 0.430 | 0.582 | +0.153 (+4.5) | 32.0 | 12.8 | 0.00 |
-| lasso, BIC lambda | 0.497 | 0.573 | +0.076 (+4.3) | 17.7 | 12.8 | 0.00 |
+| lasso, lambda selected by the score | 0.497 | 0.573 | +0.076 (+4.3) | 17.7 | 12.8 | 0.00 |
 | lasso, best-F1 lambda (oracle) | 0.566 | 0.610 | +0.044 (+1.8) | 16.8 | 12.1 | 0.00 |
-| MCP path (pilot), BIC lambda | 0.504 | 0.575 | +0.070 (+4.0) | 17.0 | 12.9 | 0.00 |
+| MCP path (pilot), lambda selected by the score | 0.504 | 0.575 | +0.070 (+4.0) | 17.0 | 12.9 | 0.00 |
 | MCP path (pilot), best-F1 lambda (oracle) | 0.545 | 0.611 | +0.066 (+3.3) | 16.4 | 12.0 | 0.00 |
-| SCAD path (pilot), BIC lambda | 0.509 | 0.573 | +0.064 (+4.1) | 16.7 | 12.9 | 0.00 |
-| MCP dense-to-sparse, BIC lambda | 0.529 | 0.582 | +0.053 (+2.9) | 15.1 | 12.8 | 0.00 |
-| adaptive lasso (BP weights), BIC lambda | 0.600 | 0.587 | -0.012 (-1.0) | 12.3 | 12.7 | 0.00 |
-| backward + swaps, BIC lambda | 0.589 | 0.593 | +0.003 (+0.8) | 12.6 | 12.6 | 0.00 |
+| SCAD path (pilot), lambda selected by the score | 0.509 | 0.573 | +0.064 (+4.1) | 16.7 | 12.9 | 0.00 |
+| MCP dense-to-sparse, lambda selected by the score | 0.529 | 0.582 | +0.053 (+2.9) | 15.1 | 12.8 | 0.00 |
+| adaptive lasso (BP weights), lambda selected by the score | 0.600 | 0.587 | -0.012 (-1.0) | 12.3 | 12.7 | 0.00 |
+| backward + swaps, lambda selected by the score | 0.589 | 0.593 | +0.003 (+0.8) | 12.6 | 12.6 | 0.00 |
 
 ### n = 10000, corr2I: directed F1 of the start, and after the search (paired z of search - start)
 
@@ -1080,14 +1080,14 @@ share of the top-60 lambdas at which the up path has the lower / higher objectiv
 |---|---|---|---|---|---|---|
 | empty graph | 0.000 | 0.537 | +0.537 (+24.1) | 18.6 | 15.5 | 0.00 |
 | min-l1 exact fit (dense) | 0.455 | 0.611 | +0.156 (+5.1) | 30.9 | 13.8 | 0.00 |
-| lasso, BIC lambda | 0.624 | 0.632 | +0.009 (+0.6) | 15.6 | 13.3 | 0.03 |
+| lasso, lambda selected by the score | 0.624 | 0.632 | +0.009 (+0.6) | 15.6 | 13.3 | 0.03 |
 | lasso, best-F1 lambda (oracle) | 0.663 | 0.673 | +0.010 (+0.7) | 14.1 | 12.1 | 0.03 |
-| MCP path (pilot), BIC lambda | 0.477 | 0.490 | +0.013 (+1.0) | 17.9 | 16.6 | 0.00 |
+| MCP path (pilot), lambda selected by the score | 0.477 | 0.490 | +0.013 (+1.0) | 17.9 | 16.6 | 0.00 |
 | MCP path (pilot), best-F1 lambda (oracle) | 0.556 | 0.560 | +0.003 (+0.2) | 14.3 | 14.7 | 0.00 |
-| SCAD path (pilot), BIC lambda | 0.518 | 0.524 | +0.006 (+0.3) | 17.1 | 15.4 | 0.03 |
-| MCP dense-to-sparse, BIC lambda | 0.616 | 0.623 | +0.007 (+1.2) | 13.3 | 13.2 | 0.00 |
-| adaptive lasso (BP weights), BIC lambda | 0.631 | 0.620 | -0.011 (-1.4) | 13.2 | 13.5 | 0.00 |
-| backward + swaps, BIC lambda | 0.593 | 0.585 | -0.008 (-0.8) | 13.4 | 13.5 | 0.00 |
+| SCAD path (pilot), lambda selected by the score | 0.518 | 0.524 | +0.006 (+0.3) | 17.1 | 15.4 | 0.03 |
+| MCP dense-to-sparse, lambda selected by the score | 0.616 | 0.623 | +0.007 (+1.2) | 13.3 | 13.2 | 0.00 |
+| adaptive lasso (BP weights), lambda selected by the score | 0.631 | 0.620 | -0.011 (-1.4) | 13.2 | 13.5 | 0.00 |
+| backward + swaps, lambda selected by the score | 0.593 | 0.585 | -0.008 (-0.8) | 13.4 | 13.5 | 0.00 |
 
 ### n = 10000, corrC: directed F1 of the start, and after the search (paired z of search - start)
 
@@ -1095,14 +1095,14 @@ share of the top-60 lambdas at which the up path has the lower / higher objectiv
 |---|---|---|---|---|---|---|
 | empty graph | 0.000 | 0.520 | +0.520 (+17.0) | 18.6 | 15.3 | 0.00 |
 | min-l1 exact fit (dense) | 0.468 | 0.687 | +0.218 (+5.9) | 30.0 | 11.7 | 0.05 |
-| lasso, BIC lambda | 0.625 | 0.670 | +0.045 (+2.6) | 15.7 | 11.8 | 0.05 |
+| lasso, lambda selected by the score | 0.625 | 0.670 | +0.045 (+2.6) | 15.7 | 11.8 | 0.05 |
 | lasso, best-F1 lambda (oracle) | 0.673 | 0.696 | +0.023 (+1.0) | 14.6 | 11.1 | 0.07 |
-| MCP path (pilot), BIC lambda | 0.566 | 0.577 | +0.012 (+0.7) | 15.8 | 13.9 | 0.03 |
+| MCP path (pilot), lambda selected by the score | 0.566 | 0.577 | +0.012 (+0.7) | 15.8 | 13.9 | 0.03 |
 | MCP path (pilot), best-F1 lambda (oracle) | 0.626 | 0.628 | +0.002 (+0.1) | 13.1 | 12.3 | 0.03 |
-| SCAD path (pilot), BIC lambda | 0.564 | 0.574 | +0.010 (+0.6) | 15.4 | 13.5 | 0.03 |
-| MCP dense-to-sparse, BIC lambda | 0.688 | 0.701 | +0.013 (+1.8) | 11.6 | 10.9 | 0.05 |
-| adaptive lasso (BP weights), BIC lambda | 0.696 | 0.705 | +0.009 (+1.2) | 11.5 | 11.0 | 0.05 |
-| backward + swaps, BIC lambda | 0.713 | 0.714 | +0.002 (+0.3) | 10.5 | 10.5 | 0.05 |
+| SCAD path (pilot), lambda selected by the score | 0.564 | 0.574 | +0.010 (+0.6) | 15.4 | 13.5 | 0.03 |
+| MCP dense-to-sparse, lambda selected by the score | 0.688 | 0.701 | +0.013 (+1.8) | 11.6 | 10.9 | 0.05 |
+| adaptive lasso (BP weights), lambda selected by the score | 0.696 | 0.705 | +0.009 (+1.2) | 11.5 | 11.0 | 0.05 |
+| backward + swaps, lambda selected by the score | 0.713 | 0.714 | +0.002 (+0.3) | 10.5 | 10.5 | 0.05 |
 
 ### n = 10000, raw2I: directed F1 of the start, and after the search (paired z of search - start)
 
@@ -1110,14 +1110,14 @@ share of the top-60 lambdas at which the up path has the lower / higher objectiv
 |---|---|---|---|---|---|---|
 | empty graph | 0.000 | 0.605 | +0.605 (+20.3) | 18.6 | 13.6 | 0.03 |
 | min-l1 exact fit (dense) | 0.444 | 0.730 | +0.287 (+8.3) | 31.7 | 9.9 | 0.03 |
-| lasso, BIC lambda | 0.566 | 0.715 | +0.149 (+6.4) | 17.2 | 10.3 | 0.03 |
+| lasso, lambda selected by the score | 0.566 | 0.715 | +0.149 (+6.4) | 17.2 | 10.3 | 0.03 |
 | lasso, best-F1 lambda (oracle) | 0.604 | 0.739 | +0.136 (+5.9) | 15.3 | 9.6 | 0.03 |
-| MCP path (pilot), BIC lambda | 0.523 | 0.661 | +0.138 (+5.6) | 17.9 | 12.4 | 0.03 |
+| MCP path (pilot), lambda selected by the score | 0.523 | 0.661 | +0.138 (+5.6) | 17.9 | 12.4 | 0.03 |
 | MCP path (pilot), best-F1 lambda (oracle) | 0.581 | 0.703 | +0.122 (+5.5) | 14.8 | 11.2 | 0.03 |
-| SCAD path (pilot), BIC lambda | 0.552 | 0.667 | +0.116 (+4.7) | 16.8 | 12.4 | 0.03 |
-| MCP dense-to-sparse, BIC lambda | 0.626 | 0.734 | +0.108 (+4.7) | 13.2 | 9.7 | 0.03 |
-| adaptive lasso (BP weights), BIC lambda | 0.677 | 0.739 | +0.062 (+3.6) | 11.1 | 9.5 | 0.03 |
-| backward + swaps, BIC lambda | 0.746 | 0.755 | +0.009 (+2.3) | 9.1 | 8.9 | 0.05 |
+| SCAD path (pilot), lambda selected by the score | 0.552 | 0.667 | +0.116 (+4.7) | 16.8 | 12.4 | 0.03 |
+| MCP dense-to-sparse, lambda selected by the score | 0.626 | 0.734 | +0.108 (+4.7) | 13.2 | 9.7 | 0.03 |
+| adaptive lasso (BP weights), lambda selected by the score | 0.677 | 0.739 | +0.062 (+3.6) | 11.1 | 9.5 | 0.03 |
+| backward + swaps, lambda selected by the score | 0.746 | 0.755 | +0.009 (+2.3) | 9.1 | 8.9 | 0.05 |
 
 ### n = inf, corr2I: directed F1 of the start, and after the search (paired z of search - start)
 
@@ -1125,14 +1125,14 @@ share of the top-60 lambdas at which the up path has the lower / higher objectiv
 |---|---|---|---|---|---|---|
 | empty graph | 0.000 | 0.549 | +0.549 (+32.0) | 18.6 | 19.1 | 0.00 |
 | min-l1 exact fit (dense) | 0.546 | 0.608 | +0.061 (+4.1) | 23.4 | 18.1 | 0.00 |
-| lasso, BIC lambda | 0.597 | 0.614 | +0.017 (+2.3) | 19.6 | 17.8 | 0.00 |
+| lasso, lambda selected by the score | 0.597 | 0.614 | +0.017 (+2.3) | 19.6 | 17.8 | 0.00 |
 | lasso, best-F1 lambda (oracle) | 0.678 | 0.649 | -0.029 (-3.6) | 13.7 | 16.1 | 0.00 |
-| MCP path (pilot), BIC lambda | 0.448 | 0.468 | +0.020 (+1.5) | 24.2 | 23.4 | 0.00 |
+| MCP path (pilot), lambda selected by the score | 0.448 | 0.468 | +0.020 (+1.5) | 24.2 | 23.4 | 0.00 |
 | MCP path (pilot), best-F1 lambda (oracle) | 0.570 | 0.548 | -0.022 (-1.9) | 13.8 | 18.6 | 0.00 |
-| SCAD path (pilot), BIC lambda | 0.473 | 0.484 | +0.011 (+1.3) | 23.1 | 22.2 | 0.00 |
-| MCP dense-to-sparse, BIC lambda | 0.628 | 0.616 | -0.011 (-2.2) | 17.8 | 17.9 | 0.00 |
-| adaptive lasso (BP weights), BIC lambda | 0.626 | 0.621 | -0.005 (-0.9) | 17.3 | 17.4 | 0.00 |
-| backward + swaps, BIC lambda | 0.637 | 0.629 | -0.009 (-1.9) | 16.3 | 16.5 | 0.00 |
+| SCAD path (pilot), lambda selected by the score | 0.473 | 0.484 | +0.011 (+1.3) | 23.1 | 22.2 | 0.00 |
+| MCP dense-to-sparse, lambda selected by the score | 0.628 | 0.616 | -0.011 (-2.2) | 17.8 | 17.9 | 0.00 |
+| adaptive lasso (BP weights), lambda selected by the score | 0.626 | 0.621 | -0.005 (-0.9) | 17.3 | 17.4 | 0.00 |
+| backward + swaps, lambda selected by the score | 0.637 | 0.629 | -0.009 (-1.9) | 16.3 | 16.5 | 0.00 |
 
 ### n = inf, corrC: directed F1 of the start, and after the search (paired z of search - start)
 
@@ -1140,14 +1140,14 @@ share of the top-60 lambdas at which the up path has the lower / higher objectiv
 |---|---|---|---|---|---|---|
 | empty graph | 0.000 | 0.561 | +0.561 (+16.5) | 18.6 | 18.6 | 0.10 |
 | min-l1 exact fit (dense) | 0.595 | 0.729 | +0.134 (+5.5) | 20.5 | 13.1 | 0.17 |
-| lasso, BIC lambda | 0.636 | 0.726 | +0.090 (+4.4) | 17.5 | 13.4 | 0.20 |
+| lasso, lambda selected by the score | 0.636 | 0.726 | +0.090 (+4.4) | 17.5 | 13.4 | 0.20 |
 | lasso, best-F1 lambda (oracle) | 0.690 | 0.802 | +0.112 (+4.7) | 14.2 | 10.5 | 0.33 |
-| MCP path (pilot), BIC lambda | 0.532 | 0.597 | +0.065 (+2.6) | 21.2 | 19.3 | 0.07 |
+| MCP path (pilot), lambda selected by the score | 0.532 | 0.597 | +0.065 (+2.6) | 21.2 | 19.3 | 0.07 |
 | MCP path (pilot), best-F1 lambda (oracle) | 0.634 | 0.702 | +0.068 (+2.8) | 12.8 | 14.0 | 0.20 |
-| SCAD path (pilot), BIC lambda | 0.557 | 0.593 | +0.036 (+1.9) | 19.9 | 18.5 | 0.07 |
-| MCP dense-to-sparse, BIC lambda | 0.731 | 0.755 | +0.024 (+1.9) | 12.9 | 11.9 | 0.23 |
-| adaptive lasso (BP weights), BIC lambda | 0.721 | 0.751 | +0.030 (+2.1) | 13.1 | 12.2 | 0.25 |
-| backward + swaps, BIC lambda | 0.751 | 0.750 | -0.001 (-0.1) | 11.7 | 11.8 | 0.28 |
+| SCAD path (pilot), lambda selected by the score | 0.557 | 0.593 | +0.036 (+1.9) | 19.9 | 18.5 | 0.07 |
+| MCP dense-to-sparse, lambda selected by the score | 0.731 | 0.755 | +0.024 (+1.9) | 12.9 | 11.9 | 0.23 |
+| adaptive lasso (BP weights), lambda selected by the score | 0.721 | 0.751 | +0.030 (+2.1) | 13.1 | 12.2 | 0.25 |
+| backward + swaps, lambda selected by the score | 0.751 | 0.750 | -0.001 (-0.1) | 11.7 | 11.8 | 0.28 |
 
 ### n = inf, raw2I: directed F1 of the start, and after the search (paired z of search - start)
 
@@ -1155,29 +1155,29 @@ share of the top-60 lambdas at which the up path has the lower / higher objectiv
 |---|---|---|---|---|---|---|
 | empty graph | 0.000 | 0.652 | +0.652 (+22.0) | 18.6 | 15.3 | 0.12 |
 | min-l1 exact fit (dense) | 0.543 | 0.710 | +0.167 (+4.9) | 23.2 | 14.2 | 0.17 |
-| lasso, BIC lambda | 0.582 | 0.719 | +0.136 (+4.6) | 19.6 | 13.7 | 0.20 |
+| lasso, lambda selected by the score | 0.582 | 0.719 | +0.136 (+4.6) | 19.6 | 13.7 | 0.20 |
 | lasso, best-F1 lambda (oracle) | 0.639 | 0.788 | +0.149 (+4.8) | 15.0 | 10.7 | 0.33 |
-| MCP path (pilot), BIC lambda | 0.512 | 0.594 | +0.082 (+3.0) | 22.2 | 18.9 | 0.12 |
+| MCP path (pilot), lambda selected by the score | 0.512 | 0.594 | +0.082 (+3.0) | 22.2 | 18.9 | 0.12 |
 | MCP path (pilot), best-F1 lambda (oracle) | 0.615 | 0.757 | +0.142 (+5.0) | 14.0 | 11.9 | 0.28 |
-| SCAD path (pilot), BIC lambda | 0.539 | 0.608 | +0.069 (+2.9) | 21.0 | 18.4 | 0.12 |
-| MCP dense-to-sparse, BIC lambda | 0.635 | 0.716 | +0.081 (+3.0) | 16.4 | 13.7 | 0.17 |
-| adaptive lasso (BP weights), BIC lambda | 0.660 | 0.755 | +0.095 (+3.6) | 14.6 | 12.2 | 0.25 |
-| backward + swaps, BIC lambda | 0.804 | 0.799 | -0.005 (-1.1) | 9.6 | 9.7 | 0.30 |
+| SCAD path (pilot), lambda selected by the score | 0.539 | 0.608 | +0.069 (+2.9) | 21.0 | 18.4 | 0.12 |
+| MCP dense-to-sparse, lambda selected by the score | 0.635 | 0.716 | +0.081 (+3.0) | 16.4 | 13.7 | 0.17 |
+| adaptive lasso (BP weights), lambda selected by the score | 0.660 | 0.755 | +0.095 (+3.6) | 14.6 | 12.2 | 0.25 |
+| backward + swaps, lambda selected by the score | 0.804 | 0.799 | -0.005 (-1.1) | 9.6 | 9.7 | 0.30 |
 
 ### ablations (corrC, mean directed F1 / SHD)
 
-| n | start | none | bic (del+rev+add) | del+rev | del+add | eBIC(0.5) | objective reversal search |
+| n | start | none | bic (del+rev+add) | del+rev | del+add | eBIC penalty (gamma = 0.5) | objective reversal search |
 |---|---|---|---|---|---|---|---|
-| 1000 | lasso, BIC lambda | 0.567 / 16.6 | 0.569 / 12.7 | 0.570 / 12.5 | 0.563 / 12.9 | 0.574 / 12.3 | - |
-| 1000 | MCP path (pilot), BIC lambda | 0.514 / 16.2 | 0.510 / 13.9 | 0.504 / 13.9 | 0.516 / 14.5 | 0.509 / 13.5 | 0.547 / 14.7 |
-| 10000 | lasso, BIC lambda | 0.625 / 15.7 | 0.670 / 11.8 | 0.673 / 11.5 | 0.668 / 11.7 | 0.668 / 11.4 | - |
-| 10000 | MCP path (pilot), BIC lambda | 0.566 / 15.8 | 0.577 / 13.9 | 0.577 / 14.0 | 0.588 / 14.2 | 0.569 / 13.8 | 0.623 / 13.1 |
-| inf | lasso, BIC lambda | 0.636 / 17.5 | 0.726 / 13.4 | 0.706 / 14.0 | 0.725 / 13.4 | 0.731 / 12.9 | - |
-| inf | MCP path (pilot), BIC lambda | 0.532 / 21.2 | 0.597 / 19.3 | 0.608 / 19.0 | 0.538 / 20.7 | 0.594 / 19.1 | 0.650 / 15.9 |
+| 1000 | lasso, lambda selected by the score | 0.567 / 16.6 | 0.569 / 12.7 | 0.570 / 12.5 | 0.563 / 12.9 | 0.574 / 12.3 | - |
+| 1000 | MCP path (pilot), lambda selected by the score | 0.514 / 16.2 | 0.510 / 13.9 | 0.504 / 13.9 | 0.516 / 14.5 | 0.509 / 13.5 | 0.547 / 14.7 |
+| 10000 | lasso, lambda selected by the score | 0.625 / 15.7 | 0.670 / 11.8 | 0.673 / 11.5 | 0.668 / 11.7 | 0.668 / 11.4 | - |
+| 10000 | MCP path (pilot), lambda selected by the score | 0.566 / 15.8 | 0.577 / 13.9 | 0.577 / 14.0 | 0.588 / 14.2 | 0.569 / 13.8 | 0.623 / 13.1 |
+| inf | lasso, lambda selected by the score | 0.636 / 17.5 | 0.726 / 13.4 | 0.706 / 14.0 | 0.725 / 13.4 | 0.731 / 12.9 | - |
+| inf | MCP path (pilot), lambda selected by the score | 0.532 / 21.2 | 0.597 / 19.3 | 0.608 / 19.0 | 0.538 / 20.7 | 0.594 / 19.1 | 0.650 / 15.9 |
 
-`identity`: `max_f1` (paired $z$ vs lasso); BIC-selected $F_1$ in the last two columns
+`identity`: `max_f1` (paired $z$ vs lasso); $F_1$ of the selected graph (BIC penalty) in the last two columns
 
-| method | n = 10³ | n = 10⁴ | n = ∞ | BIC F1, 10³ | BIC F1, 10⁴ |
+| method | n = 10³ | n = 10⁴ | n = ∞ | selected F1, 10³ | selected F1, 10⁴ |
 |---|---|---|---|---|---|
 | lasso | 0.617 | 0.661 | 0.677 | 0.550 | 0.622 |
 | gmc_0.5 | 0.621 (+1.9) | 0.671 (+3.2) | 0.684 (+1.9) | 0.565 | 0.627 |
@@ -1185,9 +1185,9 @@ share of the top-60 lambdas at which the up path has the lower / higher objectiv
 | mcp_mapg | 0.530 (-6.3) | 0.543 (-6.9) | 0.558 (-7.5) | 0.474 | 0.469 |
 | mcp_up | 0.623 (+0.5) | 0.679 (+1.2) | 0.732 (+4.3) | 0.539 | 0.616 |
 
-`variance`: `max_f1` (paired $z$ vs lasso); BIC-selected $F_1$ in the last two columns
+`variance`: `max_f1` (paired $z$ vs lasso); $F_1$ of the selected graph (BIC penalty) in the last two columns
 
-| method | n = 10³ | n = 10⁴ | n = ∞ | BIC F1, 10³ | BIC F1, 10⁴ |
+| method | n = 10³ | n = 10⁴ | n = ∞ | selected F1, 10³ | selected F1, 10⁴ |
 |---|---|---|---|---|---|
 | lasso | 0.633 | 0.669 | 0.685 | 0.555 | 0.625 |
 | gmc_0.5 | 0.636 (+1.3) | 0.678 (+3.1) | 0.725 (+3.8) | 0.557 | 0.633 |

@@ -1,4 +1,4 @@
-"""simulations/rescore_shard.py (wave 6): the extended BIC inside the selection and the search,
+"""simulations/rescore_shard.py (wave 6): the eBIC penalty inside the selection and the search,
 computed from a cell's stored supports without recomputing the paths.  Checked against the
 runner's own --ebic-gamma output on the same data sets, and overlaid by campaign.py."""
 
@@ -73,3 +73,43 @@ def test_rescoring_reproduces_the_runner_and_is_overlaid(tmp_path):
                           "--n-shards", "8", "--n-obs", "inf", "--source-cell", "direct_lasso_Cresc",
                           "--out-dir", str(out)], capture_output=True, text=True, cwd=ROOT)
     assert res.returncode == 2 and "no such source cell" in res.stderr
+
+
+def test_refit_mode_writes_a_complete_cell_with_the_likelihood_bic(tmp_path):
+    """Wave 7: --refit loglik redoes the selection and the search with the maximised likelihood
+    on the stored paths and writes a complete cell: the path fields are the source's, the
+    selection fields are new, and --p keeps only the data sets of the given sizes."""
+    root = tmp_path
+    src = root / "direct_lasso_Cresc_n1e4"
+    run([str(ROOT / "simulations" / "run_s1_shard.py"), "--shard", "0", "--n-shards", "4", "--p", "5", "6",
+         "--reps", "1", "--n-obs", "10000", "--c-scale", "variance", "--select", "search",
+         "--out-dir", str(src / "shards")])
+    (src / "n_shards").write_text("4\n")
+    out = root / "direct_lasso-ml_Cresc_n1e4" / "shards"
+    run([str(ROOT / "simulations" / "rescore_shard.py"), "--shard", "0", "--n-shards", "4", "--n-obs", "1e4",
+         "--source-cell", "direct_lasso_Cresc", "--refit", "loglik", "--select", "search", "--p", "5",
+         "--out-dir", str(out)])
+    (f,) = out.glob("shard_*.npz")
+    r = np.load(f, allow_pickle=True)
+    (g,) = (src / "shards").glob("shard_*.npz")
+    s = np.load(g, allow_pickle=True)
+    keep = [i for i in range(len(s["p"])) if int(s["p"][i]) == 5]
+    assert list(r["p"]) == [5] * len(keep) and len(keep) > 0
+    for key in ("k", "c_choice", "rep", "lambdas", "conf_offdiag", "nnz"):
+        assert np.array_equal(r[key], s[key][keep]), key
+    cfg = json.loads(str(r["config_json"]))
+    assert (cfg["refit"], cfg["select"], cfg["p_values"]) == ("loglik", "search", [5])
+    from gclm.data.simulate import CChoice, draw_instance, estimation_volatility
+    from gclm.solvers.search import Scorer
+    from run_s1_shard import unpack_supports
+    for j, i in enumerate(keep):
+        rng = np.random.default_rng([cfg["seed"], 5, int(s["k"][i]), int(s["c_choice"][i]), int(s["rep"][i])])
+        _, _, _, sigma_hat, scale = draw_instance(5, int(s["k"][i]), 10_000, list(CChoice)[int(s["c_choice"][i])],
+                                                  rng, standardize=True, return_scale=True)
+        scorer = Scorer(sigma_hat, estimation_volatility(scale, "variance"), 10_000, "loglik")
+        supports = unpack_supports(r["supports_packed"][j], len(r["lambdas"][j]), 5)
+        ib = int(r["bic_index"][j])
+        assert np.isclose(scorer.score(supports[ib]), r["bic_scores"][j][ib], rtol=1e-8)
+        assert r["search_score"][j] <= r["bic_scores"][j][ib] + 1e-9
+    rows = [x for x in campaign.load(root) if x["cell"] == "direct_lasso-ml_Cresc_n1e4"]
+    assert len(rows) == len(keep) and all(x["estimator"] == "lasso-ml" for x in rows)

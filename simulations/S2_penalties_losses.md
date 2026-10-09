@@ -345,7 +345,8 @@ size, and the gaps grow with $n$.*
    MCP plus a small ridge term (Mnet; the ridge rewards splitting mass across the two correlated
    directions, so it can hedge like the lasso while debiasing large entries).
 4. **Report skeleton and orientation metrics alongside the directed ones**, and a tuning-based
-   comparison (BIC / eBIC) next to the path maxima, which are oracle tuning.
+   comparison (selection by the score, with the BIC penalty or the eBIC penalty) next to the path
+   maxima, which are oracle tuning.
 5. **Map where nonconvexity pays off**: sweep $n$ (10³ to ∞) with the Example 2 harness and
    random drift matrices with edge weights bounded away from zero, with and without 2-cycles.
 

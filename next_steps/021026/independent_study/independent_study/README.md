@@ -12,20 +12,22 @@ lyapcd.c            C solvers for the penalised direct loss: coordinate descent 
 fastlyap.py         ctypes wrapper: cd_path, mapg_path (= the repo's MCP/SCAD estimator),
                     mapg_up_path / cd_swap_path, objective, stationarity, lambda grid
 gx.py               instances (the repo's RNG stream), the three input formulations, the explicit
-                    design, exact (weighted) lasso paths by LARS, metrics, likelihood, EBIC
+                    design, exact (weighted) lasso paths by LARS, metrics, likelihood, the score
+                    with the eBIC penalty
 methods.py          the estimators: LLA, adaptive lasso, thresholding, dense-to-sparse continuation,
                     forward / backward selection with exchange moves, basis pursuit as an LP
 e0_misspec.py       goodness of fit of the TRUE graph under the two formulations
 e1_formulations.py  formulation x penalty x n, and MCP started at the truth
 e2_identifiability.py   information per true edge (presence / direction) in the population
-e3_bakeoff.py       all estimators, path metrics and BIC-selected graphs   (also used for p = 20)
+e3_bakeoff.py       all estimators, path metrics and graphs selected by the score   (also used for p = 20)
 e5_gamma.py         gamma sweep for the repo's MCP / SCAD path
-e6_abstain.py       orient-or-abstain on BIC-selected graphs
+e6_abstain.py       orient-or-abstain on graphs selected by the score
 e7_direction.py     path direction x solver x penalty
 e8_gmc.py / gmc.py / lyapgmc.c   GMC penalty (Selesnick 2017), exact-KKT path solver and trial
 e9_bp_population.py minimum-l1 exact solution (basis pursuit) at the population level
 e10_example2.py     Dettling's Example 2, every estimator, three formulations
-s3b.py, e11_s3b.py  the BIC search of simulations/S3b_reversal_search.md (direct-loss arm) and its trial
+s3b.py, e11_s3b.py  the greedy search (on the score) of simulations/S3b_reversal_search.md
+                    (direct-loss arm) and its trial
 s3b_checks.py, s3b_refit_check.py   phase-0 checks of that search on Example 2
 analyze.py          every table of the memo, from results/           ->  results/tables.md
 make_figures.py     the three figures                                 ->  figures/

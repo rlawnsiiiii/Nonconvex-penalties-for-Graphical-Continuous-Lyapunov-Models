@@ -105,7 +105,7 @@ def test_select_search_improves_the_bic_and_stores_the_searched_graph(tmp_path):
     assert (config["penalty"], config["direction"], config["select"]) == ("MCP", "up", "search")
     for i in range(len(shard["p"])):
         start_score = shard["bic_scores"][i][int(shard["bic_index"][i])]
-        assert shard["search_score"][i] <= start_score + 1e-9             # a descent on the BIC
+        assert shard["search_score"][i] <= start_score + 1e-9             # a descent on the score
         support = unpack_supports(shard["m_search_support"][i], 1, P)[0]
         truth = true_matrix(shard, i)
         cf = confusion(support.astype(float), truth)
@@ -171,7 +171,7 @@ def dataset(shard, i, n_obs, c_scale):
 
 def test_the_likelihood_refit_behind_the_bic_is_an_option(tmp_path):
     """Wave 5a: ``--refit loglik`` scores every support by the maximised Gaussian
-    likelihood instead of the least-squares refit (the BIC proper).  Same fields;
+    likelihood (the likelihood refit) instead of the least-squares refit.  Same fields;
     the stored scores are those of the likelihood scorer, the search descends on
     them, and the likelihood cannot be worse than least squares on a support."""
     res, shard = run(tmp_path, "--method", "adaptive", "--c-scale", "variance", "--n-obs", "10000",
@@ -202,10 +202,10 @@ def test_the_likelihood_refit_behind_the_bic_is_an_option(tmp_path):
 
 def test_the_extended_bic_can_score_the_selection_and_the_search(tmp_path):
     """Wave 5c: ``--ebic-gamma 0.5 1`` selects and searches once more per gamma with
-    Dettling's extended BIC (4 gamma |E| log p) on the same path.  The plain-BIC
-    fields are unchanged; the extra ones carry the prefix ebic<gamma>_, their
+    Dettling's eBIC penalty (eBIC term 4 gamma |E| log p) on the same path.  The fields
+    with the BIC penalty are unchanged; the extra ones carry the prefix ebic<gamma>_, their
     selection is the offline rule of campaign.py, and their search descends on the
-    extended score."""
+    score with the eBIC penalty."""
     res, shard = run(tmp_path, "--c-scale", "variance", "--n-obs", "10000", "--select", "search",
                      "--ebic-gamma", "0.5", "1", n_shards=8)
     assert res.returncode == 0, res.stderr
@@ -239,8 +239,8 @@ def test_the_extended_bic_can_score_the_selection_and_the_search(tmp_path):
 
 
 def test_selection_is_recorded_for_the_log_likelihood_loss_too(tmp_path):
-    """Wave 3: the covariance-loss paths get the same BIC selection (least-squares
-    refit of each support), in both path orders and with the rescaled C."""
+    """Wave 3: the covariance-loss paths get the same selection by the score
+    (least-squares refit of each support), in both path orders and with the rescaled C."""
     res, shard = run(tmp_path, "--loss", "loglik", "--penalty", "MCP", "--direction", "up",
                      "--c-scale", "variance", "--select", "bic")
     assert res.returncode == 0, res.stderr
@@ -248,3 +248,25 @@ def test_selection_is_recorded_for_the_log_likelihood_loss_too(tmp_path):
     config = json.loads(str(shard["config_json"]))
     assert (config["loss"], config["direction"], config["c_scale"]) == ("loglik", "up", "variance")
     assert np.isfinite(shard["bic_scores"][0][int(shard["bic_index"][0])])
+
+
+def test_log_likelihood_adaptive_lasso_and_lasso_start_run_through_the_runner(tmp_path):
+    """Wave 7: the adaptive lasso and the dense -> sparse MCP path started from the lasso solution,
+    both on the log-likelihood loss, with the selection by the score and the search under the
+    likelihood refit."""
+    res, ada = run(tmp_path, "--loss", "loglik", "--method", "adaptive", "--select", "search",
+                   "--refit", "loglik", "--n-obs", "10000", name="ada")
+    assert res.returncode == 0, res.stderr
+    cfg = json.loads(str(ada["config_json"]))
+    assert (cfg["loss"], cfg["method"], cfg["refit"], cfg["up_start"]) == ("loglik", "adaptive", "loglik", "exact")
+    assert set(ada.files) == LEGACY | BIC | SEARCH
+    assert ada["search_score"][0] <= ada["bic_scores"][0][int(ada["bic_index"][0])] + 1e-9
+    res, up = run(tmp_path, "--loss", "loglik", "--penalty", "MCP", "--direction", "up", "--up-start", "lasso",
+                  "--select", "bic", "--refit", "loglik", "--n-obs", "10000", name="up")
+    assert res.returncode == 0, res.stderr
+    assert json.loads(str(up["config_json"]))["up_start"] == "lasso"
+    # the start is a covariance-loss option: refused for the direct loss and without --direction up
+    for extra in (("--up-start", "lasso", "--penalty", "MCP", "--direction", "up"),
+                  ("--loss", "loglik", "--up-start", "lasso", "--penalty", "MCP")):
+        res, _ = run(tmp_path, *extra, name="bad")
+        assert res.returncode != 0 and "up_start" in res.stderr

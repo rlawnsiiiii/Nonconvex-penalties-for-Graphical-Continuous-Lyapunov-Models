@@ -343,12 +343,14 @@ Same graphs as the n-sweep (same seeds), so everything is paired with `runs/nswe
 
 | wave | cells per $n$ | tasks per $n$ | what |
 |---|---|---|---|
-| 1 | 16 | 128 | direct loss, $p = 10, 20$: lasso, MCP / SCAD (standard, dense → sparse, LLA), adaptive lasso; each with $C = 2I$ (`C2I`) and the rescaled $C$ (`Cresc`); path, BIC-selected graph, graph after the BIC search |
-| 2 | 3 | 20 | search without a penalty and search started from the truth: $p = 10$ (`C2I`, `Cresc`), $p = 20$ (`Cresc`) |
-| 3 | 8 | 56 | log-likelihood loss, $p = 10$: lasso and MCP in both path orders, `C2I` and `Cresc`; path and BIC-selected graph |
-| 4 | 12 per $p$ | 112 – 224 per $p$ | larger $p$ at $n = 1000$ ($p = 15, 25, 30, 40, 50$): lasso, MCP, SCAD, MCP / SCAD dense → sparse, adaptive lasso, `C2I` and `Cresc`; path and BIC-selected graph, no search. Selected with `--p`, not `--n`; cells `..._p<p>_n1000` |
-| 6 | 16 | 128 | every wave 1 cell rescored with the extended BIC inside the selection and the search, from its stored supports (`simulations/rescore_shard.py`; no path recomputed); cells `rescore1_<source cell>`, overlaid on the source rows by `campaign.py` |
-| 5 | 6 + 3 + 6 + 3 | 48 + 48 (+ 32) + 64 + 20 | three checks of the selection step: (a) at $p = 10$ the BIC with the maximised likelihood (`--refit loglik`) for the lasso, MCP dense → sparse and the adaptive lasso, `C2I` and `Cresc`, with the search (cells `direct_<estimator>-ml_<C>`); (b) the pure search from 100 randomly drawn starting graphs, sparse and uniform (`search100s_p10_Cresc`, `search100u_p10_Cresc`), and 30 at $p = 20$ on 5 replicates (`search30s_p20_Cresc`); `simulations/diagnostics/restarts.py` reads off the best of the first $r$ starts; (c) the extended BIC term inside the selection and the search (`--ebic-gamma 0.5 1`, cells `direct_<estimator>-ebic_<C>`, $p = 10, 20$) and in the pure search (`searche1_p<p>_<C>`) |
+| 1 | 16 | 128 | direct loss, $p = 10, 20$: lasso, MCP / SCAD (standard, dense → sparse, LLA), adaptive lasso; each with $C = 2I$ (`C2I`) and the rescaled $C$ (`Cresc`); path, graph selected by the score, graph after the greedy search on the score |
+| 2 | 3 | 20 | search from random graphs and search started from the truth: $p = 10$ (`C2I`, `Cresc`), $p = 20$ (`Cresc`) |
+| 3 | 8 | 56 | log-likelihood loss, $p = 10$: lasso and MCP in both path orders, `C2I` and `Cresc`; path and the graph selected by the score |
+| 4 | 12 per $p$ | 112 – 224 per $p$ | larger $p$ at $n = 1000$ ($p = 15, 25, 30, 40, 50$): lasso, MCP, SCAD, MCP / SCAD dense → sparse, adaptive lasso, `C2I` and `Cresc`; path and the graph selected by the score, no search. Selected with `--p`, not `--n`; cells `..._p<p>_n1000` |
+| 7 | 14 | 244 | the log-likelihood loss over $p = 10, 20$ ($p = 30$ left out for cost), both $C$: lasso, MCP sparse → dense, MCP dense → sparse from the exact fit and from the lasso solution (`--up-start lasso`), adaptive lasso (`--method adaptive` on `--loss loglik`); selection and search with the least-squares refit; at $p = 10$ only the two estimators wave 3 lacks; cells `loglik_<estimator>_<C>[_p20]` |
+| 8 | 30 | 412 (364 at $n = 10^4$, where the six direct-loss cells are wave 5a's) | the likelihood refit: the stored paths of waves 1, 3 and 7 scored again with the model on every graph fitted by maximum likelihood (`rescore_shard.py --refit loglik`), selection and search at $p = 10$, the selection only at $p = 20$, cells `<loss>_<estimator>-ml_<C>[_p20]`; the search from 100 random graphs, the empty graph and the truth with the likelihood refit, $p = 10$, 2 replicates (`search100sml_p10_<C>`). Plan file `cluster/plan_101026.txt` (waves 7 and 8 at $n = 10^4$ and 1000; wave 8 after wave 7) |
+| 6 | 16 | 128 | every wave 1 cell rescored with the eBIC penalty inside the selection and the search, from its stored supports (`simulations/rescore_shard.py`; no path recomputed); cells `rescore1_<source cell>`, overlaid on the source rows by `campaign.py` |
+| 5 | 6 + 3 + 6 + 3 | 48 + 48 (+ 32) + 64 + 20 | three checks of the selection step: (a) at $p = 10$ the score with the maximised likelihood (`--refit loglik`) for the lasso, MCP dense → sparse and the adaptive lasso, `C2I` and `Cresc`, with the search (cells `direct_<estimator>-ml_<C>`); (b) the pure search from 100 randomly drawn starting graphs, sparse and uniform (`search100s_p10_Cresc`, `search100u_p10_Cresc`), and 30 at $p = 20$ on 5 replicates (`search30s_p20_Cresc`); `simulations/diagnostics/restarts.py` reads off the best of the first $r$ starts; (c) the eBIC term inside the selection and the search (`--ebic-gamma 0.5 1`, cells `direct_<estimator>-ebic_<C>`, $p = 10, 20$) and in the pure search (`searche1_p<p>_<C>`) |
 
 `cluster/submit_campaign.sh` does the bookkeeping exactly as `submit_nsweep.sh` does (one
 submission per cell, `--status`, `--fill`); a cell is a folder
@@ -391,7 +393,7 @@ standard paths) with `runs/nsweep_p10-20` graph by graph. `python simulations/di
 `python simulations/diagnostics/restarts.py` reads the search cells (waves 2 and 5b) and tabulates
 the best of the first $r$ randomly drawn starting graphs for every $r$ (`campaign_restarts.csv`).
 `python3 simulations/diagnostics/plot_campaign.py --rule ebic1` redraws the rule-dependent figures
-with Dettling's extended BIC ($\gamma = 1$) as the selection rule and, where wave 5c or 6 ran it,
+with Dettling's eBIC penalty ($\gamma = 1$) in the selection rule and, where wave 5c or 6 ran it,
 inside the search, into `runs/campaign/figures_ebic1/`.
 
 **A rehearsal without a cluster.** `cluster/local/sbatch` is a stand-in for `sbatch` that turns

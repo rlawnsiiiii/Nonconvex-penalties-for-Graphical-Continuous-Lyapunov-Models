@@ -3,15 +3,37 @@
 The state is a support ``S``: the off-diagonal entries of ``M`` allowed to be
 nonzero.  The diagonal is always free.  A support is scored by refitting ``M``
 without penalty on ``S`` plus the diagonal, under one of the three losses,
-and evaluating the Gaussian BIC of the implied covariance ``Sigma(M)``:
+and evaluating the likelihood score of the implied covariance ``Sigma(M)``,
+the sum of a loss term and a penalty:
 
-    BIC(S) = n [log det Sigma(M_S) + tr(Sigma(M_S)^{-1} Sigma_hat)] + log(n) (p + |S|)
-             (+ 2 gamma_e log binom(p (p - 1), |S|)  for the extended BIC)
+    score(S) = L(S) + pen(S)
+    L(S)     = n [log det Sigma(M_S) + tr(Sigma(M_S)^{-1} Sigma_hat)]
+    pen(S)   = log(n) (p + |S|)                                  the BIC penalty
+               (+ 2 gamma_e log binom(p (p - 1), |S|)  for the eBIC penalty)
 
 i.e. minus twice the maximised log-likelihood (up to a constant) plus the
 dimension penalty, the scale of Amendola, Dettling, Drton, Onori & Wu (2020),
 eq. (16)-(17), multiplied by -2n.  A refit that is not stable (an eigenvalue of
 ``M`` with real part >= 0) has no stationary covariance and scores ``inf``.
+
+Three scores, by how ``M_S`` is fitted and what it is scored by (docs/SEARCH.md Section 2):
+
+    score="likelihood", refit "direct"   least-squares fit, likelihood loss L (the campaign's default)
+    score="likelihood", refit "loglik"   maximised likelihood, likelihood loss L (Amendola et al.)
+    score="direct",     refit "direct"   least-squares fit, scored by the direct loss itself:
+
+        score_direct(S) = N log(RSS_S / N) + log(n) (p + |S|),   N = p (p + 1) / 2,
+        RSS_S = || M_S Sigma_hat + Sigma_hat M_S' + C ||_F^2
+
+    the loss of a Gaussian regression with unknown error variance on the N distinct equations
+    of the Lyapunov system plus the BIC penalty, with the sample size n in the penalty
+    (9 October 2026; not used in the campaign).
+
+Names in the code: ``bic`` computes the score with the likelihood loss term L, ``bic_direct``
+the score with the direct loss, ``bic_along_path`` the scores of the supports of a path.  The
+names are older than the terms used here (the score is a loss plus a penalty, the BIC penalty
+or the eBIC penalty) and are kept, because the stored results and the command-line flags use
+them (docs/SEARCH.md Section 2, "Names in the code").
 
 The search is best-improvement hill climbing over the neighbourhood "add one
 entry / delete one entry / reverse one entry" (as in that paper, Section 5),
@@ -25,11 +47,16 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from gclm.lyapunov import design_matrix, solve_lyapunov
+from gclm.lyapunov import design_matrix, lyapunov_residual, solve_lyapunov
 from gclm.objective.covariance import check_loss, diagonal_fit, loss_grad, loss_value
 from gclm.solvers.covariance import solve as cov_solve
 
-N_INF = 1e6        # nominal sample size standing in for n = inf in the BIC weight
+N_INF = 1e6        # nominal sample size standing in for n = inf in the score
+SCORES = ("likelihood", "direct")
+#: the residual sum of squares below which a fit counts as exact in the direct-loss score,
+#: relative to ||C||_F^2: every exact fit then scores the same and the penalty decides
+#: (at n = inf the true support and its supersets fit exactly; their RSS is rounding noise)
+RSS_FLOOR = 1e-14
 _BIG_LAMBDA = 1e8  # keeps every entry outside the support at zero in the covariance refits
 
 
@@ -148,17 +175,45 @@ def log_binom(n: int, k: int) -> float:
     return math.lgamma(n + 1) - math.lgamma(k + 1) - math.lgamma(n - k + 1)
 
 
-#: the two forms of the extended-BIC term: Chen & Chen's ``2 gamma log binom(p(p-1), k)``
+#: the two forms of the eBIC term: Chen & Chen's ``2 gamma log binom(p(p-1), k)``
 #: ("binom", S3b) and Dettling's ``4 gamma k log p`` (his eq. 6.2, "dettling", the campaign)
 EBIC_FORMS = ("binom", "dettling")
 
 
+def bic_direct(m: np.ndarray, sigma_hat: np.ndarray, c: np.ndarray, n: float, n_edges: int,
+               ebic_gamma: float = 0.0, ebic_form: str = "binom") -> float:
+    """The direct-loss score of a refitted ``M``: the loss ``N log(RSS / N)`` with
+    ``N = p (p + 1) / 2`` and ``RSS = ||M Sigma_hat + Sigma_hat M' + C||_F^2`` (twice the direct
+    loss), plus the BIC penalty ``log(n) (p + n_edges)``, or the eBIC penalty when
+    ``ebic_gamma > 0`` (the eBIC term as in :func:`bic`); ``inf`` if ``M`` is not stable (not a
+    GCLM).  ``n = inf`` uses the nominal ``N_INF``; an RSS below ``RSS_FLOOR * ||C||_F^2`` counts
+    as an exact fit."""
+    if ebic_form not in EBIC_FORMS:
+        raise ValueError(f"unknown ebic_form {ebic_form!r}; expected one of {EBIC_FORMS}")
+    if not is_stable(m):
+        return math.inf
+    p = m.shape[0]
+    big_n = p * (p + 1) / 2
+    r = lyapunov_residual(m, sigma_hat, c)
+    rss = max(float(np.sum(r * r)), RSS_FLOOR * float(np.sum(np.asarray(c, float) ** 2)))
+    nn = N_INF if math.isinf(n) else float(n)
+    score = big_n * math.log(rss / big_n) + math.log(nn) * (p + n_edges)
+    if ebic_gamma:
+        if ebic_form == "binom":
+            score += 2.0 * ebic_gamma * log_binom(p * (p - 1), n_edges)
+        else:
+            score += 4.0 * ebic_gamma * n_edges * math.log(p)
+    return score
+
+
 def bic(m: np.ndarray, sigma_hat: np.ndarray, c: np.ndarray, n: float, n_edges: int,
         ebic_gamma: float = 0.0, ebic_form: str = "binom") -> float:
-    """``n [log det Sigma(M) + tr(Sigma(M)^{-1} Sigma_hat)] + log(n) (p + n_edges)``,
-    plus, when ``ebic_gamma > 0``, the extended term ``2 gamma_e log binom(p (p - 1),
-    n_edges)`` (``ebic_form="binom"``) or ``4 gamma_e n_edges log p`` (``"dettling"``);
-    ``inf`` if ``M`` is not stable.  ``n = inf`` uses the nominal ``N_INF``."""
+    """The likelihood score of a refitted ``M``: the loss term
+    ``L = n [log det Sigma(M) + tr(Sigma(M)^{-1} Sigma_hat)]`` plus the BIC penalty
+    ``log(n) (p + n_edges)``, or, when ``ebic_gamma > 0``, the eBIC penalty: the BIC penalty
+    plus the eBIC term ``2 gamma_e log binom(p (p - 1), n_edges)`` (``ebic_form="binom"``) or
+    ``4 gamma_e n_edges log p`` (``"dettling"``); ``inf`` if ``M`` is not stable.  ``n = inf``
+    uses the nominal ``N_INF``."""
     if ebic_form not in EBIC_FORMS:
         raise ValueError(f"unknown ebic_form {ebic_form!r}; expected one of {EBIC_FORMS}")
     if not is_stable(m):
@@ -200,7 +255,7 @@ class SearchResult:
 
 
 class Scorer:
-    """Refit + BIC with a cache keyed by the support, so no support is scored twice.
+    """Refit + score with a cache keyed by the support, so no support is scored twice.
 
     Only the score is cached.  A search at p = 20 evaluates up to a few hundred
     thousand supports (S3b: 380,000 for one graph at n = inf), and caching the
@@ -211,11 +266,17 @@ class Scorer:
     it is the same iterative solve from the same warm start.
     """
 
-    def __init__(self, sigma_hat, c, n, loss="direct", ebic_gamma=0.0, ebic_form="binom"):
+    def __init__(self, sigma_hat, c, n, loss="direct", ebic_gamma=0.0, ebic_form="binom",
+                 score="likelihood"):
         self.sigma_hat, self.c, self.n, self.ebic_gamma = sigma_hat, np.asarray(c, float), n, ebic_gamma
-        self.loss, self.ebic_form = loss, ebic_form
+        self.loss, self.ebic_form, self.score_kind = loss, ebic_form, score
         if ebic_form not in EBIC_FORMS:
             raise ValueError(f"unknown ebic_form {ebic_form!r}; expected one of {EBIC_FORMS}")
+        if score not in SCORES:
+            raise ValueError(f"unknown score {score!r}; expected one of {SCORES}")
+        if score == "direct" and loss != "direct":
+            raise ValueError("the direct-loss score goes with the least-squares refit (loss='direct')")
+        self._criterion = bic_direct if score == "direct" else bic
         self.refit = make_refit(sigma_hat, self.c, loss)
         self.cache: dict[bytes, float] = {}
         self.evaluations = 0
@@ -226,8 +287,8 @@ class Scorer:
         if key not in self.cache:
             self.evaluations += 1
             m = self.refit.fit(support, m_init)
-            self.cache[key] = bic(m, self.sigma_hat, self.c, self.n, int(support.sum()),
-                                  self.ebic_gamma, self.ebic_form)
+            self.cache[key] = self._criterion(m, self.sigma_hat, self.c, self.n, int(support.sum()),
+                                              self.ebic_gamma, self.ebic_form)
             self._last = (key, m)
         return self.cache[key]
 
@@ -275,7 +336,8 @@ def _warm_start(m: np.ndarray, move: str, i: int, j: int) -> np.ndarray:
 
 def greedy_search(sigma_hat, c, n, start: np.ndarray, loss: str = "direct", ebic_gamma: float = 0.0,
                   max_steps: int = 200, allow_two_cycles: bool = True, add_screen: int | None = None,
-                  scorer: Scorer | None = None, ebic_form: str = "binom") -> SearchResult:
+                  scorer: Scorer | None = None, ebic_form: str = "binom",
+                  score: str = "likelihood") -> SearchResult:
     """Best-improvement hill climbing from the support ``start``.
 
     ``add_screen``: if given, only that many add moves are scored per step -- the
@@ -285,7 +347,7 @@ def greedy_search(sigma_hat, c, n, start: np.ndarray, loss: str = "direct", ebic
     """
     p = sigma_hat.shape[0]
     off = ~np.eye(p, dtype=bool)
-    sc = scorer or Scorer(sigma_hat, c, n, loss, ebic_gamma, ebic_form)
+    sc = scorer or Scorer(sigma_hat, c, n, loss, ebic_gamma, ebic_form, score)
     cur = np.asarray(start, bool) & off
     if not allow_two_cycles:
         cur = cur & ~(cur & cur.T & np.triu(np.ones((p, p), bool), 1))
@@ -333,8 +395,8 @@ def multistart_search(sigma_hat, c, n, starts: list[np.ndarray], **kw) -> tuple[
     """Run :func:`greedy_search` from every start with one shared cache; return
     the best-scoring result and all of them."""
     loss, ebic_gamma = kw.pop("loss", "direct"), kw.pop("ebic_gamma", 0.0)
-    ebic_form = kw.pop("ebic_form", "binom")
-    sc = Scorer(sigma_hat, c, n, loss, ebic_gamma, ebic_form)
+    ebic_form, score = kw.pop("ebic_form", "binom"), kw.pop("score", "likelihood")
+    sc = Scorer(sigma_hat, c, n, loss, ebic_gamma, ebic_form, score)
     results = [greedy_search(sigma_hat, c, n, s, loss=loss, ebic_gamma=ebic_gamma, ebic_form=ebic_form,
                              scorer=sc, **kw)
                for s in starts]
@@ -345,10 +407,10 @@ def multistart_search(sigma_hat, c, n, starts: list[np.ndarray], **kw) -> tuple[
 
 def bic_along_path(sigma_hat, c, n, supports: list[np.ndarray], loss: str = "direct",
                    ebic_gamma: float = 0.0, scorer: Scorer | None = None,
-                   ebic_form: str = "binom") -> tuple[int, list[float]]:
+                   ebic_form: str = "binom", score: str = "likelihood") -> tuple[int, list[float]]:
     """Refit and score the support of every estimate of a path; return the index
-    of the lowest score (the BIC-selected lambda) and all scores."""
-    sc = scorer or Scorer(sigma_hat, c, n, loss, ebic_gamma, ebic_form)
+    of the lowest score (the lambda selected by the score) and all scores."""
+    sc = scorer or Scorer(sigma_hat, c, n, loss, ebic_gamma, ebic_form, score)
     p = sigma_hat.shape[0]
     off = ~np.eye(p, dtype=bool)
     scores = [sc.score(np.asarray(s, bool) & off) for s in supports]
