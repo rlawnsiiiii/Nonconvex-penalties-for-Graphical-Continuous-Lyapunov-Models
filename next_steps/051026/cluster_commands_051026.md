@@ -409,3 +409,4 @@ sleep 5 && tail -3 logs/feed_queue.log
 | 071026| bash cluster/submit_campaign.sh --wave 4 --p 25 | |
 | 071026| bash cluster/submit_campaign.sh --wave 4 --p 30 | |
 | 071026| nohup bash cluster/feed_queue.sh cluster/plan_071026.txt > logs/feed.out 2>&1 & | |
+ | 091026| nohup bash cluster/feed_queue.sh cluster/plan_091026.txt > logs/feed.out 2>&1 & | |
