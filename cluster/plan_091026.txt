@@ -1,0 +1,11 @@
+# Plan for cluster/feed_queue.sh, 9 October 2026: the extended BIC inside the search for every
+# wave 1 cell (rescoring from the stored supports, wave 6), 300 starting graphs for the pure
+# search, the p = 20 pure search with the extended term, then the repairs.
+--wave 6 --n 1e4                               # 128 tasks, about 50 CPU-h
+--wave 6 --n inf                               # 128 tasks
+--wave 6 --n 1000                              # 128 tasks
+--wave 5 --only search300s                     # 48 tasks, three n, about 40 CPU-h per n
+--wave 5 --n 1e4 --only searche1_p20           # 16 tasks, about 100 CPU-h
+# repairs: each waits until no job of its wave is queued or running
+--wave 5 --fill --time 24:00:00
+--wave 6 --fill --time 24:00:00
