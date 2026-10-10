@@ -577,12 +577,14 @@ graphs)*
   wave 7 complete.
 - **(c), wave 8: the search from 100 random graphs with the likelihood refit**, Améndola et al.'s
   procedure: 100 sparse starts and the empty graph, plus the search from the truth;
-  $p = 10$, both $C$, 2 replicates (32 graphs per cell, one per task), 20 add moves screened per
-  step (`search100sml_p10_<C>`). About 640 CPU-h per sample size.
+  $p = 10$, both $C$, 2 replicates (32 graphs per cell), 20 add moves screened per step
+  (`search100sml_p10_<C>`). The 100 starts of a graph run in 4 tasks of 25 (`--start-blocks 4`),
+  since one graph takes about 17 laptop hours; 256 tasks, about 2,150 CPU-h per sample size.
 - **Costs** are estimates: laptop time per data set times 2, 400 data sets per cell. The $p = 20$
   paths and the likelihood refit along a path were timed (`next_steps/091026/time_wave7.txt`); at
   $p = 30$ only the log-likelihood lasso path was (3.8 times its $p = 20$ time,
-  `time_wave7_p30.txt`). In all about 4,000 CPU-h for both sample sizes. $p = 30$ would add about
+  `time_wave7_p30.txt`); one start of the likelihood search at $p = 10$ takes 10.1 minutes on
+  average (`time_wave8c.txt`). In all about 7,100 CPU-h for both sample sizes. $p = 30$ would add about
   3,400 CPU-h per sample size by estimate, so it is left out for now; the loops of waves 7 and 8
   in `cluster/submit_campaign.sh` take it back, with its shard counts in a comment there.
 - `cluster/plan_101026.txt` holds the order; block 14 of the command sheet; the overview with the

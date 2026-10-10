@@ -171,6 +171,7 @@ def load_search_cell(folder: Path, meta: dict, variant: str = "") -> list[dict]:
     wave 5) and the search started from the truth ("search-truth"), both in the
     ``search_*`` columns so that they line up with the estimators."""
     rows = []
+    blocks: dict[tuple, dict] = {}      # start blocks (run_search_shard.py --start-blocks): per graph
     for f in sorted((folder / "shards").glob("shard_*.npz")):
         d = np.load(f, allow_pickle=True)
         names = [str(x) for x in d["c_choice_names"]]
@@ -178,6 +179,16 @@ def load_search_cell(folder: Path, meta: dict, variant: str = "") -> list[dict]:
             base = {**meta, "p": int(d["p"][i]), "k": int(d["k"][i]),
                     "c_choice": names[int(d["c_choice"][i])], "rep": int(d["rep"][i]),
                     "n_true_edges": int(d["n_true_edges"][i])}
+            if "start_block" in d.files:
+                key = (base["p"], base["k"], base["c_choice"], base["rep"])
+                entry = blocks.setdefault(key, {"base": base, "n": int(d["start_blocks"][i]), "pure": {}})
+                entry["pure"][int(d["start_block"][i])] = (
+                    float(d["pure_score"][i]), d["pure_conf"][i], d["pure_orient"][i],
+                    float(d["pure_seconds"][i]))
+                if "truth_conf" in d.files:
+                    entry["truth"] = (d["truth_conf"][i], d["truth_orient"][i],
+                                      float(d["truth_seconds"][i]), int(d["truth_moves"][i].sum()))
+                continue
             for name in ("pure", "truth"):
                 if f"{name}_conf" not in d.files:
                     continue
@@ -188,6 +199,19 @@ def load_search_cell(folder: Path, meta: dict, variant: str = "") -> list[dict]:
                 if name == "truth":
                     row["search_moves"] = int(d["truth_moves"][i].sum())
                 rows.append(row)
+    suffix = f"-{variant}" if variant else ""
+    for key in sorted(blocks):          # the blocks of a graph back together; incomplete graphs are left out
+        entry = blocks[key]
+        if len(entry["pure"]) == entry["n"]:
+            score, conf, orient, _ = min(entry["pure"].values(), key=lambda x: x[0])
+            rows.append({**entry["base"], "estimator": f"search-pure{suffix}",
+                         **graph_metrics(conf, orient, "search"),
+                         "seconds": sum(x[3] for x in entry["pure"].values())})
+        if "truth" in entry:
+            conf, orient, seconds, moves = entry["truth"]
+            rows.append({**entry["base"], "estimator": f"search-truth{suffix}",
+                         **graph_metrics(conf, orient, "search"), "seconds": seconds,
+                         "search_moves": moves})
     return rows
 
 
@@ -309,11 +333,11 @@ def print_means(table: list[dict]) -> None:
         head = (r["loss"], r["n"], r["p"])
         if head != last:
             print(f"\n{r['loss']} loss, n = {r['n']}, p = {r['p']}")
-            print(f"  {'estimator':<14}{'C':<7}{'graphs':>7}" + "".join(f"{c:>20}" for c in REPORT[:6]))
+            print(f"  {'estimator':<20}{'C':<7}{'graphs':>7}" + "".join(f"{c:>20}" for c in REPORT[:6]))
             last = head
         cells = "".join(f"{r[c]:>12.3f} ±{r[c + '_se']:.3f}" if not math.isnan(r[c]) else f"{'':>20}"
                         for c in REPORT[:6])
-        print(f"  {r['estimator']:<14}{r['c']:<7}{r['graphs']:>7}{cells}")
+        print(f"  {r['estimator']:<20}{r['c']:<7}{r['graphs']:>7}{cells}")
 
 
 def check_baseline(rows: list[dict], out: Path) -> list[str]:

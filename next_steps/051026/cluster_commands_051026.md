@@ -392,7 +392,7 @@ sleep 5 && tail -3 logs/feed_queue.log
 
 - The plan runs (a) at $n = 10^4$, (c) at both sample sizes, (a) at $n = 1000$; then it waits until
   no wave 7 job is left, because (b) scores wave 7's paths again, and runs (b) at both sample sizes.
-- About 4,000 CPU-h in all by estimate, about two days; $p = 30$ is left out for cost. The first
+- About 7,100 CPU-h in all by estimate, three days or more; $p = 30$ is left out for cost. The first
   lines give a complete picture at $n = 10^4$, so the feeder can be stopped after them
   (`pkill -f feed_queue.sh`).
 - On the laptop afterwards: the `rsync` lines of block 9, then
@@ -418,7 +418,7 @@ sleep 5 && tail -3 logs/feed_queue.log
 | wave 5b, 300 starting graphs, three sample sizes | 48 | about 120 | 2 to 3 hours |
 | wave 7 (a), $p = 10, 20$, one sample size | 244 | about 700 (estimate) | 8 to 12 hours |
 | wave 8 (b), one sample size | 348, or 300 at $n = 10^4$ | about 770 (estimate) | about half a day |
-| wave 8 (c), 100 starts, one sample size | 64 | about 640 (estimate) | about a day; one graph per task |
+| wave 8 (c), 100 starts, one sample size | 256 | about 2,150 (estimate) | one to two days; 25 starts of a graph per task |
 
 - Each task takes about 1 to 3 hours (limit 12 h; wave 3: 24 h).
 - The first results (wave 1 at $n = 1000$) are back a few hours after block 5.

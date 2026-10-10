@@ -54,7 +54,7 @@
 #           direct-loss cells of wave 1), the selection only at p = 20 (wave 7's cells);
 #           cells <loss>_<estimator>-ml_<C>[_p<p>].  Run it after wave 7 is complete.
 #           (c) The search from 100 random graphs, the empty graph and the truth with the
-#           likelihood refit, p = 10 (search100sml_p10_<C>).
+#           likelihood refit, p = 10, the starts of a graph in 4 tasks (search100sml_p10_<C>).
 #
 # From ~/repo on the login node (nothing needs to be activated first):
 #     bash cluster/submit_campaign.sh --wave 1 --list            # the cells of a wave
@@ -250,10 +250,11 @@ cells() {
         done
       done
       # (c) the search from 100 random sparse graphs and the empty graph, and from the truth,
-      # with the likelihood refit (Amendola et al.'s procedure), p = 10
+      # with the likelihood refit (Amendola et al.'s procedure), p = 10.  One graph takes about 17
+      # laptop hours, so its starts are split into 4 blocks of 25, one (graph, block) per task.
       run=simulations/run_search_shard.py
-      echo "search100sml_p10_C2I|8si|$run|32|24:00:00|--p 10 --reps 2 --c-scale identity --methods pure truth --restarts 100 --starts sparse --refit loglik --add-screen 20"
-      echo "search100sml_p10_Cresc|8sr|$run|32|24:00:00|--p 10 --reps 2 --c-scale variance --methods pure truth --restarts 100 --starts sparse --refit loglik --add-screen 20" ;;
+      echo "search100sml_p10_C2I|8si|$run|128|24:00:00|--p 10 --reps 2 --c-scale identity --methods pure truth --restarts 100 --starts sparse --refit loglik --add-screen 20 --start-blocks 4"
+      echo "search100sml_p10_Cresc|8sr|$run|128|24:00:00|--p 10 --reps 2 --c-scale variance --methods pure truth --restarts 100 --starts sparse --refit loglik --add-screen 20 --start-blocks 4" ;;
     *) echo "unknown wave: $1 (1 to 8)" >&2; return 2 ;;
   esac
 }

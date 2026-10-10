@@ -156,6 +156,7 @@ def test_every_cell_is_accepted_by_its_runner(cluster, wave):
                                    else 30 if "search30" in name else 10)
             assert ns.ebic_gamma == (1.0 if "searche1" in name else 0.0)
             assert ns.refit == ("loglik" if ml else "direct") and ns.add_screen == (20 if ml else None)
+            assert ns.start_blocks == (4 if ml else 1)
             assert (ns.reps, tuple(ns.p)) == ((5, (20,)) if "search30s" in name else
                                               (25, (20,)) if "p20" in name else
                                               (2, (10,)) if ml else (25, (10,)))

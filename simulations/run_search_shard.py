@@ -36,6 +36,15 @@ Numbers only, one ``.npz`` per shard:
   truth_*       the same for the search started from the truth, plus the score of
                 the truth itself and the moves that left it (add, delete, reverse)
 
+Start blocks (``--start-blocks B``, wave 8 (c)).  With the likelihood refit, 100 random starts of
+one graph take longer than a cluster task may run.  Then the starts of every graph are split into
+B contiguous blocks, one (graph, block) pair per task: block b searches starts b R/B ... (b+1) R/B - 1
+(the same graphs, drawn in the same order as without blocks), the last block also the empty graph,
+and block 0 also the search from the truth.  ``--n-shards`` must be a multiple of B, so that every
+shard holds one block only; every row records ``start_block`` and ``start_blocks``.  The analysis
+(``simulations/diagnostics/restarts.py`` and ``campaign.py``) puts the blocks of a graph back
+together: the per-start results in block order, and the best-scoring end graph over all blocks.
+
     python simulations/run_search_shard.py --shard 0 --n-shards 16 --p 20 --reps 25 \
         --n-obs 1e4 --c-scale variance \
         --out-dir runs/campaign/search_p20_Cresc_n1e4/search_shards
@@ -85,8 +94,10 @@ def _graph(prefix: str, support: np.ndarray, m: np.ndarray, m_true: np.ndarray) 
 
 
 def run_one(p, k, c_choice, rep, cfg, restarts: int, methods=METHODS, starts: str = "sparse",
-            ebic_gamma: float = 0.0, refit: str = "direct", add_screen: int | None = None) -> dict:
-    """Both searches on one dataset."""
+            ebic_gamma: float = 0.0, refit: str = "direct", add_screen: int | None = None,
+            block: int = 0, blocks: int = 1) -> dict:
+    """Both searches on one dataset; with ``blocks > 1`` only start block ``block`` of the pure
+    search (see the module docstring), and the search from the truth only in block 0."""
     c_index = list(CChoice).index(c_choice)
     rng = np.random.default_rng([cfg.seed, p, k, c_index, rep])
     t0 = time.perf_counter()
@@ -113,7 +124,11 @@ def run_one(p, k, c_choice, rep, cfg, restarts: int, methods=METHODS, starts: st
                 g = start_rng.random((p, p)) < 0.5
                 np.fill_diagonal(g, False)
                 start_graphs.append(g)
-        start_graphs.append(np.zeros((p, p), dtype=bool))         # the empty graph, last
+        if blocks > 1:                                              # this block's random starts
+            size = restarts // blocks
+            start_graphs = start_graphs[block * size:(block + 1) * size]
+        if block == blocks - 1:
+            start_graphs.append(np.zeros((p, p), dtype=bool))     # the empty graph, last
         # max_steps: a guard only, as in run_s1_shard.select_graph (the search stops by
         # itself when no move lowers the score)
         best, results = multistart_search(sigma_hat, c_est, cfg.n_obs, start_graphs, loss=refit,
@@ -126,12 +141,13 @@ def run_one(p, k, c_choice, rep, cfg, restarts: int, methods=METHODS, starts: st
             "m_pure_starts_support": np.packbits(np.array([r.support for r in results])),
             "pure_start_moves": np.array([len(r.moves) for r in results], dtype=np.int32),
             "pure_exact_starts": sum(np.array_equal(r.support, truth) for r in results),
-            "pure_empty_start_exact": int(np.array_equal(results[-1].support, truth)),
+            "pure_empty_start_exact": (int(np.array_equal(results[-1].support, truth))
+                                       if block == blocks - 1 else -1),
             "pure_evaluations": best.evaluations,
             "pure_seconds": time.perf_counter() - t1,
         })
 
-    if "truth" in methods:
+    if "truth" in methods and block == 0:
         t1 = time.perf_counter()
         scorer = Scorer(sigma_hat, c_est, cfg.n_obs, refit, ebic_gamma, EBIC_FORM)
         truth_score, _ = scorer(truth)
@@ -147,6 +163,8 @@ def run_one(p, k, c_choice, rep, cfg, restarts: int, methods=METHODS, starts: st
             "truth_seconds": time.perf_counter() - t1,
         })
     row["seconds"] = time.perf_counter() - t0
+    if blocks > 1:
+        row.update({"start_block": block, "start_blocks": blocks})
     return row
 
 
@@ -179,6 +197,10 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--add-screen", type=int, default=None, metavar="N",
                     help="with --refit loglik: score only the N add moves with the largest "
                          "gradient per step (default: all of them)")
+    ap.add_argument("--start-blocks", type=int, default=1, metavar="B",
+                    help="split the random starts of every graph into B blocks, one (graph, block) "
+                         "pair per task (default 1: all starts of a graph in one task); --restarts "
+                         "and --n-shards must be multiples of B")
     return ap
 
 
@@ -191,6 +213,13 @@ def main() -> None:
         ap.error("--restarts must not be negative")
     if args.ebic_gamma < 0:
         ap.error("--ebic-gamma must not be negative")
+    blocks = args.start_blocks
+    if blocks < 1:
+        ap.error("--start-blocks must be at least 1")
+    if blocks > 1 and ("pure" not in args.methods or args.restarts % blocks
+                       or args.n_shards % blocks):
+        ap.error("--start-blocks B needs the pure search, and --restarts and --n-shards "
+                 "multiples of B (every shard then holds one block)")
 
     base = S1Config()
     cfg = S1Config(
@@ -199,20 +228,20 @@ def main() -> None:
         n_obs=args.n_obs if args.n_obs is not None else base.n_obs,
         c_scale=args.c_scale or base.c_scale,
     )
-    tasks = task_list(cfg)[args.shard::args.n_shards]
+    tasks = [(*t, b) for t in task_list(cfg) for b in range(blocks)][args.shard::args.n_shards]
     args.out_dir.mkdir(parents=True, exist_ok=True)
     out = args.out_dir / f"shard_{args.shard:04d}_of_{args.n_shards:04d}.npz"
     print(f"shard {args.shard}/{args.n_shards}: {len(tasks)} datasets "
           f"[n={cfg.n_obs}, c_scale={cfg.c_scale}, methods={args.methods}, "
           f"restarts={args.restarts}, starts={args.starts}, ebic_gamma={args.ebic_gamma}, "
-          f"refit={args.refit}, add_screen={args.add_screen}] -> {out}",
+          f"refit={args.refit}, add_screen={args.add_screen}, start_blocks={blocks}] -> {out}",
           flush=True)
 
     store: dict[str, list] = {}
     t0 = time.time()
-    for n, (p, k, c, r) in enumerate(tasks, 1):
+    for n, (p, k, c, r, b) in enumerate(tasks, 1):
         row = run_one(p, k, c, r, cfg, args.restarts, tuple(args.methods), args.starts,
-                      args.ebic_gamma, args.refit, args.add_screen)
+                      args.ebic_gamma, args.refit, args.add_screen, block=b, blocks=blocks)
         for key, val in row.items():
             store.setdefault(key, []).append(val)
         if n % 10 == 0 or n == len(tasks):
@@ -236,7 +265,7 @@ def main() -> None:
         "c_choices": [c.value for c in cfg.c_choices],
         "methods": list(args.methods), "restarts": args.restarts, "starts": args.starts,
         "restart_seed": RESTART_SEED, "max_density": MAX_DENSITY, "score": "bic",
-        "refit": args.refit, "add_screen": args.add_screen,
+        "refit": args.refit, "add_screen": args.add_screen, "start_blocks": blocks,
         "ebic_gamma": args.ebic_gamma, "ebic_form": EBIC_FORM,
     })
     payload["c_choice_names"] = np.array([c.value for c in CChoice])

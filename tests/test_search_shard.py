@@ -144,3 +144,50 @@ def test_the_likelihood_refit_scores_both_searches(tmp_path):
         for name in ("pure", "truth"):
             support = unpack_supports(shard[f"m_{name}_support"][i], 1, P)[0]
             assert np.isclose(scorer(support)[0], shard[f"{name}_score"][i], rtol=1e-8)
+
+
+def _cell(out, *extra, shards=1):
+    """All shards of a small cell (p = P, one replicate: 16 data sets)."""
+    for s in range(shards):
+        cmd = [sys.executable, str(RUNNER), "--shard", str(s), "--n-shards", str(shards), "--p", str(P),
+               "--reps", "1", "--n-obs", "10000", "--out-dir", str(out), *extra]
+        res = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
+        assert res.returncode == 0, res.stderr
+    return [np.load(f, allow_pickle=True) for f in sorted(out.glob("shard_*.npz"))]
+
+
+def test_start_blocks_split_the_starts_of_a_graph_exactly(tmp_path):
+    """--start-blocks 2: the four random starts of every graph in two tasks.  Put back together
+    in block order they are the starts of the unsplit run, with the same end graphs and scores
+    (least-squares refit, so deterministic); the empty graph is in the last block, the search
+    from the truth in block 0 only, and every shard holds one block."""
+    (whole,) = _cell(tmp_path / "whole", "--restarts", "4")
+    b0, b1 = _cell(tmp_path / "split", "--restarts", "4", "--start-blocks", "2", shards=2)
+    assert set(b0["start_block"]) == {0} and set(b1["start_block"]) == {1}
+    assert set(b0["start_blocks"]) == {2} and json.loads(str(b0["config_json"]))["start_blocks"] == 2
+    assert "truth_conf" in b0.files and "truth_conf" not in b1.files
+    assert set(b0["pure_empty_start_exact"]) == {-1}
+    for key in ("p", "k", "c_choice", "rep"):
+        assert np.array_equal(b0[key], whole[key]) and np.array_equal(b1[key], whole[key])
+    for i in range(len(whole["p"])):
+        s0, s1 = np.asarray(b0["pure_scores"][i], float), np.asarray(b1["pure_scores"][i], float)
+        assert (len(s0), len(s1)) == (2, 3)                       # 2 random | 2 random + the empty graph
+        assert np.array_equal(np.concatenate([s0, s1]), np.asarray(whole["pure_scores"][i], float))
+        ends = np.concatenate([unpack_supports(b0["m_pure_starts_support"][i], 2, P),
+                               unpack_supports(b1["m_pure_starts_support"][i], 3, P)])
+        assert np.array_equal(ends, unpack_supports(whole["m_pure_starts_support"][i], 5, P))
+        assert min(b0["pure_score"][i], b1["pure_score"][i]) == whole["pure_score"][i]
+        assert b1["pure_empty_start_exact"][i] == whole["pure_empty_start_exact"][i]
+        assert b0["truth_score"][i] == whole["truth_score"][i]
+        assert np.array_equal(b0["truth_conf"][i], whole["truth_conf"][i])
+
+
+def test_start_blocks_need_whole_blocks(tmp_path):
+    for extra in (["--restarts", "3", "--start-blocks", "2"],           # 3 starts in 2 blocks
+                  ["--restarts", "4", "--start-blocks", "2", "--n-shards", "3"],
+                  ["--restarts", "4", "--start-blocks", "2", "--methods", "truth"],
+                  ["--restarts", "4", "--start-blocks", "0"]):
+        cmd = [sys.executable, str(RUNNER), "--shard", "0", "--n-shards", "2", "--p", str(P),
+               "--reps", "1", "--out-dir", str(tmp_path / "x"), *extra]
+        res = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
+        assert res.returncode == 2, extra

@@ -1,7 +1,7 @@
 # Plan for cluster/feed_queue.sh, 10 October 2026: wave 7 (a) the log-likelihood loss over
 # p = 10 and 20 (p = 30 left out for cost); wave 8 (b) the likelihood refit on the stored paths and
 # (c) the search from 100 random graphs with the likelihood refit; each at n = 1e4 and n = 1000.
-# Costs are estimates: next_steps/091026/next_steps_091026.md §2.  About 4,000 CPU-h in all.
+# Costs are estimates: next_steps/091026/next_steps_091026.md §2, §4.  About 7,100 CPU-h in all.
 # It also carries plan_091026.txt (waves 5 and 6), so ONE feeder runs everything: stop any other
 # feeder first.  Lines whose cells are already submitted or complete are skipped.
 --wave 6 --n 1e4
@@ -10,8 +10,8 @@
 --wave 5 --only search300s
 --wave 5 --n 1e4 --only searche1_p20
 --wave 7 --n 1e4                               # (a) 244 tasks, about 700 CPU-h
---wave 8 --n 1e4 --only search100sml           # (c) 64 tasks, about 640 CPU-h
---wave 8 --n 1000 --only search100sml          # (c) 64 tasks, about 640 CPU-h
+--wave 8 --n 1e4 --only search100sml           # (c) 256 tasks (4 per graph), about 2,150 CPU-h
+--wave 8 --n 1000 --only search100sml          # (c) 256 tasks (4 per graph), about 2,150 CPU-h
 --wave 7 --n 1000                              # (a) 244 tasks, about 700 CPU-h
 # (b) scores wave 7's paths again, so this line waits until no wave 7 job is queued or running
 --wave 7 --fill --time 24:00:00

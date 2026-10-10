@@ -54,21 +54,41 @@ def f1_of(support: np.ndarray, m_true: np.ndarray) -> float:
 
 def load_cell(folder: Path) -> list[dict]:
     """One dict per graph: the final score of every start (random ones first, the empty
-    graph last), the final supports if stored, and the true matrix."""
+    graph last), the final supports if stored, and the true matrix.  A cell run with start
+    blocks (``run_search_shard.py --start-blocks B``) has one row per graph and block; the
+    blocks of a graph are put back together in block order, and a graph with a block missing
+    is left out."""
+    import json
     graphs, starts, restarts = [], None, None
+    pieces: dict[tuple, dict] = {}                 # (p, k, c_choice, rep) -> block -> piece
     for f in sorted((folder / "shards").glob("shard_*.npz")):
         d = np.load(f, allow_pickle=True)
-        import json
         cfg = json.loads(str(d["config_json"]))
         starts, restarts = cfg.get("starts", "sparse"), int(cfg["restarts"])
+        blocks = int(cfg.get("start_blocks", 1))
         for i in range(len(d["p"])):
             p = int(d["p"][i])
             m_true = np.zeros((p, p))
             m_true[d["m_true_i"][i], d["m_true_j"][i]] = d["m_true_v"][i]
-            g = {"p": p, "scores": np.asarray(d["pure_scores"][i], float), "m_true": m_true}
+            scores = np.asarray(d["pure_scores"][i], float)
+            g = {"p": p, "scores": scores, "m_true": m_true}
             if "m_pure_starts_support" in d.files:
-                g["ends"] = unpack_supports(d["m_pure_starts_support"][i], restarts + 1, p)
-            graphs.append(g)
+                g["ends"] = unpack_supports(d["m_pure_starts_support"][i], len(scores), p)
+            if blocks == 1:
+                graphs.append(g)
+                continue
+            key = (p, int(d["k"][i]), int(d["c_choice"][i]), int(d["rep"][i]))
+            pieces.setdefault(key, {"blocks": blocks})[int(d["start_block"][i])] = g
+    for key in sorted(pieces):
+        parts = pieces[key]
+        if any(b not in parts for b in range(parts["blocks"])):
+            continue                                   # a block of this graph is missing
+        order = [parts[b] for b in range(parts["blocks"])]
+        g = {"p": order[0]["p"], "m_true": order[0]["m_true"],
+             "scores": np.concatenate([x["scores"] for x in order])}
+        if all("ends" in x for x in order):
+            g["ends"] = np.concatenate([x["ends"] for x in order])
+        graphs.append(g)
     return graphs, starts, restarts
 
 

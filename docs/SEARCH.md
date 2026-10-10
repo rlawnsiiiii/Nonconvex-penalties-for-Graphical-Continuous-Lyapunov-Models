@@ -155,8 +155,28 @@ are neither independent nor of equal variance, and their number does not grow wi
 with $p + |S| \ge N$ free entries generically fits the $N$ equations exactly: its RSS is zero up to
 rounding (floored at $10^{-14}\|C\|_F^2$, `RSS_FLOOR`), so its loss term lies far below that of
 every graph that does not fit exactly, and the score pulls toward dense graphs at every finite $n$.
-At $n = \infty$ the true support already fits exactly and the penalty decides among exact fits. It is not used in the campaign; the check on 32 graphs is
-`next_steps/091026/score_check.py`.
+At $n = \infty$ the true support already fits exactly and the penalty decides among exact fits.
+
+**Checked on 32 graphs** (10 October; $p = 10$, $C = 2I$, $k = 1, \dots, 4$, the four true $C$, two
+replicates; the lasso path of the direct loss; every score with the BIC penalty;
+`next_steps/091026/score_check.py` and `.txt`):
+
+| $n$ | loss term of the score | from the truth: $F_1$ (edges) | selected on the path | after the search | s per graph |
+|---|---|---|---|---|---|
+| $10^3$ | likelihood, least-squares fit (the campaign's) | 0.684 (17.8) | 0.515 (23.3) | 0.482 (17.0) | 0.8 |
+| $10^3$ | likelihood, likelihood fit (Améndola, Dettling) | 0.703 (17.4) | 0.510 (22.8) | 0.478 (16.5) | 565 |
+| $10^3$ | direct loss, $N\log(\mathrm{RSS}_S/N)$ | 0.679 (35.0) | 0.426 (45.0) | 0.426 (45.0) | 0.5 |
+| $10^4$ | likelihood, least-squares fit | 0.788 (23.7) | 0.565 (29.5) | 0.558 (23.4) | 0.6 |
+| $10^4$ | likelihood, likelihood fit | 0.801 (23.5) | 0.566 (29.3) | 0.560 (23.2) | 623 |
+| $10^4$ | direct loss | 0.747 (31.0) | 0.440 (45.0) | 0.440 (45.0) | 0.4 |
+
+The true graphs have 23.7 edges on average.
+- **The direct-loss score is degenerate.** On the path it selects the densest graph, the lasso's
+  dense end with $p(p-1)/2 = 45$ edges, in every one of the 64 graphs, and the search stays there.
+  From the true graph it adds 7 to 11 edges. It is not used in the campaign.
+- **The likelihood fit and the least-squares fit select the same graphs.** The selected and the
+  searched graphs differ by at most 0.005 in $F_1$; from the truth the likelihood fit is 0.01 to
+  0.02 higher. It costs 700 to 1,000 times as much. This is wave 5a's result again, on other data.
 
 **When the least-squares refit is unstable.** The least-squares fit of a sparse support is not
 entry by entry: the off-diagonal residuals $(M_{ii} + M_{jj})\hat\Sigma_{ij}$ couple the diagonal
@@ -366,7 +386,10 @@ minutes.
   graph and `--restarts` randomly drawn graphs (10 in wave 2, 100 in wave 5b; `--starts sparse` or
   `uniform`), and `greedy_search` from the true graph as a ceiling. The graph and the score every
   start ends at are stored, and `simulations/diagnostics/restarts.py` reads off the best of the
-  first $r$ starts for every $r$.
+  first $r$ starts for every $r$. With `--start-blocks B` the starts of every graph are split into
+  $B$ contiguous blocks, one (graph, block) pair per task, for searches too long for one task
+  (wave 8 (c): 100 starts with the likelihood refit); `restarts.py` and `campaign.py` put the
+  blocks of a graph back together.
 - **The refit behind the score** is least squares on the direct loss for every loss (`--refit
   direct`, the default), or the maximised likelihood (`--refit loglik`, wave 5a at $p = 10$).
 - **The eBIC penalty** is off (the BIC penalty is used) except from wave 5c on:
