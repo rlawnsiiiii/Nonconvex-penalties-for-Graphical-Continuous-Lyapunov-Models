@@ -1,0 +1,14 @@
+p=20 identity lasso         path    90.4 s
+p=20 identity lasso BIC with the likelihood refit    80.0 s (95 supports)
+p=20 identity MCP           path    72.6 s
+p=20 identity MCP-up exact  path   117.3 s
+p=20 identity MCP-up lasso  path   180.3 s
+p=20 identity adaptive      path   101.2 s
+p=20 variance lasso         path   218.9 s
+p=20 variance lasso BIC with the likelihood refit   110.7 s (89 supports)
+p=20 variance MCP           path   132.2 s
+p=20 variance MCP-up exact  path   290.4 s
+p=20 variance MCP-up lasso  path   598.9 s
+p=20 variance adaptive      path   248.3 s
+p=10 variance search after the BIC selection, likelihood refit, all adds:    77.8 s, 9 moves
+p=10 variance pure search, 10 random starts + empty, likelihood refit, add_screen=20:  5549.0 s, 11957 supports

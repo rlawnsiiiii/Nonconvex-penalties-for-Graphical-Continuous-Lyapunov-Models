@@ -1,0 +1,16 @@
+p=10 k=2 variance random start 1  (18 edges):   135.5 s,  11 moves, score 85948.3
+p=10 k=4 identity random start 1  (23 edges):   240.3 s,  18 moves, score 68772.3
+p=10 k=4 identity random start 2  ( 8 edges):    92.7 s,  22 moves, score 68783.7
+p=10 k=4 identity random start 3  (11 edges):   191.0 s,  27 moves, score 68784.9
+p=10 k=2 variance random start 2  (21 edges):   738.9 s,  19 moves, score 85960.7
+p=10 k=4 variance random start 1  ( 9 edges):  1241.2 s,  23 moves, score 68763.6
+p=10 k=4 identity truth           (35 edges):  1051.9 s,  11 moves, score 68787.2
+p=10 k=2 variance random start 3  (16 edges):   706.1 s,  12 moves, score 86169.1
+p=10 k=2 variance truth           (20 edges):    25.3 s,   2 moves, score 85894.2
+p=10 k=2 identity random start 1  (21 edges):  1744.7 s,  20 moves, score 86484.4
+p=10 k=4 variance random start 2  (18 edges):   544.1 s,  21 moves, score 68808.7
+p=10 k=2 identity random start 2  ( 7 edges):    51.0 s,  22 moves, score 85947.3
+p=10 k=2 identity random start 3  (10 edges):    59.6 s,  13 moves, score 85949.5
+p=10 k=2 identity truth           (20 edges):    27.9 s,   6 moves, score 85940.0
+p=10 k=4 variance random start 3  (16 edges):  1538.4 s,  28 moves, score 68766.9
+p=10 k=4 variance truth           (35 edges):   632.4 s,  11 moves, score 68751.9

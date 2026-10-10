@@ -1,0 +1,15 @@
+Scores of a graph in the greedy search, p = 10, C = 2I, lasso path of the direct loss (next_steps/091026/score_check.py)
+
+n = 1000: 32 graphs, mean true edges 23.7
+  score (all with the BIC penalty)                              from the truth  selected on path    search from it  s/graph
+  least-squares fit, likelihood loss term                      F1 0.684  17.8e   F1 0.515  23.3e   F1 0.482  17.0e      0.8
+  likelihood fit, likelihood loss term (Améndola, Dettling)    F1 0.703  17.4e   F1 0.510  22.8e   F1 0.478  16.5e    564.8
+  least-squares fit, direct-loss term N log(RSS/N)             F1 0.679  35.0e   F1 0.426  45.0e   F1 0.426  45.0e      0.5
+
+n = 10000: 32 graphs, mean true edges 23.7
+  score (all with the BIC penalty)                              from the truth  selected on path    search from it  s/graph
+  least-squares fit, likelihood loss term                      F1 0.788  23.7e   F1 0.565  29.5e   F1 0.558  23.4e      0.6
+  likelihood fit, likelihood loss term (Améndola, Dettling)    F1 0.801  23.5e   F1 0.566  29.3e   F1 0.560  23.2e    622.8
+  least-squares fit, direct-loss term N log(RSS/N)             F1 0.747  31.0e   F1 0.440  45.0e   F1 0.440  45.0e      0.4
+
+e = mean number of edges of the graph

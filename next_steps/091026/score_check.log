@@ -1,0 +1,80 @@
+0 done, 64 to go, 4 workers
+1/64 (1000, 1, 0, 0) default 0 s, amendola 40 s
+2/64 (1000, 1, 0, 1) default 0 s, amendola 42 s
+3/64 (1000, 1, 1, 1) default 0 s, amendola 76 s
+4/64 (1000, 1, 2, 0) default 0 s, amendola 49 s
+5/64 (1000, 1, 2, 1) default 0 s, amendola 55 s
+6/64 (1000, 1, 1, 0) default 0 s, amendola 101 s
+7/64 (1000, 2, 0, 1) default 0 s, amendola 72 s
+8/64 (1000, 2, 1, 0) default 0 s, amendola 59 s
+9/64 (1000, 2, 1, 1) default 0 s, amendola 79 s
+10/64 (1000, 2, 0, 0) default 0 s, amendola 242 s
+11/64 (1000, 2, 2, 0) default 0 s, amendola 96 s
+12/64 (1000, 2, 2, 1) default 1 s, amendola 217 s
+13/64 (1000, 1, 3, 1) default 1 s, amendola 623 s
+14/64 (1000, 2, 3, 0) default 1 s, amendola 338 s
+15/64 (1000, 3, 0, 0) default 1 s, amendola 230 s
+16/64 (1000, 2, 3, 1) default 1 s, amendola 406 s
+17/64 (1000, 3, 1, 0) default 1 s, amendola 298 s
+18/64 (1000, 3, 1, 1) default 1 s, amendola 541 s
+19/64 (1000, 3, 2, 0) default 1 s, amendola 467 s
+20/64 (1000, 1, 3, 0) default 1 s, amendola 1675 s
+21/64 (1000, 3, 2, 1) default 1 s, amendola 277 s
+22/64 (1000, 3, 3, 1) default 1 s, amendola 444 s
+23/64 (1000, 3, 0, 1) default 1 s, amendola 1466 s
+24/64 (1000, 3, 3, 0) default 1 s, amendola 1088 s
+25/64 (1000, 4, 0, 1) default 1 s, amendola 682 s
+26/64 (1000, 4, 1, 0) default 1 s, amendola 816 s
+27/64 (1000, 4, 1, 1) default 1 s, amendola 350 s
+28/64 (1000, 4, 2, 0) default 1 s, amendola 380 s
+29/64 (1000, 4, 2, 1) default 1 s, amendola 434 s
+30/64 (10000, 1, 0, 0) default 0 s, amendola 31 s
+31/64 (10000, 1, 0, 1) default 0 s, amendola 39 s
+32/64 (10000, 1, 1, 0) default 0 s, amendola 152 s
+33/64 (10000, 1, 1, 1) default 0 s, amendola 91 s
+34/64 (10000, 1, 2, 0) default 0 s, amendola 31 s
+35/64 (10000, 1, 2, 1) default 0 s, amendola 29 s
+36/64 (1000, 4, 3, 1) default 1 s, amendola 934 s
+37/64 (1000, 4, 0, 0) default 1 s, amendola 2805 s
+38/64 (10000, 2, 0, 0) default 0 s, amendola 163 s
+39/64 (10000, 2, 0, 1) default 0 s, amendola 123 s
+40/64 (10000, 2, 1, 0) default 0 s, amendola 85 s
+41/64 (10000, 2, 1, 1) default 0 s, amendola 103 s
+42/64 (10000, 2, 2, 0) default 1 s, amendola 189 s
+43/64 (10000, 2, 2, 1) default 0 s, amendola 251 s
+44/64 (1000, 4, 3, 0) default 2 s, amendola 2692 s
+45/64 (10000, 1, 3, 1) default 1 s, amendola 1985 s
+46/64 (10000, 3, 0, 0) default 1 s, amendola 191 s
+47/64 (10000, 1, 3, 0) default 1 s, amendola 2682 s
+48/64 (10000, 3, 1, 0) default 1 s, amendola 183 s
+49/64 (10000, 2, 3, 1) default 1 s, amendola 932 s
+50/64 (10000, 3, 2, 0) default 1 s, amendola 259 s
+51/64 (10000, 3, 2, 1) default 0 s, amendola 130 s
+52/64 (10000, 3, 0, 1) default 1 s, amendola 1139 s
+53/64 (10000, 2, 3, 0) default 1 s, amendola 2073 s
+54/64 (10000, 3, 3, 1) default 1 s, amendola 553 s
+55/64 (10000, 3, 1, 1) default 1 s, amendola 1375 s
+56/64 (10000, 3, 3, 0) default 1 s, amendola 1334 s
+57/64 (10000, 4, 1, 0) default 1 s, amendola 675 s
+58/64 (10000, 4, 1, 1) default 1 s, amendola 328 s
+59/64 (10000, 4, 2, 0) default 1 s, amendola 135 s
+60/64 (10000, 4, 2, 1) default 1 s, amendola 274 s
+61/64 (10000, 4, 0, 0) default 1 s, amendola 1733 s
+62/64 (10000, 4, 3, 0) default 1 s, amendola 504 s
+63/64 (10000, 4, 0, 1) default 1 s, amendola 1516 s
+64/64 (10000, 4, 3, 1) default 1 s, amendola 641 s
+Scores of a graph in the greedy search, p = 10, C = 2I, lasso path of the direct loss (next_steps/091026/score_check.py)
+
+n = 1000: 32 graphs, mean true edges 23.7
+  score (all with the BIC penalty)                              from the truth  selected on path    search from it  s/graph
+  least-squares fit, likelihood loss term                      F1 0.684  17.8e   F1 0.515  23.3e   F1 0.482  17.0e      0.8
+  likelihood fit, likelihood loss term (Améndola, Dettling)    F1 0.703  17.4e   F1 0.510  22.8e   F1 0.478  16.5e    564.8
+  least-squares fit, direct-loss term N log(RSS/N)             F1 0.679  35.0e   F1 0.426  45.0e   F1 0.426  45.0e      0.5
+
+n = 10000: 32 graphs, mean true edges 23.7
+  score (all with the BIC penalty)                              from the truth  selected on path    search from it  s/graph
+  least-squares fit, likelihood loss term                      F1 0.788  23.7e   F1 0.565  29.5e   F1 0.558  23.4e      0.6
+  likelihood fit, likelihood loss term (Améndola, Dettling)    F1 0.801  23.5e   F1 0.566  29.3e   F1 0.560  23.2e    622.8
+  least-squares fit, direct-loss term N log(RSS/N)             F1 0.747  31.0e   F1 0.440  45.0e   F1 0.440  45.0e      0.4
+
+e = mean number of edges of the graph

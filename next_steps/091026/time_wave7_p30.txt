@@ -1,0 +1,4 @@
+B p=10 variance from the selected graph (26 edges): likelihood search   133.4 s, 14 moves, 817 supports (least-squares search: 8 moves)
+B p=20 variance from the selected graph (74 edges): likelihood search   253.1 s for 2 steps (271 supports); least-squares search 42 moves; full likelihood search about 89 min
+B p=20 variance from the random start 1 (16 edges): likelihood search    18.3 s for 2 steps (105 supports); least-squares search 0 moves; full likelihood search about 0 min
+A p=30 identity log-likelihood lasso path:    339.0 s
