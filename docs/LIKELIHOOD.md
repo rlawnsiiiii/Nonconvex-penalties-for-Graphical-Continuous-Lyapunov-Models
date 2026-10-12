@@ -95,7 +95,7 @@ the same trick as in `gclm`'s `DGELYP`, and it is what makes an iteration $O(p^3
   $|\nabla_M L(M_D)_{ij}|\le\lambda$ off the diagonal. The same for all three penalties. For
   correlation input it has a closed form: $\Sigma(M_D)=I$, both $\Sigma$-gradients reduce to
   $I-\hat\Sigma$, the adjoint solution with $M_D=-I$ is $Z=-(I-\hat\Sigma)/2$, and
-  $\nabla_M=-2Z\Sigma=\hat\Sigma-I$, hence
+  $\nabla_M=-2Z\Sigma=I-\hat\Sigma$, hence
 
   $$\lambda_{\max}=\max_{i\neq j}\lvert\hat\Sigma_{ij}\rvert\qquad(\hat\Sigma\text{ a correlation matrix, }C=2I),$$
 

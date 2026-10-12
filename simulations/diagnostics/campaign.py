@@ -264,14 +264,21 @@ def paired(x, y) -> dict:
             "z": float(d.mean() / se) if se > 0 else (0.0 if d.mean() == 0 else math.nan)}
 
 
-def means_table(rows: list[dict]) -> list[dict]:
+def means_table(rows: list[dict], by_true_c: bool = False) -> list[dict]:
+    """Means with standard errors per (loss, estimator, C, n, p) over all graphs of a cell
+    (the four settings of the true C pooled), or, with ``by_true_c``, per setting of the true
+    C as well (column ``true_c``: 100 graphs each at p = 10, 20)."""
     groups = defaultdict(list)
     for r in rows:
-        groups[(r["loss"], r["estimator"], r["c"], r["n"], r["p"])].append(r)
+        key = (r["loss"], r["estimator"], r["c"], r["n"], r["p"]) + ((r["c_choice"],) if by_true_c else ())
+        groups[key].append(r)
     out = []
-    for (loss, est, c, n, p), g in sorted(groups.items(), key=lambda kv: (
-            kv[0][0], n_key(kv[0][3]), kv[0][4], kv[0][2], estimator_key(kv[0][1]))):
+    for key, g in sorted(groups.items(), key=lambda kv: (
+            kv[0][0], n_key(kv[0][3]), kv[0][4], kv[0][2], estimator_key(kv[0][1]), kv[0][5:])):
+        loss, est, c, n, p = key[:5]
         row = {"loss": loss, "estimator": est, "c": c, "n": n, "p": p, "graphs": len(g)}
+        if by_true_c:
+            row["true_c"] = key[5]
         for col in REPORT:
             mean, se, _ = mean_se([r.get(col) for r in g])
             row[col], row[f"{col}_se"] = mean, se
@@ -292,7 +299,8 @@ def paired_table(rows: list[dict]) -> list[dict]:
     out = []
     for (loss, c, n, p, est), cell in sorted(by.items(), key=lambda kv: (
             kv[0][0], n_key(kv[0][2]), kv[0][3], kv[0][1], estimator_key(kv[0][4]))):
-        ref_est = "lasso-ml" if est.endswith("-ml") else "lasso"
+        ref_est = "lasso-ml" if est.endswith(("-ml", "sml")) else "lasso"   # the "-ml" cells and the
+        #                                                 100-start likelihood-refit searches (search-*-100sml)
         for ref_name, ref_key in (("same_c", (loss, c, n, p, ref_est)),
                                   ("dettling", (loss, "C2I", n, p, ref_est))):
             ref = by.get(ref_key)
@@ -376,12 +384,14 @@ def main() -> None:
     write(args.root / "campaign_per_dataset.csv", rows)
     table = means_table(rows)
     write(args.root / "campaign_means.csv", table)
+    write(args.root / "campaign_means_by_true_c.csv", means_table(rows, by_true_c=True))
     write(args.root / "campaign_paired.csv", paired_table(rows))
     print_means(table)
     cells = sorted({r["cell"] for r in rows})
     print(f"\n{len(rows)} rows from {len(cells)} cells; "
           f"{sum(r['seconds'] for r in rows) / 3600:.1f} CPU-hours")
-    print(f"wrote {args.root / 'campaign_per_dataset.csv'}, campaign_means.csv, campaign_paired.csv")
+    print(f"wrote {args.root / 'campaign_per_dataset.csv'}, campaign_means.csv, campaign_means_by_true_c.csv, "
+          f"campaign_paired.csv")
     if args.check_baseline:
         for line in check_baseline(rows, args.root / "campaign_baseline_check.txt"):
             print(line)

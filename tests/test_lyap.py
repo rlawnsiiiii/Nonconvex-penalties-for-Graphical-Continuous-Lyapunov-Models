@@ -5,7 +5,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from scipy.linalg import solve_continuous_lyapunov
+
 from gclm.lyapunov import (
+    SchurLyapunov,
     commutation_matrix,
     design_matrix,
     gram_matrix,
@@ -84,3 +87,32 @@ def test_design_matrix_matches_r(p):
         ("glmnet", "jsonlite"),
     )
     assert np.allclose(design_matrix(sigma), np.asarray(out["A"]), atol=1e-12)
+
+
+def test_schur_solves_match_scipy_for_symmetric_right_hand_sides():
+    """SchurLyapunov.solve and solve_adjoint against scipy, for the symmetric right-hand sides
+    the package uses (-C and dL/dSigma).  The output is symmetrised, so a non-symmetric right-hand
+    side is not supported (code review, 12 October 2026)."""
+    rng = np.random.default_rng(3)
+    for p in (1, 2, 5, 9):
+        m = rng.normal(size=(p, p))
+        np.fill_diagonal(m, -np.abs(m).sum(axis=1) - 0.3)
+        y = rng.normal(size=(p, p))
+        y = y + y.T
+        fac = SchurLyapunov(m)
+        np.testing.assert_allclose(fac.solve(y), solve_continuous_lyapunov(m, y), atol=1e-10)
+        np.testing.assert_allclose(fac.solve_adjoint(y), solve_continuous_lyapunov(m.T, y), atol=1e-10)
+
+
+def test_schur_stability_flag_near_the_boundary():
+    """The flag (largest diagonal entry of the real Schur form below zero) agrees with the
+    eigenvalues for matrices whose spectral abscissa lies within 1e-6 to 1e-2 of zero, on
+    either side, with real eigenvalues and complex pairs."""
+    rng = np.random.default_rng(4)
+    for _ in range(300):
+        p = int(rng.integers(2, 8))
+        a = rng.normal(size=(p, p))
+        shift = np.linalg.eigvals(a).real.max() + rng.choice([-1, 1]) * 10 ** rng.uniform(-6, -2)
+        m = a - shift * np.eye(p)
+        assert SchurLyapunov(m).stable == (np.linalg.eigvals(m).real.max() < 0)
+

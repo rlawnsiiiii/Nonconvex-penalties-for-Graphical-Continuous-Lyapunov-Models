@@ -1,6 +1,6 @@
 # Verdicts so far
 
-*As of 9 October 2026. The bottom line, the verdicts as a table, then the evidence for them figure by figure; the evidence is in the documents named in each row. "IS" is the
+*As of 12 October 2026. The bottom line, the verdicts as a table, then the evidence for them figure by figure; the evidence is in the documents named in each row. "IS" is the
 independent study (`../next_steps/021026/independent_study/independent_study_021026.md`), "031026"
 the combined note (`../next_steps/031026/next_steps_031026.md`), "campaign note"
 `../next_steps/051026/cluster_campaign_051026.md`, "S4" the campaign's results (`S4_campaign.md`).
@@ -61,11 +61,11 @@ S4 is the long version of rows 7 to 26; the earlier studies (S2, S3a, S3b, IS) c
 | 19 | **The nonconvex penalty is not what helps.** The adaptive lasso (weights from the dense end of the lasso path, convex) matches MCP dense → sparse in `max_f1` at $p = 10, 20$ (paired −0.010 … +0.024: MCP dense → sparse slightly ahead at $p = 10$, $n \ge 10^4$, the adaptive lasso ahead at $p = 20$) and pulls ahead with $p$ (+0.03 / +0.07 at $p = 50$, $n = 10^3$); it beats it in `aupr` (+0.07 … +0.14 at $p = 10, 20$, up to +0.18 at $p = 50$), in the graph selected by the score (+0.01 … +0.04) and after the search (0.00 … +0.01). LLA gains three quarters of dense → sparse at $p = 20$. | `twobytwo_aupr`, `by_p`; S4 §4 | settled for the direct loss |
 | 20 | **Dettling's eBIC penalty does not change the ranking; it is the better penalty where the BIC penalty is too weak and the score selects too many edges, and the worse one where it is not.** The ranking of the estimators is the same with either penalty everywhere. With the BIC penalty the score selects 1.2 to 3.3 times the true edges for the lasso at $n = 10^3$ with $C = 2I$, up to 5 times with the rescaled $C$, and the eBIC term ($\gamma = 1$) halves the excess; it gains up to +0.05 in $F_1$ at $p = 50$ and +0.01 to +0.02 at $p = 20$, $n \ge 10^4$, and loses up to 0.04 (lasso) and 0.02 (dense-start estimators) with $C = 2I$ at $n = 10^3$, $p \le 30$, where the BIC penalty is about right. $\gamma = 0.5$ sits between. The path decides the ranking, the penalty the level. | `bic_vs_ebic`, `by_p` (bottom row), `selection_checks` (right); S4 §5, §6a; `docs/SEARCH.md` §2a | revised 9 Oct |
 | 21 | **With the model exact, the score is right; with a wrong $C$ it is not.** The search started from the truth stays at it for `C_ID` at $n = \infty$ ($F_1$ 0.98 – 0.99) and leaves it in every misspecified setting (0.43 – 0.87). The best data-driven searches end 0.10 – 0.24 below the truth-started one. | `search_ceilings`, `by_true_c_search_f1`; S4 §5; 051026 §2 | settled |
-| 22 | **On the log-likelihood loss the dense → sparse MCP path does not beat the lasso in `max_f1` at finite $n$** (−0.05 … −0.07 with $C = 2I$; −0.00 and −0.03 with the rescaled $C$; +0.025 at $n = \infty$), though its `aupr` is better with the rescaled $C$ (+0.06 … +0.14). Its dense start is the exact fit $-\tfrac12 C\hat\Sigma^{-1}$, not the lasso's dense end, which is the likely reason. The log-likelihood lasso matches the direct-loss lasso, and the best estimators on either loss are the direct-loss dense-start ones (0.67 against 0.64 at $p = 10$, $n = 10^4$, rescaled $C$). | `loglik_p10`; S4 §6 | settled for the exact-fit start; the lasso-start variant not run |
+| 22 | **On the log-likelihood loss, the dense start from the exact fit does not beat the lasso; the dense start from the lasso does** (waves 3 and 7). MCP dense → sparse from the exact fit $-\tfrac12 C\hat\Sigma^{-1}$ (Varando & Hansen's start) loses in `max_f1` at finite $n$ (−0.05 … −0.07 with $C = 2I$; −0.00 and −0.03 with the rescaled $C$). Started from the log-likelihood lasso's dense end it wins, and so does the adaptive lasso: +0.092 / +0.104 at $p = 20$, $n = 10^4$ with the rescaled $C$ ($z$ 20, 22), +0.037 / +0.039 with $C = 2I$, +0.025 … +0.038 at $p = 10$ with the rescaled $C$; a loss of 0.01 … 0.02 at $n = 10^3$ with $C = 2I$, where the direct-loss versions tie. AUPR gains +0.08 … +0.26. The direct loss's verdicts 7, 19 and 23 hold on this loss too, and the start is what matters. | `loglik_wave7`, `loglik_p10`; S4 §6 | settled at $p = 10, 20$, $n \le 10^4$ |
 | 23 | **The gain grows with $p$ because the lasso deteriorates and the dense-start estimators hardly do.** At $n = 10^3$ the lasso's `max_f1` falls from 0.59 at $p = 10$ to 0.47 / 0.43 at $p = 50$ ($C = 2I$ / rescaled $C$), the adaptive lasso's to 0.55 / 0.57, MCP dense → sparse's to 0.52 / 0.50; the paired gains reach +0.044 / +0.065 (MCP) and +0.078 / +0.133 (adaptive), $z$ 18 … 34. The standard paths only close their deficit because the lasso comes down to them. $p > n$ ($p = 40, 50$) is no obstacle: the gains are largest there. The rescaled $C$ helps the dense-start estimators and hurts the lasso at large $p$. | `by_p`, `gain_by_p`; S4 §6a | settled |
-| 24 | **The pure search needs many sparse starting graphs, and the right kind.** At $p = 10$ with the rescaled $C$, 100 sparse starts instead of 10 lift it by +0.05 at $n \ge 10^4$, to within 0.02 of the lasso + search and 0.01 to 0.03 of the adaptive lasso + search, at 10 to 30 times the cost and still rising at $r = 100$; at $n = 10^3$ by +0.01 only, 0.03 to 0.04 behind. 100 uniform starts (Nowzohour et al.'s recipe) end 0.06 to 0.15 below 10 sparse ones: in this class a start of density one half descends into a dense local optimum. | `restarts`; S4 §4a | settled at $p = 10$; $p = 20$ not run |
-| 25 | **The least-squares refit is a valid stand-in for the likelihood refit behind the score.** With the maximised likelihood behind the score, the selected and the searched graphs of the lasso, MCP dense → sparse and the adaptive lasso move by at most 0.01 ($p = 10$, $n = 10^4$, both $C$), within one standard error, at 30 to 180 times the cost. | `selection_checks` (left); S4 §5 | settled |
-| 26 | **The eBIC term inside the search helps at $p = 20$.** Dettling's $4\gamma|E|\log p$ with $\gamma = 1$ in the selection and the search adds +0.016 to +0.022 in $F_1$ to every estimator at $p = 20$, $n = 10^4$ ($z$ 6 to 9; 60 → 51 edges for 47 true), nothing at $p = 10$, and leaves the ranking unchanged; in the pure search it is a wash, and at $n = 10^3$ it pulls the truth-started search away from the truth. With verdict 20, the penalty to use from $p = 20$ on. | `selection_checks` (right); S4 §5 | settled at $n = 10^4$ |
+| 24 | **The pure search needs many sparse starting graphs, and the right kind.** At $p = 10$ with the rescaled $C$, 100 sparse starts instead of 10 lift it by +0.05 at $n \ge 10^4$, and 300 (Améndola et al.'s number) by +0.06 / +0.07, to 0.593 / 0.605: level with the lasso + search (0.597 / 0.592) and within 0.015 / 0.003 of the adaptive lasso + search, at about 100 times their cost and not quite saturated even then (the best of 300 is reached within 100 starts for 53 … 57 % of the graphs). At $n = 10^3$ +0.015 from 10 to 300, 0.02 … 0.04 behind. 100 uniform starts (Nowzohour et al.'s recipe) end 0.06 … 0.15 below 10 sparse ones: in this class a start of density one half descends into a dense local optimum. With the likelihood refit instead of least squares (wave 8 (c), 27 graphs so far) the 100-start search reaches the same $F_1$ as with least squares. | `restarts`; S4 §4a | settled at $p = 10$; $p = 20$ not run |
+| 25 | **The least-squares refit is a valid stand-in for the likelihood refit behind the score.** With the maximised likelihood behind the score, on every stored path of waves 1, 3 and 7 at $n = 10^4$ (27 cells, both losses, $p = 10$ and 20), the selected graph has 0.1 … 4.6 fewer edges and an $F_1$ higher by +0.000 … +0.011 (largest on the log-likelihood paths at $p = 20$ with the rescaled $C$, $z$ 5 … 7), the searched graph by −0.000 … +0.010 ($p = 10$); the ranking of the estimators is the same in every cell. It costs 30 … 180 times more. | `refit_n1e4`, `selection_checks` (left); S4 §5 | settled at $n = 10^4$; $n = 10^3$ queued |
+| 26 | **The eBIC term inside the search helps at $p = 20$ for $n \ge 10^4$, and hurts at $n = 10^3$.** Dettling's $4\gamma|E|\log p$ with $\gamma = 1$ in the selection and the search, on every wave 1 cell (wave 6): after the search +0.016 … +0.022 in $F_1$ for every estimator at $p = 20$, $n = 10^4$ and $\infty$ (60 → 51 edges for 47 true); at $p = 10$ ±0.007 for $n \ge 10^4$; at $n = 10^3$ a loss of 0.01 … 0.03 at both $p$ (largest for the lasso with $C = 2I$), where the term drops true edges with small weights. In the pure search at $p = 20$ it adds +0.019 at $n = 10^4$. The ranking never changes. With verdict 20, the penalty to use from $p = 20$ on at $n \ge 10^4$. | `bic_vs_ebic`, `selection_checks` (right), `../runs/campaign/figures_ebic1/`; S4 §5 | settled |
 
 ## The figures
 
@@ -81,9 +81,11 @@ One line on how to read each (`../runs/campaign/figures/`; drawn by
 | `selection_p20` | $p = 20$, rescaled $C$: oracle $\lambda$, selected graph (BIC penalty), after the search | selection by the score keeps the ranking; the search lifts the lasso most |
 | `orientation_p20` | what the selected graphs (BIC penalty) consist of: correct, hedged, reversed, false edges | the standard path's loss is reversed edges; the lasso hedges |
 | `search_ceilings` | the search from three estimators' graphs (coloured), from 10 random starts (grey) and from the truth (dark) | the random-start search is below, the truth-started one far above everything |
-| `restarts` | the pure search with $r = 1 \dots 100$ starting graphs; rows: uniform / sparse draw; columns: $n$ | dashed: best of the first $r$ random starts; solid: plus the empty graph; dotted: wave 2's 10 starts + empty; blue / green: lasso / adaptive lasso + search. Sparse starts reach the blue line at $n \ge 10^4$, uniform ones never |
+| `restarts` | the pure search with $r = 1 \dots 100$ (and 300) starting graphs; rows: sparse 100, sparse 100 with the likelihood refit, sparse 300, uniform 100; columns: $n$ | dashed: best of the first $r$ random starts; solid: plus the empty graph; dotted: wave 2's 10 starts + empty; blue / green: lasso / adaptive lasso + search. Sparse starts reach the blue line at $n \ge 10^4$, uniform ones never |
 | `selection_checks` | left: least-squares (grey) against likelihood refit (brown) behind the score; right: the eBIC term $4\gamma\lvert E\rvert\log p$ in the search, $\gamma = 0$ (grey, BIC penalty), 0.5, 1 (purple) | left: the markers coincide; right: purple above grey at $p = 20$ only |
-| `loglik_p10` | the log-likelihood loss at $p = 10$ | the dense → sparse MCP (filled orange) is not above the lasso at finite $n$ |
+| `loglik_p10` | the log-likelihood loss at $p = 10$, wave 3: lasso and MCP in both orders, dense → sparse from the exact fit | the dense → sparse MCP (filled orange) is not above the lasso at finite $n$ |
+| `loglik_wave7` | the log-likelihood loss with the dense starts from the lasso (wave 7), $p = 10, 20$, $n = 10^3, 10^4$; rows: oracle $F_1$, AUPR, selected graph, after the search | the crosses (MCP from the lasso) and green triangles (adaptive lasso) lie above the lasso wherever the direct-loss versions do; the filled squares (MCP from the exact fit) do not |
+| `refit_n1e4` | the likelihood refit minus the least-squares refit, paired, every cell of wave 8 (b) at $n = 10^4$ | every point is within +0.011 of zero |
 
 ## The evidence, theme by theme
 
@@ -255,12 +257,13 @@ search away from the truth, because at small $n$ it penalises true edges with sm
 
 ![](../runs/campaign/figures/restarts.png)
 
-*The greedy search without a path, $p = 10$, rescaled $C$, 400 graphs per panel. Columns:
-$n = 10^3, 10^4, \infty$. Rows: the starting graphs drawn uniformly over all directed graphs
-(every entry with probability $\tfrac12$, the recipe of Nowzohour et al. 2017 adapted to this
-class) or sparsely (edge probability $d \sim U[0, 0.3]$ per graph, the repository's recipe). The
-$x$-axis is $r$, the number of randomly drawn starting graphs used; the $y$-axis the $F_1$ of the
-graph that the best-scoring of those starts ends at.*
+*The greedy search without a path, $p = 10$, 400 graphs per panel (27 in the likelihood-refit
+panel). Columns: $n = 10^3, 10^4, \infty$. Rows: 100 sparse starting graphs (edge probability
+$d \sim U[0, 0.3]$ per graph, the repository's recipe), rescaled $C$; the same with the model on
+every graph fitted by maximum likelihood (wave 8 (c), $C = 2I$); 300 sparse starts (wave 6);
+100 uniform starts (every entry with probability $\tfrac12$, the recipe of Nowzohour et al. 2017
+adapted to this class). The $x$-axis is $r$, the number of randomly drawn starting graphs used;
+the $y$-axis the $F_1$ of the graph that the best-scoring of those starts ends at.*
 
 **How to read the lines.** The **dashed grey** curve is the best of the first $r$ random starts
 alone. The **solid dark** curve is the same with the empty graph added as one more start, which is
@@ -270,39 +273,52 @@ construction the solid sparse curve meets it at $r = 10$. The **blue** and **gre
 lasso and the adaptive lasso with the search on the same graphs, the data-driven methods the
 pure search competes with.
 
-**What it shows.** Bottom row, $n = 10^4$ and $\infty$: the solid curve keeps climbing past $r = 10$
-and reaches 0.581 and 0.589 at $r = 100$, within 0.016 and 0.003 of the lasso + search and 0.03 and
-0.01 below the adaptive lasso + search, and it has not flattened; the best score of 100 starts is
-reached within the first 50 for only 61 to 64 % of the graphs. So at these sample sizes the
-10-start pure search of wave 2 was limited by its starts, and with the 300 of Améndola et al. it
-would probably match the lasso-based methods, at 10 to 30 times their cost (14 CPU-h per cell
-against 0.4 to 4). Bottom left, $n = 10^3$: the curve flattens at $r \approx 20$ at 0.48, below
-both lines (0.511, 0.527); more starts do not help there. Top row: 100 uniform starts end 0.06 to
-0.15 below 10 sparse ones (dashed curve), and the solid curve is high only because the empty graph
-wins; a start with 45 edges for 22 true ones descends into a dense local optimum. That is verdict
-24: the pure search needs many sparse starting graphs, and the recipe of the starts matters more
-than their number. The "search-pure" rows elsewhere on this page remain the 10-start version, a
-lower bound.
+**What it shows.** Top row, $n = 10^4$ and $\infty$: the solid curve keeps climbing past $r = 10$
+and reaches 0.581 and 0.589 at $r = 100$, and it has not flattened. Third row, 300 starts: it goes
+on to 0.593 and 0.605, level with the lasso + search (0.597, 0.592) and within 0.015 and 0.003 of
+the adaptive lasso + search; the best of 300 is reached within the first 100 starts for only 53 to
+57 % of the graphs, so even 300 are not quite enough. The cost is about 40 CPU-h per cell against
+0.4 to 4 for the lasso-based searches. At $n = 10^3$ (left column) the curves flatten at
+$r \approx 20$ near 0.48 to 0.49, below both lines (0.511, 0.527); more starts do not help there.
+Second row: with the likelihood refit, on the 27 graphs finished so far, the best of 100 starts
+ends at the same $F_1$ as the least-squares search on those graphs (0.538 against 0.533), 0.04 to
+0.05 below the lasso-based searches; the fit behind the score does not change where the random
+starts get. Bottom row: 100 uniform starts end 0.06 to 0.15 below 10 sparse ones (dashed curve),
+and the solid curve is high only because the empty graph wins; a start with 45 edges for 22 true
+ones descends into a dense local optimum. That is verdict 24: the pure search needs many sparse
+starting graphs, and the recipe of the starts matters more than their number. The "search-pure"
+rows elsewhere on this page remain the 10-start version, a lower bound.
 
 ### F. The other losses (verdicts 13, 14, 18, 22)
 
+![](../runs/campaign/figures/loglik_wave7.png)
+
+*The log-likelihood loss with the dense-start estimators (wave 7, 12 October), 400 graphs per
+cell, $p = 10$ and 20, $n = 10^3$ and $10^4$, both $C$. Rows: $F_1$ at the oracle $\lambda$, AUPR,
+$F_1$ of the selected graph (BIC penalty), $F_1$ after the search. Orange crosses: MCP dense →
+sparse started from the lasso's dense end; filled orange squares: the same started from the exact
+fit (wave 3); hollow squares: MCP sparse → dense; green: the adaptive lasso.*
+
+**What it shows.** Wave 3 had found (verdict 22, first half) that on this loss MCP dense → sparse
+is not above the lasso at finite $n$. Its dense start was the exact fit $-\tfrac12 C\hat\Sigma^{-1}$,
+as in Varando & Hansen, a fully dense matrix with no preference for sparsity. Wave 7 runs the two
+dense starts that work on the direct loss: MCP from the log-likelihood lasso's dense end
+(crosses) and the adaptive lasso (green). Both lie above the lasso wherever their direct-loss
+versions do: at $p = 20$, $n = 10^4$ by +0.09 and +0.10 in oracle $F_1$ with the rescaled $C$ and
++0.04 with $C = 2I$, at $p = 10$ by +0.04 with the rescaled $C$, and they lose by 0.01 to 0.02 at
+$n = 10^3$ with $C = 2I$, where the direct-loss versions tie. The filled squares, from the exact
+fit, stay below the lasso everywhere. So the start, not the loss, is what matters (verdict 22,
+second half); the standard path (hollow squares) loses by 0.11 to 0.16 on this loss too. After
+the search (bottom row) the lasso catches up at $p = 20$, $n = 10^4$, as on the direct loss
+(verdict 9). With the right start the log-likelihood loss is slightly better than the direct loss
+at $p = 20$ (adaptive lasso 0.716 against 0.666 with the rescaled $C$) at 3 to 10 times the cost
+per path; at $p = 10$ the two losses are within 0.01. Verdict 14, that covariance-loss fits are
+machine-dependent for single graphs, is why only means are reported for this loss.
+
 ![](../runs/campaign/figures/loglik_p10.png)
 
-*The log-likelihood loss, $p = 10$, 400 graphs per cell: the lasso and MCP in both path orders,
-both $C$; $F_1$ at the oracle $\lambda$.*
-
-**What it shows.** On this loss the dense → sparse MCP path (filled orange) is not above the lasso
-at finite $n$ (−0.05 to −0.07 with $C = 2I$, −0.00 to −0.03 with the rescaled $C$) and only at
-$n = \infty$ with the rescaled $C$ (+0.025); its precision–recall area is better with the rescaled $C$
-at every $n$, so its path ranks the entries well but its best single graph is not better. The
-likely reason (S4 §6): this path starts from the exact fit $-\tfrac12 C\hat\Sigma^{-1}$, as in Varando
-& Hansen, not from the lasso's dense end, which already favours sparse solutions; the variant with
-the lasso start is not run (open item 1). The lasso in both orders is within 0.02 of itself
-(verdict 18), and the log-likelihood lasso is within 0.01 of the direct-loss lasso (verdict 13
-qualified: it was the best of the three losses for the lasso in S2, but the direct-loss dense-start
-estimators beat everything on either loss, 0.67 against 0.64 at $n = 10^4$ with the rescaled $C$).
-Verdict 14, that covariance-loss fits are machine-dependent for single graphs, is why only means
-are reported for this loss.
+*Wave 3: the log-likelihood loss at $p = 10$, the lasso and MCP in both path orders, dense → sparse
+from the exact fit; $F_1$ at the oracle $\lambda$, three sample sizes.*
 
 ## The methods side by side
 
@@ -379,9 +395,9 @@ Varando & Hansen (2020) estimate $C$ instead.
 *The campaign is planned in [`../next_steps/051026/cluster_campaign_051026.md`](../next_steps/051026/cluster_campaign_051026.md)
 and reported in [`S4_campaign.md`](S4_campaign.md).*
 
-1. The log-likelihood MCP path started from the log-likelihood lasso's dense end (S4 §6; one
-   option in `covloss_path`, about 60 CPU-h): does the gain of the direct loss appear on this
-   loss too once the start is the same?
+1. Settled (verdict 22, wave 7): the log-likelihood MCP path started from the log-likelihood
+   lasso's dense end, and the adaptive lasso, gain on this loss as on the direct loss. Not run:
+   $p = 30$ and $n = \infty$ on this loss.
 2. Why the score with the BIC penalty selects more edges with the rescaled $C$ than with $C = 2I$ at
    large $p$ (S4 §6a). The eBIC term in the search removes part of the over-selection at $p = 20$
    (verdict 26); whether it does at $p = 40, 50$ was not run.
@@ -398,9 +414,9 @@ and reported in [`S4_campaign.md`](S4_campaign.md).*
    for the pure search. Is its gap of 0.02 to 0.07 to the lasso-based starts a matter of too few
    starts? Found on the way: with the rescaled $C$ the empty start is dead (score $= +\infty$) in
    6 to 25 % of the graphs (S4 §4a).
-8. Settled at $n = 10^4$ (verdict 26); wave 6 (`cluster/plan_091026.txt`, not yet submitted)
-   rescores every wave 1 cell with the eBIC term inside the search, so that every figure exists
-   with that penalty (`runs/campaign/figures_ebic1/`), and runs 300 starting graphs for the pure
-   search. Wave 5c: the eBIC term ($4\gamma|E|\log p$, $\gamma = 0.5,
-   1$) inside the selection and the search, next to the BIC penalty on the same path, and in the
-   pure search. So far it was used offline on the path only (verdict 20: $\pm 0.03$ at $\gamma = 1$).
+8. Settled (verdict 26, wave 6): the eBIC term inside the selection and the search on every
+   wave 1 cell, at three $n$; every figure exists with that penalty in
+   `runs/campaign/figures_ebic1/`. 300 starting graphs for the pure search: verdict 24.
+9. Wave 8 (b) at $n = 10^3$ (the likelihood refit on the stored paths) and wave 8 (c) for the
+   rescaled $C$ and at $n = 10^3$ (the 100-start search with the likelihood refit) are queued on
+   the cluster; verdicts 24 and 25 are stated for what has arrived.

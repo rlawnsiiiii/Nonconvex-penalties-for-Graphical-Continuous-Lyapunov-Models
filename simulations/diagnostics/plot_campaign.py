@@ -71,6 +71,7 @@ STYLE = {
     "MCP": ("#eb6834", "s", False, "MCP, sparse → dense"),
     "SCAD": ("#1baf7a", "^", False, "SCAD, sparse → dense"),
     "MCP-up": ("#eb6834", "s", True, "MCP, dense → sparse"),
+    "MCP-up-lasso": ("#eb6834", "P", True, "MCP, dense → sparse from the lasso"),
     "SCAD-up": ("#1baf7a", "^", True, "SCAD, dense → sparse"),
     "MCP-lla": ("#e87ba4", "D", True, "MCP by LLA"),
     "adaptive": ("#008300", "v", True, "adaptive lasso"),
@@ -291,6 +292,97 @@ def fig_loglik(means, out, ests=("lasso", "lasso-up", "MCP", "MCP-up")):
     save(fig, out, "loglik_p10")
 
 
+def fig_loglik_wave7(means, out, ests=("lasso", "MCP", "MCP-up", "MCP-up-lasso", "adaptive"),
+                     metrics=("max_f1", "aupr", "bic_f1", "search_f1")):
+    """Wave 7 with wave 3: the log-likelihood loss at p = 10 and 20, both C, n = 1e3 and 1e4;
+    one row per metric, one column per (p, C).  At p = 10 the lasso, MCP and MCP-up come from
+    wave 3 (selected graph, no search), the two new estimators from wave 7."""
+    sel = [r for r in means if r["loss"] == "loglik" and r["n"] in ("1000", "1e4")]
+    if not any(r["estimator"] in ("MCP-up-lasso", "adaptive") for r in sel):
+        return
+    cols = [(p, c) for p in ("10", "20") for c in ("C2I", "Cresc")]
+    ns = ("1000", "1e4")
+    xs = np.arange(len(ns))
+    fig, axes = plt.subplots(len(metrics), len(cols), figsize=(3.0 * len(cols), 2.7 * len(metrics)),
+                             sharex=True, sharey="row", squeeze=False)
+    for a, metric in enumerate(metrics):
+        for b, (p, c) in enumerate(cols):
+            ax = axes[a][b]
+            style_axes(ax)
+            for k, est in enumerate(ests):
+                rr = {r["n"]: r for r in sel if r["p"] == p and r["c"] == c and r["estimator"] == est}
+                ys = [f(rr[n][metric]) if n in rr else math.nan for n in ns]
+                if all(math.isnan(y) for y in ys):
+                    continue
+                series(ax, xs + dodge(k, len(ests)), ys, est,
+                       err=[f(rr[n][metric + "_se"]) if n in rr else math.nan for n in ns])
+            ax.set_xticks(xs)
+            ax.set_xticklabels([N_LABEL[n] for n in ns])
+            if a == 0:
+                ax.set_title(f"p = {p}, {'C = 2I' if c == 'C2I' else 'rescaled C'}", loc="left", fontsize=9, color=INK)
+            if a == len(metrics) - 1:
+                ax.set_xlabel("sample size n", fontsize=9, color=INK_2)
+        axes[a][0].set_ylabel(METRIC_NAME[metric], fontsize=8.5, color=INK_2)
+    fig.suptitle("log-likelihood loss", x=0.01, ha="left", fontsize=9.5, color=INK_2)
+    fig.tight_layout()
+    legend(fig, ests, ncol=5)
+    save(fig, out, "loglik_wave7")
+
+
+def fig_refit(rows, out, n="1e4"):
+    """Wave 8 (b) with wave 5a: the likelihood refit against the least-squares refit behind the
+    score, graph by graph.  For every estimator with both an "-ml" cell and its plain cell at the
+    same loss, C, p and n: the paired difference (ML minus LS) in F1 of the selected graph and,
+    where both have a search, after the search; one panel per loss and p."""
+    pairs = []
+    by = defaultdict(dict)
+    for r in rows:
+        by[(r["loss"], r["c"], r["p"], r["n"], r["estimator"])][(r["k"], r["c_choice"], r["rep"])] = r
+    keys = sorted(k for k in by if k[4].endswith("-ml") and (k[0], k[1], k[2], k[3], k[4][:-3]) in by)
+    for loss, c, p, nn, est in keys:
+        if nn != n:
+            continue
+        ml, ls = by[(loss, c, p, nn, est)], by[(loss, c, p, nn, est[:-3])]
+        ids = [g for g in ml if g in ls]
+        for metric in ("bic_f1", "search_f1"):
+            d = np.array([f(ml[g].get(metric, math.nan)) - f(ls[g].get(metric, math.nan)) for g in ids])
+            d = d[~np.isnan(d)]
+            if len(d) > 1:
+                pairs.append({"loss": loss, "c": c, "p": p, "est": est[:-3], "metric": metric,
+                              "diff": d.mean(), "se": d.std(ddof=1) / math.sqrt(len(d)), "n_pairs": len(d)})
+    if not pairs:
+        return
+    panels = sorted({(q["loss"], q["p"]) for q in pairs}, key=lambda x: (x[0], int(x[1])))
+    fig, axes = plt.subplots(1, len(panels), figsize=(3.4 * len(panels) + 0.4, 3.4), sharey=True, squeeze=False)
+    for b, (loss, p) in enumerate(panels):
+        ax = axes[0][b]
+        style_axes(ax)
+        ests = [e for e in ("lasso", "lasso-up", "MCP", "MCP-up", "MCP-up-lasso", "adaptive")
+                if any(q["est"] == e and (q["loss"], q["p"]) == (loss, p) for q in pairs)]
+        for k, c in enumerate(("C2I", "Cresc")):
+            for metric, mk, mfc in (("bic_f1", "o", "none"), ("search_f1", "o", None)):
+                pts = [(ests.index(q["est"]), q["diff"], q["se"]) for q in pairs
+                       if (q["loss"], q["p"], q["c"], q["metric"]) == (loss, p, c, metric)]
+                if not pts:
+                    continue
+                col = INK_2 if c == "C2I" else "#b5651d"
+                ax.errorbar([x + (k - 0.5) * 0.18 for x, _, _ in pts], [y for _, y, _ in pts],
+                            yerr=[e for _, _, e in pts], ls="none", marker=mk, ms=6, color=col,
+                            mfc=col if mfc is None else "none", mew=1.3, capsize=2)
+        ax.axhline(0, color=GREY, lw=0.8, zorder=1)
+        ax.set_xticks(range(len(ests)))
+        ax.set_xticklabels([STYLE[e][3] for e in ests], fontsize=7.5, rotation=20, ha="right")
+        ax.set_title(f"{loss} loss, p = {p}, n = {N_LABEL[n]}", loc="left", fontsize=9, color=INK)
+    axes[0][0].set_ylabel("F₁ with the likelihood refit minus with the least-squares refit", fontsize=8.5, color=INK_2)
+    handles = [Line2D([], [], ls="none", marker="o", color=INK_2, mfc="none", label="C = 2I, selected graph"),
+               Line2D([], [], ls="none", marker="o", color=INK_2, label="C = 2I, after the search"),
+               Line2D([], [], ls="none", marker="o", color="#b5651d", mfc="none", label="rescaled C, selected graph"),
+               Line2D([], [], ls="none", marker="o", color="#b5651d", label="rescaled C, after the search")]
+    fig.tight_layout()
+    fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=4, frameon=False, fontsize=7.5)
+    save(fig, out, f"refit_n{n}")
+
+
 PS = ("10", "15", "20", "25", "30", "40", "50")
 P_EST = ("lasso", "MCP", "SCAD", "MCP-up", "SCAD-up", "adaptive")
 
@@ -360,40 +452,69 @@ def fig_gain_by_p(paired, out, ests=("MCP", "SCAD", "MCP-up", "SCAD-up", "adapti
     save(fig, out, "gain_by_p")
 
 
-def fig_restarts(root: Path, means, out, kind_filter=None, name="restarts"):
-    """Wave 5b: the best of the first r randomly drawn starting graphs, from campaign_restarts.csv
-    (cells with per-start supports only, i.e. wave 5), against the 10 starts of wave 2 and
-    the lasso-based search on the same graphs.  Rows: how the starts are drawn; columns: n."""
+def fig_restarts(root: Path, means, out, kind_filter=None, name="restarts", rows_filter=None):
+    """Waves 5b and 8 (c): the best of the first r randomly drawn starting graphs, from
+    campaign_restarts.csv (one curve per cell), against the 10 starts of wave 2 and the lasso-based
+    search.  Rows: one per kind of cell (how the starts are drawn, their number, the refit);
+    columns: n.  The reference lines (wave 2, lasso + search, adaptive lasso + search) are means
+    over the same graphs as the curve when the cell holds a subset of the campaign's graphs."""
     path = root / "campaign_restarts.csv"
     if not path.exists():
         return
     rows = [r for r in read(path) if r["f1_mean"] not in ("", "nan")]
-    cells = sorted({(r["starts"], r["p"], r["c"], r["n"]) for r in rows})
+    if rows_filter is not None:
+        rows = [r for r in rows if rows_filter(r)]
+    cells = sorted({r["cell"] for r in rows})
     if not cells:
         return
-    kinds = sorted({k for k, _, _, _ in cells if kind_filter is None or k in kind_filter},
-                   reverse=True)                                         # sparse before uniform
-    ns = [n for n in NS if any(c[3] == n for c in cells)]
+
+    def kind_of(cell):                      # "sparse, 100 starts", "sparse, 300 starts", "sparse, 100 starts, likelihood refit"
+        r = next(x for x in rows if x["cell"] == cell)
+        return (f"{r['starts']}, {r['R']} starts" + (", likelihood refit" if "ml" in cell.split("_")[0] else ""))
+
+    kinds = sorted({kind_of(c) for c in cells if kind_filter is None or kind_of(c).split(",")[0] in kind_filter})
+    ns = [n for n in NS if any(r["n"] == n for r in rows)]
     fig, axes = plt.subplots(len(kinds), len(ns), figsize=(3.6 * len(ns) + 0.6, 3.2 * len(kinds)),
                              sharey=True, squeeze=False)
+    per_dataset = None
     for a, kind in enumerate(kinds):
         for b, n in enumerate(ns):
             ax = axes[a][b]
             style_axes(ax)
-            sel = [c for c in cells if c[0] == kind and c[3] == n]
+            sel = [c for c in cells if kind_of(c) == kind and c.endswith(f"_n{n}")]
             if not sel:
                 ax.set_visible(False)
                 continue
-            _, p, c, _ = sel[0]
-            rr = [r for r in rows if (r["starts"], r["p"], r["c"], r["n"]) == sel[0]]
+            cell = sel[0]
+            if len(sel) > 1:
+                print(f"fig_restarts: {len(sel)} cells of kind '{kind}' at n = {n}; drawing {cell}")
+            rr = [r for r in rows if r["cell"] == cell]
+            p, c = rr[0]["p"], rr[0]["c"]
+            n_graphs = int(rr[0]["n_graphs"])
             for with_empty, col, ls, label in ((0, GREY, "--", "best of the first r random starts"),
                                                (1, INK_2, "-", "the same plus the empty graph")):
                 pts = sorted((int(r["r"]), f(r["f1_mean"]), f(r["f1_se"])) for r in rr
                              if r["with_empty"] == str(with_empty))
                 ax.errorbar([x for x, _, _ in pts], [y for _, y, _ in pts], yerr=[e for _, _, e in pts],
                             color=col, ls=ls, lw=1.6, marker="o", ms=3.5, capsize=2, label=label, zorder=3)
-            ref = {r["estimator"]: f(r["search_f1"]) for r in means
-                   if r["p"] == p and r["c"] == c and r["n"] == n and r["loss"] == "direct"}
+            # the reference lines: over all 400 graphs when the cell has them, else over the
+            # cell's own graphs (wave 8 (c) runs 2 replicates)
+            ref = {}
+            if n_graphs >= 400:
+                ref = {r["estimator"]: f(r["search_f1"]) for r in means
+                       if r["p"] == p and r["c"] == c and r["n"] == n and r["loss"] == "direct"}
+            else:
+                if per_dataset is None and (root / "campaign_per_dataset.csv").exists():
+                    per_dataset = read(root / "campaign_per_dataset.csv")
+                if per_dataset:
+                    ids = {(r["k"], r["c_choice"], r["rep"]) for r in per_dataset if r["cell"] == cell}
+                    for est in ("search-pure", "lasso", "adaptive"):
+                        v = [f(r["search_f1"]) for r in per_dataset
+                             if r["loss"] == "direct" and r["p"] == p and r["c"] == c and r["n"] == n
+                             and r["estimator"] == est and (r["k"], r["c_choice"], r["rep"]) in ids]
+                        v = [x for x in v if not math.isnan(x)]
+                        if v:
+                            ref[est] = float(np.mean(v))
             for est, label in (("search-pure", "wave 2: 10 sparse starts + empty"),
                                ("lasso", "lasso + search"), ("adaptive", "adaptive lasso + search")):
                 if est in ref and not math.isnan(ref[est]):
@@ -402,9 +523,11 @@ def fig_restarts(root: Path, means, out, kind_filter=None, name="restarts"):
                     if b == 0:
                         ax.annotate(label, (1.05, ref[est]), fontsize=7, color=STYLE[est][0], va="bottom")
             ax.set_xscale("log")
-            ax.set_xticks([1, 3, 10, 30, 100])
-            ax.set_xticklabels(["1", "3", "10", "30", "100"])
-            ax.set_title(f"{kind} starts, p = {p}, {C_NAME[c]}, n = {N_LABEL.get(n, n)}",
+            ticks = [1, 3, 10, 30, 100] + ([300] if int(rr[0]["R"]) >= 300 else [])
+            ax.set_xticks(ticks)
+            ax.set_xticklabels([str(x) for x in ticks])
+            ax.set_title(f"{kind}: p = {p}, {C_NAME[c]}, n = {N_LABEL.get(n, n)}"
+                         + (f" ({n_graphs} graphs)" if n_graphs < 400 else ""),
                          loc="left", fontsize=8.5, color=INK)
             if a == len(kinds) - 1:
                 ax.set_xlabel("r = randomly drawn starting graphs", fontsize=9, color=INK_2)
@@ -489,16 +612,18 @@ def apply_rule(records: list[dict], rule: str) -> list[dict]:
         r = dict(r)
         if r.get("estimator") in ("search-pure", "search-truth"):
             continue
-        if r.get("estimator", "").endswith("-e1"):
+        renamed = r.get("estimator", "").endswith("-e1")     # scored with the eBIC penalty already
+        if renamed:
             r["estimator"] = r["estimator"][:-3]
-        for key in list(r):
-            if key.startswith("ebic1_search_"):
-                r[key.replace("ebic1_search_", "search_", 1)] = r[key]
-            elif key.startswith("ebic1_"):
-                r[key.replace("ebic1_", "bic_", 1)] = r[key]
-        for key in list(r):
-            if key.startswith("search_") and "ebic1_" + key not in r:
-                r[key] = ""                                   # no rescored search for this cell
+        else:
+            for key in list(r):
+                if key.startswith("ebic1_search_"):
+                    r[key.replace("ebic1_search_", "search_", 1)] = r[key]
+                elif key.startswith("ebic1_"):
+                    r[key.replace("ebic1_", "bic_", 1)] = r[key]
+            for key in list(r):
+                if key.startswith("search_") and "ebic1_" + key not in r:
+                    r[key] = ""                               # no rescored search for this cell
         out.append(r)
     return out
 
@@ -612,6 +737,10 @@ def main() -> None:
     fig_orientation(rows, out)
     fig_search(means, out)
     fig_loglik(means, out)
+    fig_loglik_wave7(means, out)
+    if args.rule == "bic":
+        for n in ("1000", "1e4"):
+            fig_refit(rows, out, n)
     fig_by_p(means, out)
     fig_gain_by_p(paired, out)
     if args.rule == "bic":                 # the checks of the rule are rule-independent

@@ -191,3 +191,17 @@ def test_direct_loss_score_needs_the_least_squares_refit(cycle):
         Scorer(sigma, C5, 1000, "loglik", score="direct")
     with pytest.raises(ValueError):
         Scorer(sigma, C5, 1000, "direct", score="rss")
+
+
+def test_simple_graphs_only_when_two_cycles_are_not_allowed(cycle):
+    """allow_two_cycles=False (the simple graphs of Amendola et al.): random starts never hold
+    both directions of a pair, and the search from a start full of 2-cycles ends at a graph
+    without one (code review, 12 October 2026)."""
+    rng = np.random.default_rng(5)
+    for _ in range(50):
+        s = random_support(6, rng, 0.9, allow_two_cycles=False)
+        assert not (s & s.T).any() and not s.diagonal().any()
+    m, sigma, truth = cycle
+    start = truth | truth.T                       # every true edge in both directions
+    res = greedy_search(sigma, C5, 1000, start, allow_two_cycles=False)
+    assert not (res.support & res.support.T).any()

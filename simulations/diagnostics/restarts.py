@@ -43,7 +43,7 @@ from run_s1_shard import unpack_supports  # noqa: E402
 #: (search100s_..., search100u_...), and 100 sparse starts with the likelihood refit (search100sml_...)
 CELL = re.compile(r"^search(?P<variant>[0-9]+[su](?:ml)?)?_p(?P<p>[0-9]+)_(?P<c>C2I|Cresc)_n(?P<n>[0-9e]+|inf)$")
 GRID = (1, 2, 3, 5, 10, 20, 30, 50, 100)
-COLUMNS = ("cell", "p", "c", "n", "starts", "R", "r", "with_empty", "n_graphs", "f1_mean", "f1_se",
+COLUMNS = ("cell", "p", "c", "n", "true_c", "starts", "R", "r", "with_empty", "n_graphs", "f1_mean", "f1_se",
            "score_reached", "empty_dead")
 
 
@@ -71,7 +71,8 @@ def load_cell(folder: Path) -> list[dict]:
             m_true = np.zeros((p, p))
             m_true[d["m_true_i"][i], d["m_true_j"][i]] = d["m_true_v"][i]
             scores = np.asarray(d["pure_scores"][i], float)
-            g = {"p": p, "scores": scores, "m_true": m_true}
+            g = {"p": p, "scores": scores, "m_true": m_true,
+                 "true_c": str(d["c_choice_names"][int(d["c_choice"][i])])}
             if "m_pure_starts_support" in d.files:
                 g["ends"] = unpack_supports(d["m_pure_starts_support"][i], len(scores), p)
             if blocks == 1:
@@ -84,7 +85,7 @@ def load_cell(folder: Path) -> list[dict]:
         if any(b not in parts for b in range(parts["blocks"])):
             continue                                   # a block of this graph is missing
         order = [parts[b] for b in range(parts["blocks"])]
-        g = {"p": order[0]["p"], "m_true": order[0]["m_true"],
+        g = {"p": order[0]["p"], "m_true": order[0]["m_true"], "true_c": order[0]["true_c"],
              "scores": np.concatenate([x["scores"] for x in order])}
         if all("ends" in x for x in order):
             g["ends"] = np.concatenate([x["ends"] for x in order])
@@ -135,7 +136,10 @@ def main() -> None:
         rows = curves(graphs, restarts, args.grid)
         meta = {"cell": folder.name, "p": int(m["p"]), "c": m["c"], "n": m["n"], "starts": starts,
                 "R": restarts}
-        out += [{**meta, **row} for row in rows]
+        out += [{**meta, "true_c": "all", **row} for row in rows]          # the four settings pooled
+        for setting in sorted({g["true_c"] for g in graphs}):              # and one row set per setting
+            sub = [g for g in graphs if g["true_c"] == setting]
+            out += [{**meta, "true_c": setting, **row} for row in curves(sub, restarts, args.grid)]
         print(f"\n{folder.name}: {len(graphs)} graphs, R = {restarts} {starts} starts, "
               f"empty start dead in {rows[0]['empty_dead']:.2f}")
         print(f"  {'r':>4s} {'reached':>8s} {'F1 best-of-r':>13s} {'F1 +empty':>10s}")

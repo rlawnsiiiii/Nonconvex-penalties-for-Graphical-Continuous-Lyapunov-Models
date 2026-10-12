@@ -274,7 +274,7 @@ def test_lambda_max_separates_diagonal_from_nondiagonal(loss):
 @pytest.mark.parametrize("loss", LOSSES)
 def test_lambda_max_is_the_largest_correlation(loss):
     """Closed form for correlation input and C = 2I: at M_D = -I both
-    Sigma-gradients are I - Sigma_hat and grad_M = Sigma_hat - I, so
+    Sigma-gradients are I - Sigma_hat and grad_M = I - Sigma_hat, so
     lambda_max = max_{i != j} |Sigma_hat_ij| -- the graphical lasso's."""
     _, s_hat, c = _instance()
     assert np.allclose(np.diag(s_hat), 1.0)
@@ -479,3 +479,69 @@ def test_path_rejects_bad_arguments():
         covloss_path(s_hat, c, "loglik", direction="sideways")
     with pytest.raises(ValueError):
         solve(s_hat, c, 0.1, method="cg")
+
+
+# --------------------------------------------------------------------------- #
+# Other C than 2I (code review, 12 October 2026): the campaign fits with the rescaled
+# C = 2 diag(1/s^2), and the tests above use C = 2I only.
+# --------------------------------------------------------------------------- #
+
+
+def _instance_c(kind, p=6, seed=7):
+    """Standardised data drawn with C_Random_Diag, and the C of the fit: the rescaled C
+    (correct after standardising) or a random non-diagonal positive definite C."""
+    from gclm.data.simulate import estimation_volatility
+    rng = np.random.default_rng(seed)
+    _, _, _, s, scale = draw_instance(p, 2, 500, CChoice.RANDOM_DIAG, rng, standardize=True,
+                                      return_scale=True)
+    if kind == "rescaled":
+        return s, estimation_volatility(scale, "variance")
+    a = rng.normal(size=(p, p))
+    return s, a @ a.T / p + np.eye(p)
+
+
+def _fd_grad(m, s, c, loss, h=1e-6):
+    g = np.zeros_like(m)
+    for i in range(m.shape[0]):
+        for j in range(m.shape[1]):
+            e = np.zeros_like(m)
+            e[i, j] = h
+            g[i, j] = (loss_value(m + e, s, c, loss) - loss_value(m - e, s, c, loss)) / (2 * h)
+    return g
+
+
+@pytest.mark.parametrize("loss", LOSSES)
+@pytest.mark.parametrize("kind", ["rescaled", "full"])
+def test_gradient_matches_finite_differences_for_other_c(loss, kind):
+    s, c = _instance_c(kind)
+    m = _perturbed(dense_fit(s, c), np.random.default_rng(1), 0.2)   # stable, non-symmetric, off the optimum
+    np.testing.assert_allclose(loss_grad(m, s, c, loss), _fd_grad(m, s, c, loss), rtol=1e-5, atol=1e-7)
+
+
+@pytest.mark.parametrize("loss", LOSSES)
+def test_lambda_max_closed_form_for_a_diagonal_c(loss):
+    """Correlation input and a diagonal C: the diagonal fit has Sigma = I and m_i = -C_ii / 2,
+    and off the diagonal the gradient there is 2 Sigma_hat_ij / (m_i + m_j) for both losses
+    (the adjoint equation reads (m_i + m_j) Z_ij = G_ij with G_ij = -Sigma_hat_ij); with C = 2I
+    this is the largest correlation."""
+    s, c = _instance_c("rescaled")
+    assert np.allclose(np.diag(s), 1.0)
+    m = np.diag(diagonal_fit(s, c))
+    np.testing.assert_allclose(m, -np.diag(c) / 2, rtol=1e-12)
+    off = ~np.eye(len(m), dtype=bool)
+    want = (2 * np.abs(s) / np.abs(m[:, None] + m[None, :]))[off].max()
+    assert lambda_max(s, c, loss) == pytest.approx(want, rel=1e-10)
+
+
+@pytest.mark.parametrize("loss", LOSSES)
+@pytest.mark.parametrize("pen", PENALTIES)
+def test_lambda_max_is_the_threshold_with_the_rescaled_c(loss, pen):
+    """Just above lambda_max the diagonal fit does not move; below it the solution leaves the
+    diagonal -- for every penalty, with the C of the campaign."""
+    s, c = _instance_c("rescaled")
+    lm = lambda_max(s, c, loss)
+    md = diagonal_fit(s, c)
+    above = solve(s, c, 1.001 * lm, loss, m_init=md, penalty=pen)
+    np.testing.assert_allclose(above, md, atol=1e-10)
+    below = solve(s, c, 0.95 * lm, loss, m_init=md, penalty=pen)
+    assert np.count_nonzero(below - np.diag(np.diag(below))) > 0

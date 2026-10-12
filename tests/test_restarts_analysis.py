@@ -27,12 +27,18 @@ def test_curves_match_the_stored_best_and_are_monotone(tmp_path):
     res = subprocess.run([sys.executable, str(ROOT / "simulations" / "diagnostics" / "restarts.py"),
                           "--root", str(tmp_path)], capture_output=True, text=True, cwd=ROOT)
     assert res.returncode == 0, res.stderr
-    rows = list(csv.DictReader(open(tmp_path / "campaign_restarts.csv")))
-    assert {r["cell"] for r in rows} == {"search3u_p5_C2I_n1e4"}
-    assert sorted({int(r["r"]) for r in rows}) == [1, 2, 3] and all(r["starts"] == "uniform" for r in rows)
-    # with all R random starts and the empty graph, best-of-r is the stored pure result
+    all_rows = list(csv.DictReader(open(tmp_path / "campaign_restarts.csv")))
+    assert {r["cell"] for r in all_rows} == {"search3u_p5_C2I_n1e4"}
     (f,) = (cell / "shards").glob("shard_*.npz")
     d = np.load(f, allow_pickle=True)
+    # one row set for the settings of the true C pooled ("all") and one per setting in the shard
+    settings = {str(d["c_choice_names"][int(i)]) for i in d["c_choice"]}
+    assert {r["true_c"] for r in all_rows} == {"all"} | settings
+    rows = [r for r in all_rows if r["true_c"] == "all"]
+    per_setting = [r for r in all_rows if r["true_c"] != "all" and r["r"] == "3" and r["with_empty"] == "1"]
+    assert sum(int(r["n_graphs"]) for r in per_setting) == int(next(r for r in rows if r["r"] == "3")["n_graphs"])
+    assert sorted({int(r["r"]) for r in rows}) == [1, 2, 3] and all(r["starts"] == "uniform" for r in rows)
+    # with all R random starts and the empty graph, best-of-r is the stored pure result
     f1 = [2 * c[0] / max(1, 2 * c[0] + c[1] + c[3]) for c in d["pure_conf"]]
     full = next(r for r in rows if int(r["r"]) == 3 and r["with_empty"] == "1")
     assert np.isclose(float(full["f1_mean"]), np.mean(f1)) and float(full["score_reached"]) == 1.0

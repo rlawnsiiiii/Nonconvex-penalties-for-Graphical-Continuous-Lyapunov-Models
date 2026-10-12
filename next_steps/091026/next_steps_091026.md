@@ -291,3 +291,43 @@ largest part of the plan, about 2,150 CPU-h per sample size (§3, item 2).
    Pulling while waves 7 and 8 run is safe: the running tasks keep their code, and the queued
    ones accept the same arguments. If you want part (c) smaller (§3, item 2), tell me before it is
    submitted again.
+
+---
+
+## 5. Results of 12 October: waves 6, 7 and 8 (b) are home
+
+The results are written up with their figures in `simulations/S4_campaign.md` (§4a the 300-start
+and likelihood-refit searches, §5 the eBIC penalty on every cell and the likelihood refit on
+every path, §6 the log-likelihood loss with the dense starts) and `simulations/VERDICTS.md`
+(verdicts 22, 24, 25, 26 revised; themes E and F; figure index), and the briefing deck has a new
+evidence slide V7 (`slides/091026/briefing.pdf`). In short:
+
+1. **The log-likelihood loss gives the same verdicts as the direct loss, once the dense start is
+   the lasso's dense end** (wave 7). MCP dense → sparse from the lasso and the adaptive lasso beat
+   the log-likelihood lasso by +0.09 and +0.10 in oracle $F_1$ at $p = 20$, $n = 10^4$ with the
+   rescaled $C$ (+0.04 with $C = 2I$) and by +0.04 at $p = 10$; at $n = 10^3$ with $C = 2I$ they lose
+   by 0.01 to 0.02, where the direct-loss versions tie. MCP from the exact fit, wave 3's start,
+   still loses. With the right start this loss is slightly better than the direct loss at $p = 20$,
+   at 3 to 10 times the cost per path.
+2. **The likelihood refit changes nothing** (wave 8 (b), 27 cells at $n = 10^4$, both losses,
+   $p = 10$ and 20): +0.000 to +0.011 in $F_1$ of the selected graph, 0.1 to 4.6 fewer edges, the
+   ranking the same in every cell. Améndola's and Dettling's maximised likelihood and our
+   least-squares fit lead to the same conclusions.
+3. **300 random starts reach the lasso + search** (wave 6, $p = 10$, rescaled $C$): 0.593 and 0.605
+   at $n = 10^4$ and $\infty$ against 0.597 and 0.592, at about 100 times the cost; at $n = 10^3$ they
+   stay 0.02 to 0.04 behind.
+4. **The eBIC term inside the search, on every wave 1 cell** (wave 6): +0.02 at $p = 20$ for
+   $n \ge 10^4$, nothing at $p = 10$, and a loss of 0.01 to 0.03 at $n = 10^3$. Every figure now
+   exists with that penalty in `runs/campaign/figures_ebic1/`.
+5. **Wave 8 (c)**, the 100-start search with the likelihood refit: 27 of 32 graphs for $C = 2I$ at
+   $n = 10^4$ so far, where it ends at the same $F_1$ as the least-squares search; the rest is queued.
+
+**Still on the cluster:** wave 8 (c) for the rescaled $C$ and at $n = 10^3$, and wave 8 (b) at
+$n = 10^3$. When they are home: `rsync` (block 9), `python simulations/diagnostics/campaign.py`,
+`python simulations/diagnostics/restarts.py`, `python3 simulations/diagnostics/plot_campaign.py`
+(and `--rule ebic1`), and tell me; verdicts 24 and 25 then get their $n = 10^3$ lines.
+
+**Fixed on the way** (from the code review of 12 October, `next_steps/121026/code_review_121026.md`):
+the restart figure drew every cell of one kind into one curve; the eBIC rule blanked the
+eBIC-scored searches; the wave 8 (c) searches were compared with the least-squares lasso instead
+of the likelihood-refit one. None of these touched stored results.

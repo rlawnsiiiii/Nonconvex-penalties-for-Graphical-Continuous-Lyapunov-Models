@@ -515,3 +515,25 @@ def test_nonconvex_penalties_remove_the_lasso_bias(pen):
     checked = rows if pen == "MCP" else rows[:-1]
     for lam, bias_ncv in checked:
         assert bias_ncv < 1e-6, lam
+
+
+@pytest.mark.parametrize("pen,gamma", [("MCP", 1.2), ("MCP", 3.0), ("SCAD", 2.2), ("SCAD", 3.7)])
+@pytest.mark.parametrize("frac", [0.5, 0.9, 0.99])
+def test_prox_near_the_step_cap(pen, gamma, frac):
+    """Steps close to where the closed forms stop being valid (MCP needs t < gamma, SCAD
+    t < gamma - 1), and small gamma: the prox still reaches the brute-force minimum of
+    0.5 (x - z)^2 + t P(x).  Compared by objective value, since near the cap the minimum is flat."""
+    t = frac * (gamma if pen == "MCP" else gamma - 1)
+    got = prox(ZS, t, LAM, np.ones_like(ZS), pen, gamma)
+
+    def obj(z, x):
+        return 0.5 * (x - z) ** 2 + t * scalar(pen, x, LAM, gamma)
+
+    for z, x in zip(ZS, got):
+        assert obj(z, x) <= obj(z, brute_prox(z, t, pen, gamma)) + 1e-9
+
+
+@pytest.mark.parametrize("pen,gamma", [("MCP", 3.0), ("SCAD", 3.7)])
+def test_prox_refuses_a_step_at_the_cap(pen, gamma):
+    with pytest.raises(ValueError):
+        prox(ZS, gamma if pen == "MCP" else gamma - 1, LAM, np.ones_like(ZS), pen, gamma)

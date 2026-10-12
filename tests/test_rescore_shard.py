@@ -113,3 +113,26 @@ def test_refit_mode_writes_a_complete_cell_with_the_likelihood_bic(tmp_path):
         assert r["search_score"][j] <= r["bic_scores"][j][ib] + 1e-9
     rows = [x for x in campaign.load(root) if x["cell"] == "direct_lasso-ml_Cresc_n1e4"]
     assert len(rows) == len(keep) and all(x["estimator"] == "lasso-ml" for x in rows)
+
+
+@pytest.mark.parametrize("mode", [["--ebic-gamma", "1", "--select", "search"],
+                                  ["--refit", "loglik", "--select", "bic"]])
+def test_a_source_that_cannot_be_rebuilt_is_refused(tmp_path, mode):
+    """Every data set is rebuilt from its seed and checked against the source's own stored
+    scores. A source whose stored setting no longer matches (here: another seed) is refused in
+    both modes, instead of being rescored on the wrong data (code review, 12 October 2026)."""
+    src = tmp_path / "direct_lasso_Cresc_n1e4"
+    run([str(ROOT / "simulations" / "run_s1_shard.py"), *COMMON, "--out-dir", str(src / "shards")])
+    (src / "n_shards").write_text("8\n")
+    (f,) = (src / "shards").glob("shard_*.npz")
+    d = dict(np.load(f, allow_pickle=True))
+    cfg = json.loads(str(d["config_json"]))
+    cfg["seed"] += 1
+    d["config_json"] = json.dumps(cfg)
+    np.savez_compressed(f, **d)
+    out = tmp_path / "rescored_direct_lasso_Cresc_n1e4" / "shards"      # the submit script's layout
+    res = subprocess.run([sys.executable, str(ROOT / "simulations" / "rescore_shard.py"), "--shard", "0",
+                          "--n-shards", "8", "--n-obs", "1e4", "--source-cell", "direct_lasso_Cresc",
+                          *mode, "--out-dir", str(out)], capture_output=True, text=True, cwd=ROOT)
+    assert res.returncode != 0 and "not rebuilt" in res.stderr
+    assert not list(out.glob("*.npz"))
