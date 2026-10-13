@@ -355,8 +355,15 @@ Same graphs as the n-sweep (same seeds), so everything is paired with `runs/nswe
 `cluster/submit_campaign.sh` does the bookkeeping exactly as `submit_nsweep.sh` does (one
 submission per cell, `--status`, `--fill`); a cell is a folder
 `runs/campaign/<cell>_n<n>/` with its shards in `shards/`. `cluster/campaign_array.sbatch` is the
-job script; its first argument is the runner (`simulations/run_s1_shard.py` or
-`simulations/run_search_shard.py`).
+job script; its first argument is the runner (`simulations/run_s1_shard.py`,
+`simulations/run_search_shard.py` or `simulations/rescore_shard.py`). Since 13 October 2026 the
+folder also records what the cell was submitted with (`submission`: wave, runner, arguments, time
+limit): `--fill` resubmits from that record and reports a cell recorded by another wave instead of
+filling it with the wrong runner (six cell names belong to both wave 5 and wave 8); a folder from
+before the record is filled only when its shard count matches the wave's definition. Every `sbatch`
+call is appended to `logs/submissions.log` with the time and the git commit, and every shard records
+the commit the task ran from (`provenance_json`). Shards are written to a temporary name and renamed
+into place, so a task killed while saving leaves nothing `--fill` would count as written.
 
 ```bash
 cd ~/repo && git pull
@@ -377,7 +384,12 @@ continues there. Check the room with `squeue -M serial -u $USER -h -r | wc -l`, 
 per line, e.g. `cluster/plan_071026.txt`) in order, each as soon as the queue has room for all of
 its tasks (a line larger than the cap goes in parts, cell by cell, whenever its largest cell
 fits), holds a `--fill` line until no job of its wave is queued, and logs to
-`logs/feed_queue.log`; start it with `nohup ... &` on the login node.
+`logs/feed_queue.log`; start it with `nohup ... &` on the login node. One feeder runs at a time (a
+lock directory, `logs/feed_queue.lock`, holding its pid; a second feeder exits with a message);
+while `squeue` fails a `--fill` line waits rather than proceeds; a `--fill` line whose jobs have
+ended without reducing the number of missing shards is given up on with a warning (its tasks fail
+every time: check `logs/camp_*.err` and `sacct -M serial`); and a plan line whose dry run fails,
+for instance `--only` matching no cell, is skipped with the dry run's message.
 
 Back on the laptop:
 

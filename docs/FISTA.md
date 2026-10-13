@@ -251,6 +251,18 @@ established that `glmnet`, not our code, is the inaccurate one at the dense end 
 
 ---
 
+### 4.7 Accuracy at the campaign's tolerance, against the packages (12 October 2026)
+
+The checks above run at $10^{-12}$ or tighter; the campaign runs at $10^{-8}$. Measured on 12
+campaign data sets against the exact, KKT-certified lasso solution at every λ: the objective is within
+$2.4\times10^{-7}$ (relative), and the support differs at 0 to 9 of 100 λ, one entry each, with oracle
+$F_1$ unchanged and AUPR within 0.0006. glmnet, ncvreg and skglm at their defaults miss the support at 35
+to 87 of 100 λ; at $10^{-10}$ FISTA is exact everywhere for 1.6 times the time. MCP and SCAD and the
+log-likelihood solver were checked in the same study:
+[`next_steps/121026/solver_accuracy_121026.md`](../next_steps/121026/solver_accuracy_121026.md).
+
+---
+
 ## 5. Why `fista` is the default
 
 **Default: `fista`** — for **speed on the full grid**, not because it is a better or more accurate

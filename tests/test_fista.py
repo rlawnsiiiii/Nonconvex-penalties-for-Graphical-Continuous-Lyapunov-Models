@@ -266,3 +266,33 @@ def test_converges_from_any_problem_size(p):
     viol[~active] = np.maximum(np.abs(g) - thr, 0.0)[~active]
     assert np.max(viol) < 1e-6
     assert np.all(np.diag(m) < 0)
+
+
+# --------------------------------------------------------------------------- #
+# 6. What a solve reports (code review A4, 13 October 2026) and the symmetry of C
+# --------------------------------------------------------------------------- #
+
+
+def test_return_info_reports_steps_and_convergence():
+    sigma, c, w = _problem()
+    lam = 0.3 * lambda_max(sigma, c)
+    m, info = solve_fista(sigma, c, lam, weights=w, tol=1e-10, return_info=True)
+    assert info.converged and 1 <= info.iterations <= 50_000
+    assert np.array_equal(m, solve_fista(sigma, c, lam, weights=w, tol=1e-10))
+    _, info = solve_fista(sigma, c, lam, weights=w, tol=1e-10, max_iter=3, return_info=True)
+    assert not info.converged and info.iterations == 3              # the cap, no longer silent
+    _, info = solve_fista(sigma, c, lam, weights=w, tol=1e-10, penalty="MCP", return_info=True)
+    assert info.converged and info.iterations >= 1
+    _, info = solve_fista(sigma, c, lam, weights=w, tol=1e-10, penalty="MCP", max_iter=2, return_info=True)
+    assert not info.converged and info.iterations == 2
+
+
+def test_c_must_be_symmetric():
+    """The gradient 2 R Sigma assumes a symmetric residual, i.e. a symmetric C (code review D)."""
+    sigma, c, w = _problem()
+    bad = c.copy()
+    bad[0, 1] = 0.3
+    with pytest.raises(ValueError):
+        solve_fista(sigma, bad, 0.1, weights=w)
+    with pytest.raises(ValueError):
+        solve_fista(sigma, bad, 0.1, weights=w, penalty="MCP")

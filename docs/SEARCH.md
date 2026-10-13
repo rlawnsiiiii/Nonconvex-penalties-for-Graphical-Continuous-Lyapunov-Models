@@ -51,7 +51,7 @@ one selected with the eBIC penalty ($\gamma = 0.5$, 1).
    | loss | refit | class |
    |---|---|---|
    | direct, $\tfrac12\lVert A(\hat\Sigma)\operatorname{vec}(M) + \operatorname{vec}(C)\rVert^2$ | least squares on the columns of $A$ in $S \cup \mathrm{diag}$, via the normal equations on the precomputed Gram matrix ($\texttt{lstsq}$ as fallback) | `DirectRefit` |
-   | log-likelihood or Frobenius, as in docs/LIKELIHOOD.md | the package's APG solver (`solvers.covariance.solve`) with weight 1 and $\lambda = 10^8$ outside the support (those entries stay exactly zero) and weight 0 on it; warm-started from the current estimate when that is stable, otherwise from the diagonal fit; tolerance $10^{-9}$ | `CovRefit` |
+   | log-likelihood or Frobenius, as in docs/LIKELIHOOD.md | the package's APG solver (`solvers.covariance.solve`) with weight 1 and $\lambda = 10^8$ outside the support (those entries stay exactly zero) and weight 0 on it; warm-started from the current estimate when that is stable, otherwise from the diagonal fit; inside the selection and the search tolerance $10^{-8}$ with at most 3,000 steps (`SEARCH_TOL`, `SEARCH_MAX_ITER`: the scores and selected graphs equal those at $10^{-9}$ / 50,000, S3b §9.0; the class default is $10^{-9}$ / 50,000). A refit that stops at the cap is counted (`CovRefit.unconverged`; code review A2, see §3) | `CovRefit` |
 
 2. **Score** the implied covariance $\Sigma(\hat M_S)$, the stationary covariance from
    $M\Sigma + \Sigma M^\top + C = 0$:
@@ -147,10 +147,13 @@ default is in between: fitted by the quadratic loss, scored by the likelihood lo
 is `Scorer(..., score="direct")` (`bic_direct`, 9 October; tests in `tests/test_search.py`):
 
 $$\mathrm{score}_{\mathrm{dir}}(S) = N\log(\mathrm{RSS}_S/N) + (p+|S|)\log n, \qquad
-N = \tfrac{p(p+1)}{2},\quad \mathrm{RSS}_S = \|M_S\hat\Sigma + \hat\Sigma M_S^\top + C\|_F^2,$$
+N = \tfrac{p(p+1)}{2},\quad \mathrm{RSS}_S = \sum_{i\le j} R_{ij}^2,\quad R = M_S\hat\Sigma + \hat\Sigma M_S^\top + C,$$
 
 the score of a Gaussian regression with unknown error variance on the $N$ distinct equations of
-the Lyapunov system, with the BIC penalty. It is not a likelihood of the data: the $N$ residuals
+the Lyapunov system, with the BIC penalty: the residual $R$ is symmetric and its upper triangle
+holds the $N$ equations once each (until 13 October 2026 the full Frobenius norm $\|R\|_F^2$ was
+used, which counts every off-diagonal equation twice — code review D; the table below was
+computed with that version). It is not a likelihood of the data: the $N$ residuals
 are neither independent nor of equal variance, and their number does not grow with $n$. A support
 with $p + |S| \ge N$ free entries generically fits the $N$ equations exactly: its RSS is zero up to
 rounding (floored at $10^{-14}\|C\|_F^2$, `RSS_FLOOR`), so its loss term lies far below that of
@@ -203,14 +206,41 @@ moves (`next_steps/051026/files/time_starts.py` for the dataset).
 | add | every off-diagonal entry not in $S$. Adding the reverse of a selected entry creates a 2-cycle |
 
 **Best improvement** (`greedy_search`): score every neighbour, move to the best one if it lowers
-the score, and repeat. Stop when no neighbour improves, or after 200 steps.
+the score, and repeat. Stop when no neighbour improves, or after `max_steps` (200 by default; the
+runners allow $p(p-1)$); a search stopped by the cap says so (`SearchResult.capped`).
 - Scored supports are cached, so no support is refitted twice.
 - **With an iterative refit** (the covariance losses; the likelihood refit of wave 5a),
   `add_screen` can restrict the add moves scored per step to the ones with the largest
   $\lvert\nabla L\rvert$ at the current refit; deletes and reverses are always all scored. The
-  campaign does not use it (`--add-screen` is off; scoring every add move with the likelihood refit
-  costs 15 to 100 s per graph at $p = 10$), so the two searches of wave 1 and wave 5a differ in the
-  score only, not in the neighbourhood.
+  searches from a path's selected graph do not use it (`--add-screen` is off in waves 5a and 8 (b);
+  scoring every add move with the likelihood refit costs 15 to 100 s per graph at $p = 10$), so the
+  two searches of wave 1 and wave 5a differ in the score only, not in the neighbourhood. The
+  100-start search with the likelihood refit, wave 8 (c), uses `--add-screen 20`: 100 starts of
+  one graph with every add move scored would take longer than a cluster task may run.
+- **Iterative refits that do not converge** (code review A2, 13 October 2026). The covariance
+  refits are capped at 3,000 steps. On a support with a 2-cycle the likelihood need not have a
+  maximiser: the two entries of the cycle can grow without bound while the loss keeps falling
+  (seen: $|M_{ij}|$ from 460 to 2,000 over 60,000 steps, the score still falling), so the refit
+  stops at the cap and the score is the value there, 5 to 19 units above the infimum at
+  $n = 10^3$, one to three edges' worth of BIC penalty — a bias against such graphs in every search
+  with the likelihood refit (waves 5a, 8 (b), 8 (c)). Measured on the stored wave 8 cells, 0 of 16
+  selected and searched supports were capped, and in one full search step 7 of 106 neighbours were,
+  all adds that create a 2-cycle; tightening them left the chosen move unchanged. Every refit now
+  reports whether it converged: `Scorer.unconverged` counts the capped refits, every
+  `SearchResult` carries the number that occurred during its search (`unconverged`) and whether it
+  was stopped by its step cap (`capped`), and the cluster runners store them per graph
+  (`bic_unconverged`, `search_unconverged`, `search_capped`; `pure_*`, `truth_*`). The scores
+  themselves are left as they are.
+- **The matrix behind the end graph** (code review A2b). The scorer caches scores, not matrices;
+  `greedy_search` now keeps the matrix of its best move when that support was scored for the first
+  time in the step, so the stored refit is exactly the one that was scored. A support scored in an
+  earlier step (a cache hit, typically "reverse" after "add") has its matrix recomputed from the
+  current warm start, which for an iterative refit can be another stationary point: if it scores
+  lower, that better value replaces the cached score (still a strict descent); if higher, the
+  cached score stands and the case is counted (`mismatches`, stored as `search_mismatches`). With
+  the least-squares refit the recomputed matrix is identical. The same recomputation is why two
+  start blocks of wave 8 (c), each with its own cache, can score one end graph differently (code
+  review A5; 4 of 36 end graphs by more than $10^{-9}$, up to $7.8\times10^{-3}$).
 
 **Starts:**
 

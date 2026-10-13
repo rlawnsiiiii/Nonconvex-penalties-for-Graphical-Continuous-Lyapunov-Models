@@ -31,10 +31,19 @@ Numbers only, one ``.npz`` per shard:
                 confusion counts, orientation breakdown (order: ORIENT), score; per
                 start (random ones first, the empty graph last): the final score
                 (``pure_scores``), the final support (``m_pure_starts_support``,
-                packed, unpack with ``unpack_supports(.., restarts + 1, p)``) and
-                the number of moves made; how many starts ended at the truth
+                packed; unpack with ``unpack_supports(.., len(pure_scores), p)``,
+                which is ``restarts + 1`` without start blocks and the block's share
+                of the starts with them) and the number of moves made; how many
+                starts ended at the truth; ``pure_dead`` (the best score is +inf: no
+                start reached a graph with a stable refit, code review A3),
+                ``pure_unconverged`` (refits that stopped at the solver's iteration
+                cap over all starts, code review A2) and ``pure_capped`` (starts whose
+                search was stopped by the step cap)
   truth_*       the same for the search started from the truth, plus the score of
                 the truth itself and the moves that left it (add, delete, reverse)
+
+Shards are written to a temporary name and renamed into place (code review C4); the
+provenance records the git commit (C3).
 
 Start blocks (``--start-blocks B``, wave 8 (c)).  With the likelihood refit, 100 random starts of
 one graph take longer than a cluster task may run.  Then the starts of every graph are split into
@@ -54,8 +63,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import platform
-import socket
 import sys
 import time
 from pathlib import Path
@@ -68,7 +75,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gclm.config import S1Config, parse_n_obs  # noqa: E402
 from gclm.data.simulate import C_SCALES, CChoice, draw_instance, estimation_volatility  # noqa: E402
 from gclm.solvers.search import Scorer, greedy_search, multistart_search, random_support  # noqa: E402
-from run_s1_shard import EBIC_FORM, ORIENT, RAGGED, _counts, sparse_triple, task_list  # noqa: E402,F401
+from run_s1_shard import (EBIC_FORM, ORIENT, RAGGED, _counts, pack, provenance, save_npz,  # noqa: E402,F401
+                          sparse_triple, task_list)
 
 METHODS = ("pure", "truth")
 #: second seed word of the random starts; with (p, k, C, rep) it fixes them per dataset,
@@ -145,6 +153,9 @@ def run_one(p, k, c_choice, rep, cfg, restarts: int, methods=METHODS, starts: st
                                        if block == blocks - 1 else -1),
             "pure_evaluations": best.evaluations,
             "pure_seconds": time.perf_counter() - t1,
+            "pure_dead": not np.isfinite(best.score),
+            "pure_unconverged": sum(r.unconverged for r in results),
+            "pure_capped": sum(r.capped for r in results),
         })
 
     if "truth" in methods and block == 0:
@@ -161,6 +172,9 @@ def run_one(p, k, c_choice, rep, cfg, restarts: int, methods=METHODS, starts: st
                                      kinds.count("reverse")], dtype=np.int32),
             "truth_evaluations": res.evaluations,
             "truth_seconds": time.perf_counter() - t1,
+            "truth_dead": not np.isfinite(res.score),
+            "truth_unconverged": res.unconverged,
+            "truth_capped": res.capped,
         })
     row["seconds"] = time.perf_counter() - t0
     if blocks > 1:
@@ -220,11 +234,19 @@ def main() -> None:
                        or args.n_shards % blocks):
         ap.error("--start-blocks B needs the pure search, and --restarts and --n-shards "
                  "multiples of B (every shard then holds one block)")
+    if blocks > 1 and args.restarts < blocks:
+        ap.error("--start-blocks B needs at least B random starts (one per block)")
+    if args.reps is not None and args.reps < 1:
+        ap.error("--reps must be at least 1")
+    if args.p is not None and any(p < 2 for p in args.p):
+        ap.error("--p takes sizes of at least 2")
+    if args.add_screen is not None and args.refit != "loglik":
+        ap.error("--add-screen applies to the likelihood refit (--refit loglik)")
 
     base = S1Config()
     cfg = S1Config(
         p_values=tuple(args.p) if args.p else base.p_values,
-        n_rep=args.reps if args.reps else base.n_rep,
+        n_rep=args.reps if args.reps is not None else base.n_rep,
         n_obs=args.n_obs if args.n_obs is not None else base.n_obs,
         c_scale=args.c_scale or base.c_scale,
     )
@@ -249,15 +271,7 @@ def main() -> None:
             print(f"  {n}/{len(tasks)}  {el/60:.1f} min elapsed, "
                   f"eta {(len(tasks)-n)*el/n/60:.1f} min", flush=True)
 
-    payload = {}
-    for key, vals in store.items():
-        if key.startswith(RAGGED):                       # length depends on p / the graph
-            arr = np.empty(len(vals), dtype=object)
-            for i, v in enumerate(vals):
-                arr[i] = v
-        else:
-            arr = np.array(vals)
-        payload[key] = arr
+    payload = pack(store)
     payload["config_json"] = json.dumps({
         **{f: getattr(cfg, f) for f in ("n_rep", "n_obs", "standardize", "metzler", "seed",
                                         "c_scale")},
@@ -269,14 +283,8 @@ def main() -> None:
         "ebic_gamma": args.ebic_gamma, "ebic_form": EBIC_FORM,
     })
     payload["c_choice_names"] = np.array([c.value for c in CChoice])
-    payload["provenance_json"] = json.dumps({
-        "host": socket.gethostname(), "python": sys.version.split()[0],
-        "numpy": np.__version__, "platform": platform.platform(),
-        "shard": args.shard, "n_shards": args.n_shards,
-        "wall_seconds": time.time() - t0,
-        "finished_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-    })
-    np.savez_compressed(out, **payload)
+    payload["provenance_json"] = provenance(args.shard, args.n_shards, t0)
+    save_npz(out, payload)
     print(f"done: {len(tasks)} datasets in {(time.time()-t0)/60:.1f} min -> {out} "
           f"({out.stat().st_size/1e6:.1f} MB)", flush=True)
 

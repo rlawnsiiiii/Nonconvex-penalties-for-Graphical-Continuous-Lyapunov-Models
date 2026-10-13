@@ -668,3 +668,27 @@ def test_pyproximal_backend_rejects_nonconvex_penalty(instance):
     _, sigma, c = instance
     with pytest.raises(ValueError, match="l1 penalty only"):
         lasso_path(sigma, c, n_lambda=3, solver="pyproximal", penalty="MCP")
+
+
+def test_path_diagnostics_and_grid_order(instance):
+    """Code review A4 / D (13 October 2026): a fista path reports steps and convergence per
+    lambda (0 steps at lambda_max, the closed form); a grid given in decreasing order gives the
+    same estimates in the grid's own order (the loop used to assume an increasing grid); the
+    design backend reports nothing; the derived paths report too."""
+    from gclm.solvers.path import adaptive_lasso_path, lla_path
+    _, sigma, c = instance
+    lams = lambda_grid(lambda_max(sigma, c), 8)
+    path = lasso_path(sigma, c, lambdas=lams, tol=1e-10)
+    assert path.iterations.shape == lams.shape and path.converged.all()
+    assert path.iterations[-1] == 0 and path.iterations[0] > 0
+    rev = lasso_path(sigma, c, lambdas=lams[::-1], tol=1e-10)
+    for a, b in zip(path.estimates, rev.estimates[::-1]):
+        assert np.array_equal(a, b)
+    assert np.array_equal(rev.iterations[::-1], path.iterations)
+    assert lasso_path(sigma, c, lambdas=lams, solver="design", tol=1e-10).iterations.size == 0
+    up = lasso_path(sigma, c, lambdas=lams, penalty="MCP", direction="up", tol=1e-10)
+    assert up.converged.all() and up.iterations[-1] == 0 and up.iterations[0] > 0
+    lla = lla_path(sigma, c, lambdas=lams, penalty="MCP", tol=1e-10)
+    assert lla.iterations.shape == lams.shape and lla.converged.all() and lla.iterations[-1] == 0
+    ada = adaptive_lasso_path(sigma, c, n_lambda=8, tol=1e-10)
+    assert ada.iterations.shape == (8,) and ada.converged.all() and ada.iterations[-1] == 0

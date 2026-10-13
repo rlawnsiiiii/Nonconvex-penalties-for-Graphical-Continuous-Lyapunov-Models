@@ -38,6 +38,12 @@ from gclm.objective.penalties import (
 
 
 METHODS = ("apg", "prox", "newton")
+#: rounding level of a loss value, relative to max(1, |L|): differences of L below it are noise
+EPS_F = 1e-13
+#: the loss values decide the backtracking test while the bound's predicted change is at least
+#: this many rounding units; below that the secant test on the gradients decides
+#: (``_Problem._bound_holds``; code review A1, 13 October 2026)
+RESOLVED = 100.0
 
 @dataclass
 class FitInfo:
@@ -87,12 +93,38 @@ class _Problem:
                             self.penalty, self.gamma)
 
     def _slack(self) -> float:
-        return 1e-13 * max(1.0, abs(self.big_f))
+        """Rounding level of the objective at the iterate."""
+        return EPS_F * max(1.0, abs(self.big_f))
 
-    def accept(self, new: _Point):
+    def accept(self, new: _Point, grad: np.ndarray | None = None):
         self.pt = new
-        self.grad = _grad_at(new, self.sigma_hat, self.loss)
+        self.grad = _grad_at(new, self.sigma_hat, self.loss) if grad is None else grad
         self.big_f = new.f + self.pen(new.m)
+
+    def _bound_holds(self, pt: _Point, grad: np.ndarray, new: _Point, d: np.ndarray,
+                     t: float) -> tuple[bool, np.ndarray | None]:
+        """Does the quadratic upper bound ``L(M+) <= L(Y) + <grad, d> + ||d||^2 / (2t)``
+        hold at the trial point ``M+ = Y + d``?  Decided in a rounding-safe way.
+
+        While the bound's predicted change of ``L`` is well above the rounding level
+        of ``L``, the loss values decide, as in Varando & Hansen's Algorithm 1.  Near a
+        stationary point that change is far below it (``<grad, d>`` is of the order of
+        ``t ||grad||^2``): the difference ``L(M+) - L(Y)`` is then noise and a test on
+        it passes at every ``t``, which left the step uncontrolled -- a spurious step
+        was accepted from a stationary warm start, and stiff solves ran to the
+        iteration cap (code review A1, 13 October 2026).  There the same bound is
+        tested on the gradients: for a quadratic ``L`` it is exactly the secant
+        condition ``<grad(M+) - grad(Y), d> <= ||d||^2 / t``, and gradients are
+        computed directly, not as the difference of two nearly equal numbers.
+        Returns the verdict and, when it was computed, the gradient at ``M+``.
+        """
+        dd = float(np.sum(d * d))
+        model = float(np.sum(grad * d)) + dd / (2.0 * t)   # the bound's change in L (<= 0 for a prox step)
+        eps = EPS_F * max(1.0, abs(pt.f))
+        if abs(model) >= RESOLVED * eps:
+            return new.f <= pt.f + model + eps, None
+        grad_new = _grad_at(new, self.sigma_hat, self.loss)
+        return float(np.sum((grad_new - grad) * d)) <= dd / t * (1.0 + 1e-6), grad_new
 
     def prox_step(self, t: float, base: _Point | None = None,
                   base_grad: np.ndarray | None = None) -> tuple[bool, float, np.ndarray | None]:
@@ -101,9 +133,9 @@ class _Problem:
 
         Accepts ``M+ = prox_{tP}(Y - t grad L(Y))`` iff ``M+`` is stable, the
         quadratic upper bound ``L(M+) <= L(Y) + <grad, M+ - Y> + ||M+ - Y||^2 / (2t)``
-        holds, and the objective does not rise above the current iterate's --
-        Varando & Hansen's test, made monotone in the iterate.  Returns
-        ``(accepted, t, s)`` with ``s = M+ - Y``.
+        holds (:meth:`_bound_holds`), and the objective does not rise above the
+        current iterate's -- Varando & Hansen's test, made monotone in the iterate.
+        Returns ``(accepted, t, s)`` with ``s = M+ - Y``.
         """
         pt = self.pt if base is None else base
         grad = self.grad if base_grad is None else base_grad
@@ -112,10 +144,10 @@ class _Problem:
             new = _evaluate(m_new, self.c, self.sigma_hat, self.loss)
             if np.isfinite(new.f):
                 d = m_new - pt.m
-                quad = pt.f + float(np.sum(grad * d)) + float(np.sum(d * d)) / (2.0 * t)
-                if new.f <= quad + self._slack():          # curvature condition met at this t
+                ok, grad_new = self._bound_holds(pt, grad, new, d, t)
+                if ok:                                      # curvature condition met at this t
                     if new.f + self.pen(m_new) <= self.big_f + self._slack():
-                        self.accept(new)
+                        self.accept(new, grad_new)
                         self.n_prox += 1
                         return True, t, d
                     return False, t, None                   # uphill from the iterate: caller restarts
@@ -189,8 +221,20 @@ def solve(
     MFISTA) and otherwise replaced by a plain step with the momentum reset
     (O'Donoghue & Candes 2015).  Step sizes by backtracking from a
     Barzilai-Borwein trial.  Follows the same stationary points as ``"prox"``
-    at a fraction of the iterations.  Stops when the gradient mapping
-    ``max|M+ - Y| / t`` falls below ``tol`` (default ``1e-6``).
+    at a fraction of the iterations.  Stops when the first-order residual of the
+    iterate (:func:`gclm.objective.penalties.stationarity`) is below ``tol``
+    (default ``1e-6``); a start that already satisfies it is returned unchanged.
+
+    The backtracking test is decided on the loss values while they resolve it and
+    on the gradients (the secant condition) when the bound's predicted change is at
+    rounding level, which keeps the step controlled near a stationary point
+    (``_Problem._bound_holds``).  Until 13 October 2026 the test allowed an absolute
+    slack and the stopping rule was the gradient mapping ``max|M+ - Y| / t``: near
+    a stationary point every step passed, a stationary warm start was moved by one
+    uncontrolled step and reported converged, and badly scaled solves (a ``C`` with
+    a diagonal ratio of 100 or more) ran to the iteration cap (code review A1; the
+    log-likelihood cells of the campaign stored before that date were computed with
+    the old test, see docs/LIKELIHOOD.md Section 4.3).
 
     ``method="prox"`` -- the plain proximal-gradient method: Algorithm 1 with
     Barzilai-Borwein trial steps (monotone SpaRSA, Wright, Nowak & Figueiredo
@@ -240,7 +284,10 @@ def solve(
     if method == "apg":
         x_prev = prob.pt.m
         tk = 1.0
-        for _ in range(max_iter):
+        converged = prob.kkt() <= tol               # a stationary start (a warm start that already
+        for _ in range(max_iter):                   # solves this lambda) is returned as it is
+            if converged:
+                break
             tk1 = 0.5 * (1.0 + np.sqrt(1.0 + 4.0 * tk * tk))
             y = _evaluate(prob.pt.m + ((tk - 1.0) / tk1) * (prob.pt.m - x_prev),
                           c, sigma_hat, loss)
@@ -258,19 +305,18 @@ def solve(
                 tk = 1.0
                 if not ok:
                     break
-            if float(np.max(np.abs(s))) / t <= tol:
-                converged = True
-                break
+            converged = prob.kkt() <= tol               # judged at the accepted iterate itself
             t = min(bb_step(t, s, grad_y), 2.0 * t)
     elif method == "prox":
+        converged = prob.kkt() <= tol
         for _ in range(max_iter):
+            if converged:
+                break
             grad_old = prob.grad
             ok, t, s = prob.prox_step(t)
             if not ok:
                 break
-            if float(np.max(np.abs(s))) / t <= tol:
-                converged = True
-                break
+            converged = prob.kkt() <= tol
             t = bb_step(t, s, grad_old)
     else:
         # Outer loop: identify (proximal gradient) -> converge (Newton) -> re-check.

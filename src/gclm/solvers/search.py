@@ -23,11 +23,22 @@ Three scores, by how ``M_S`` is fitted and what it is scored by (docs/SEARCH.md 
     score="direct",     refit "direct"   least-squares fit, scored by the direct loss itself:
 
         score_direct(S) = N log(RSS_S / N) + log(n) (p + |S|),   N = p (p + 1) / 2,
-        RSS_S = || M_S Sigma_hat + Sigma_hat M_S' + C ||_F^2
+        RSS_S = sum_{i <= j} R_ij^2,   R = M_S Sigma_hat + Sigma_hat M_S' + C
 
     the loss of a Gaussian regression with unknown error variance on the N distinct equations
     of the Lyapunov system plus the BIC penalty, with the sample size n in the penalty
-    (9 October 2026; not used in the campaign).
+    (9 October 2026; not used in the campaign).  The residual R is symmetric, so its upper
+    triangle holds the N distinct equations once each (until 13 October 2026 the full Frobenius
+    norm was used, which counts every off-diagonal equation twice -- code review D).
+
+Refits that do not converge (code review A2, 13 October 2026).  The covariance refits are
+iterative and capped (``CovRefit``, 3,000 steps inside the search).  On a support with a
+2-cycle the likelihood need not have a maximiser: the two entries of the cycle can grow
+without bound while the loss keeps falling, so the refit stops at the cap and the score is the
+value there -- a few units above the infimum, a bias against such graphs.  Every refit now
+reports whether it converged; ``Scorer.unconverged`` counts the capped refits and every
+``SearchResult`` carries the number that occurred during its search, which the cluster runners
+store next to the scores.  The scores themselves are left as they are.
 
 Names in the code: ``bic`` computes the score with the likelihood loss term L, ``bic_direct``
 the score with the direct loss, ``bic_along_path`` the scores of the supports of a path.  The
@@ -94,8 +105,12 @@ class DirectRefit:
         self.gram = self.a.T @ self.a
         self.atb = self.a.T @ self.rhs
         self.idx = vec_index(self.p)
+        self.fits = 0                    # same counters as CovRefit; a closed form never fails to converge
+        self.unconverged = 0
+        self.last_converged = True
 
     def fit(self, support: np.ndarray, m_init: np.ndarray | None = None) -> np.ndarray:
+        self.fits += 1
         free = support | np.eye(self.p, dtype=bool)
         cols = self.idx[free]
         g = self.gram[np.ix_(cols, cols)]
@@ -132,7 +147,14 @@ class CovRefit:
     support plus the diagonal, with the package's APG solver: entries outside the
     support carry weight 1 and a huge lambda (so they stay exactly zero), entries
     on it weight 0 (unpenalised).  Warm-started from ``m_init`` when that is
-    stable, otherwise from the diagonal fit."""
+    stable, otherwise from the diagonal fit.
+
+    The solve is iterative and capped at ``max_iter`` steps.  ``fits`` counts the
+    refits, ``unconverged`` those that stopped at the cap without meeting ``tol``,
+    ``last_converged`` says it for the latest one (code review A2, 13 October 2026).
+    A refit at the cap is not always a solver failure: on a support with a 2-cycle
+    the likelihood can have no maximiser (the module docstring), and then the matrix
+    at the cap is what gets scored."""
 
     def __init__(self, sigma_hat: np.ndarray, c: np.ndarray, loss: str, tol: float = 1e-9,
                  max_iter: int = 50_000):
@@ -140,6 +162,9 @@ class CovRefit:
         self.max_iter = max_iter
         self.p = sigma_hat.shape[0]
         self.m_diag = diagonal_fit(sigma_hat, self.c)
+        self.fits = 0
+        self.unconverged = 0
+        self.last_converged = True
 
     def fit(self, support: np.ndarray, m_init: np.ndarray | None = None) -> np.ndarray:
         eye = np.eye(self.p, dtype=bool)
@@ -149,9 +174,14 @@ class CovRefit:
             cand = np.where(support | eye, m_init, 0.0)
             if is_stable(cand) and np.isfinite(loss_value(cand, self.sigma_hat, self.c, self.loss)):
                 start = cand
-        return cov_solve(self.sigma_hat, self.c, _BIG_LAMBDA, loss=self.loss, weights=weights,
-                         m_init=start, penalty="lasso", method="apg", tol=self.tol,
-                         max_iter=self.max_iter)
+        m, info = cov_solve(self.sigma_hat, self.c, _BIG_LAMBDA, loss=self.loss, weights=weights,
+                            m_init=start, penalty="lasso", method="apg", tol=self.tol,
+                            max_iter=self.max_iter, return_info=True)
+        self.fits += 1
+        self.last_converged = bool(info.converged)
+        if not info.converged:
+            self.unconverged += 1
+        return m
 
 
 # inside the search the covariance refits only need an accurate *score*: at tol 1e-8 with
@@ -183,19 +213,21 @@ EBIC_FORMS = ("binom", "dettling")
 def bic_direct(m: np.ndarray, sigma_hat: np.ndarray, c: np.ndarray, n: float, n_edges: int,
                ebic_gamma: float = 0.0, ebic_form: str = "binom") -> float:
     """The direct-loss score of a refitted ``M``: the loss ``N log(RSS / N)`` with
-    ``N = p (p + 1) / 2`` and ``RSS = ||M Sigma_hat + Sigma_hat M' + C||_F^2`` (twice the direct
-    loss), plus the BIC penalty ``log(n) (p + n_edges)``, or the eBIC penalty when
-    ``ebic_gamma > 0`` (the eBIC term as in :func:`bic`); ``inf`` if ``M`` is not stable (not a
-    GCLM).  ``n = inf`` uses the nominal ``N_INF``; an RSS below ``RSS_FLOOR * ||C||_F^2`` counts
-    as an exact fit."""
+    ``N = p (p + 1) / 2`` and ``RSS`` the sum of the squared residuals of the ``N`` distinct
+    Lyapunov equations -- the upper triangle of the symmetric residual
+    ``M Sigma_hat + Sigma_hat M' + C`` (the direct loss itself is half the full Frobenius norm,
+    which counts the off-diagonal equations twice) -- plus the BIC penalty ``log(n) (p + n_edges)``,
+    or the eBIC penalty when ``ebic_gamma > 0`` (the eBIC term as in :func:`bic`); ``inf`` if ``M``
+    is not stable (not a GCLM).  ``n = inf`` uses the nominal ``N_INF``; an RSS below ``RSS_FLOOR``
+    times the same sum for ``C`` counts as an exact fit."""
     if ebic_form not in EBIC_FORMS:
         raise ValueError(f"unknown ebic_form {ebic_form!r}; expected one of {EBIC_FORMS}")
     if not is_stable(m):
         return math.inf
     p = m.shape[0]
     big_n = p * (p + 1) / 2
-    r = lyapunov_residual(m, sigma_hat, c)
-    rss = max(float(np.sum(r * r)), RSS_FLOOR * float(np.sum(np.asarray(c, float) ** 2)))
+    r = np.triu(lyapunov_residual(m, sigma_hat, c))        # the N distinct equations, once each
+    rss = max(float(np.sum(r * r)), RSS_FLOOR * float(np.sum(np.triu(np.asarray(c, float)) ** 2)))
     nn = N_INF if math.isinf(n) else float(n)
     score = big_n * math.log(rss / big_n) + math.log(nn) * (p + n_edges)
     if ebic_gamma:
@@ -219,7 +251,7 @@ def bic(m: np.ndarray, sigma_hat: np.ndarray, c: np.ndarray, n: float, n_edges: 
     if not is_stable(m):
         return math.inf
     try:
-        sigma = solve_lyapunov(m, c)
+        sigma = solve_lyapunov(m, c, check=False)      # stability checked just above
         sign, logdet = np.linalg.slogdet(sigma)
         if sign <= 0 or not np.isfinite(logdet):
             return math.inf
@@ -252,6 +284,9 @@ class SearchResult:
     moves: list[tuple[str, int, int]] = field(default_factory=list)
     evaluations: int = 0
     scores: list[float] = field(default_factory=list)    # score after each accepted move
+    capped: bool = False          # stopped by max_steps, not because no move improved the score
+    unconverged: int = 0          # refits during this search that stopped at the solver's iteration cap
+    mismatches: int = 0           # accepted moves whose recomputed matrix scored above the cached score
 
 
 class Scorer:
@@ -259,11 +294,16 @@ class Scorer:
 
     Only the score is cached.  A search at p = 20 evaluates up to a few hundred
     thousand supports (S3b: 380,000 for one graph at n = inf), and caching the
-    refitted matrix with each of them took more than a cluster task's 2 GB.  The
-    matrix is recomputed on demand (:meth:`fit`): once per accepted move in the
-    search, against hundreds of scores per move.  For the direct loss the refit is
-    a closed form, so the recomputed matrix is identical; for the covariance losses
-    it is the same iterative solve from the same warm start.
+    refitted matrix with each of them took more than a cluster task's 2 GB.
+    :meth:`score_new` hands the matrix back together with the score when the support
+    is scored for the first time, so :func:`greedy_search` keeps exactly the matrix
+    that was scored for its best move at no extra cost.  Only for a support scored in
+    an earlier step (a cache hit) is the matrix recomputed (:meth:`fit`): identical
+    for the direct loss (a closed form), but for the covariance losses the recomputed
+    solve starts from the current warm start and can reach another stationary point
+    than the one scored; :func:`greedy_search` then keeps the scores and the matrices
+    consistent (code review A2b, 13 October 2026).  The diagonal is masked here, so a
+    caller need not do it.
     """
 
     def __init__(self, sigma_hat, c, n, loss="direct", ebic_gamma=0.0, ebic_form="binom",
@@ -280,29 +320,51 @@ class Scorer:
         self.refit = make_refit(sigma_hat, self.c, loss)
         self.cache: dict[bytes, float] = {}
         self.evaluations = 0
+        self._off = ~np.eye(sigma_hat.shape[0], dtype=bool)
         self._last: tuple[bytes, np.ndarray] | None = None     # the refit of the last new support
 
+    @property
+    def unconverged(self) -> int:
+        """Refits so far that stopped at the solver's iteration cap (0 for least squares)."""
+        return self.refit.unconverged
+
+    def _key(self, support: np.ndarray) -> tuple[np.ndarray, bytes]:
+        support = np.asarray(support, bool) & self._off        # the diagonal is never part of a support
+        return support, np.packbits(support).tobytes()
+
+    def score_new(self, support: np.ndarray, m_init: np.ndarray | None = None) -> tuple[float, np.ndarray | None]:
+        """The score of a support and, if it was scored for the first time in this call, the
+        refitted matrix behind it (``None`` for a cache hit: only scores are kept, see above)."""
+        support, key = self._key(support)
+        if key in self.cache:
+            return self.cache[key], None
+        self.evaluations += 1
+        m = self.refit.fit(support, m_init)
+        self.cache[key] = self._criterion(m, self.sigma_hat, self.c, self.n, int(support.sum()),
+                                          self.ebic_gamma, self.ebic_form)
+        self._last = (key, m)
+        return self.cache[key], m
+
     def score(self, support: np.ndarray, m_init: np.ndarray | None = None) -> float:
-        key = np.packbits(support).tobytes()
-        if key not in self.cache:
-            self.evaluations += 1
-            m = self.refit.fit(support, m_init)
-            self.cache[key] = self._criterion(m, self.sigma_hat, self.c, self.n, int(support.sum()),
-                                              self.ebic_gamma, self.ebic_form)
-            self._last = (key, m)
-        return self.cache[key]
+        return self.score_new(support, m_init)[0]
+
+    def criterion(self, support: np.ndarray, m: np.ndarray) -> float:
+        """The score of a given refit ``m`` on ``support``, without the cache."""
+        support, _ = self._key(support)
+        return self._criterion(m, self.sigma_hat, self.c, self.n, int(support.sum()),
+                               self.ebic_gamma, self.ebic_form)
 
     def fit(self, support: np.ndarray, m_init: np.ndarray | None = None) -> np.ndarray:
         """The unpenalised refit on ``support`` (not cached, see above)."""
-        key = np.packbits(support).tobytes()
+        support, key = self._key(support)
         if self._last is not None and self._last[0] == key:
             return self._last[1]
         return self.refit.fit(support, m_init)
 
     def __call__(self, support: np.ndarray, m_init: np.ndarray | None = None):
         """``(score, refit)`` of a support."""
-        score = self.score(support, m_init)
-        return score, self.fit(support, m_init)
+        score, m = self.score_new(support, m_init)
+        return score, (m if m is not None else self.fit(support, m_init))
 
 
 def neighbours(support: np.ndarray, allow_two_cycles: bool = True):
@@ -334,6 +396,24 @@ def _warm_start(m: np.ndarray, move: str, i: int, j: int) -> np.ndarray:
     return w
 
 
+def _consistent(sc: Scorer, support: np.ndarray, m: np.ndarray, score: float, res: SearchResult) -> float:
+    """The matrix held for a support and its score must belong together.  A matrix that had
+    to be recomputed for a support scored in an earlier step (the cache keeps scores only)
+    can be another stationary point of an iterative refit.  When it scores lower, that
+    better value replaces the cached one (a strict descent still); when it scores higher,
+    the cached score stands -- that stationary point was reached from another warm start --
+    and the mismatch is counted (code review A2b, 13 October 2026).  Identical matrices,
+    the direct loss's closed form, pass through unchanged."""
+    fresh = sc.criterion(support, m)
+    slack = 1e-9 * max(1.0, abs(score) if np.isfinite(score) else 1.0)
+    if fresh < score - slack:
+        sc.cache[sc._key(support)[1]] = fresh
+        return fresh
+    if fresh > score + slack:
+        res.mismatches += 1
+    return score
+
+
 def greedy_search(sigma_hat, c, n, start: np.ndarray, loss: str = "direct", ebic_gamma: float = 0.0,
                   max_steps: int = 200, allow_two_cycles: bool = True, add_screen: int | None = None,
                   scorer: Scorer | None = None, ebic_form: str = "binom",
@@ -344,6 +424,11 @@ def greedy_search(sigma_hat, c, n, start: np.ndarray, loss: str = "direct", ebic
     entries with the largest |gradient| of the loss at the current refit (used for
     the covariance losses, whose refits are iterative).  Deletes and reverses are
     always all scored.  Pass a shared ``scorer`` to reuse its cache across starts.
+
+    The result says whether the search was stopped by ``max_steps`` (``capped``), how
+    many refits hit the solver's iteration cap (``unconverged``) and how many accepted
+    moves had a recomputed matrix scoring above the cached score (``mismatches``,
+    see :func:`_consistent`); the matrix it returns is the one its score belongs to.
     """
     p = sigma_hat.shape[0]
     off = ~np.eye(p, dtype=bool)
@@ -351,8 +436,13 @@ def greedy_search(sigma_hat, c, n, start: np.ndarray, loss: str = "direct", ebic
     cur = np.asarray(start, bool) & off
     if not allow_two_cycles:
         cur = cur & ~(cur & cur.T & np.triu(np.ones((p, p), bool), 1))
-    cur_score, cur_m = sc(cur)
+    unconverged_before = sc.unconverged
+    cur_score, cur_m = sc.score_new(cur)
     res = SearchResult(cur.copy(), cur_m, cur_score)
+    if cur_m is None:                                # scored before (a shared cache): recompute
+        cur_m = sc.fit(cur)
+        cur_score = _consistent(sc, cur, cur_m, cur_score, res)
+        res.m, res.score = cur_m, cur_score
     for _ in range(max_steps):
         allowed_adds = None
         if add_screen is not None and loss != "direct" and np.isfinite(cur_score):
@@ -365,16 +455,23 @@ def greedy_search(sigma_hat, c, n, start: np.ndarray, loss: str = "direct", ebic
             if move == "add" and allowed_adds is not None and (i, j) not in allowed_adds:
                 continue
             warm = _warm_start(cur_m, move, i, j) if np.isfinite(cur_score) else None
-            score = sc.score(s, warm)
+            score, m_new = sc.score_new(s, warm)
             if best is None or score < best[0]:
-                best = (score, s, (move, i, j), warm)
+                best = (score, s, (move, i, j), warm, m_new)   # m_new: the matrix of a freshly scored support
         if best is None or not best[0] < cur_score - 1e-9 * max(1.0, abs(cur_score) if np.isfinite(cur_score) else 1.0):
             break
         cur_score, cur = best[0], best[1]
-        cur_m = sc.fit(cur, best[3])                 # one refit per accepted move
+        if best[4] is not None:
+            cur_m = best[4]                          # exactly the matrix that was scored
+        else:                                        # scored in an earlier step: one refit, then checked
+            cur_m = sc.fit(cur, best[3])
+            cur_score = _consistent(sc, cur, cur_m, cur_score, res)
         res.moves.append(best[2])
         res.scores.append(cur_score)
+    else:
+        res.capped = True                            # max_steps reached while moves still improved
     res.support, res.m, res.score, res.evaluations = cur, cur_m, cur_score, sc.evaluations
+    res.unconverged = sc.unconverged - unconverged_before
     return res
 
 

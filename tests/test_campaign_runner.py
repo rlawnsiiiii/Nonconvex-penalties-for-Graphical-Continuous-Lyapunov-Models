@@ -30,16 +30,18 @@ sys.path.insert(0, str(ROOT / "simulations"))
 
 from run_s1_shard import ORIENT, unpack_supports  # noqa: E402
 
-#: the fields of a shard before the campaign options existed
+#: the fields of a shard before the campaign options existed, plus ``converged`` (the solver's
+#: flag per lambda, stored for every loss since 13 October 2026, code review A4)
 LEGACY = {"p", "k", "c_choice", "rep", "lambda_max", "lambdas", "conf_offdiag", "conf_incdiag",
-          "nnz", "objective", "kkt", "iterations", "newton_steps", "n_true_edges",
+          "nnz", "objective", "kkt", "iterations", "newton_steps", "converged", "n_true_edges",
           "m_true_i", "m_true_j", "m_true_v", "best_f1_index", "best_acc_index",
           "m_best_f1_i", "m_best_f1_j", "m_best_f1_v", "m_best_acc_i", "m_best_acc_j",
           "m_best_acc_v", "seconds", "config_json", "c_choice_names", "provenance_json"}
 BIC = {"supports_packed", "scale", "bic_index", "bic_scores", "bic_evaluations", "bic_conf",
-       "bic_orient", "select_seconds"}
+       "bic_orient", "select_seconds", "bic_dead", "bic_unconverged"}
 SEARCH = {"m_search_support", "m_search_i", "m_search_j", "m_search_v", "search_conf",
-          "search_orient", "search_score", "search_evaluations", "search_moves", "search_seconds"}
+          "search_orient", "search_score", "search_evaluations", "search_moves", "search_seconds",
+          "search_dead", "search_unconverged", "search_capped", "search_mismatches"}
 P = 5
 
 
@@ -270,3 +272,54 @@ def test_log_likelihood_adaptive_lasso_and_lasso_start_run_through_the_runner(tm
                   ("--loss", "loglik", "--up-start", "lasso", "--penalty", "MCP")):
         res, _ = run(tmp_path, *extra, name="bad")
         assert res.returncode != 0 and "up_start" in res.stderr
+
+
+def test_the_direct_loss_stores_solver_diagnostics_and_provenance(tmp_path):
+    """Code review A4 / C3 / C4 (13 October 2026): FISTA's step counts and convergence flag per
+    lambda and the first-order residual are stored for the direct loss too, the provenance
+    names the git commit, no selection is dead or unconverged here, and no temporary file is
+    left behind by the atomic write."""
+    res, shard = run(tmp_path, "--select", "bic")
+    assert res.returncode == 0, res.stderr
+    assert shard["converged"].all() and shard["iterations"].min() >= 0
+    assert shard["iterations"][0][-1] == 0                    # lambda_max: the closed form, no steps
+    assert shard["iterations"][0][0] > 0
+    assert np.all(np.isfinite(shard["kkt"])) and shard["kkt"].max() < 1e-4
+    assert np.all(shard["newton_steps"] == -1)
+    assert not shard["bic_dead"].any() and np.all(shard["bic_unconverged"] == 0)
+    prov = json.loads(str(shard["provenance_json"]))
+    assert {"commit", "dirty", "host", "numpy"} <= set(prov)
+    assert not list((tmp_path / "out").glob("*.tmp"))
+
+
+def test_more_shards_than_tasks_gives_a_readable_empty_shard(tmp_path):
+    """Code review C5: a shard with no data set still has the identifier columns, so the
+    analysis reads it instead of failing on a missing ``p``."""
+    out = tmp_path / "cell" / "shards"
+    cmd = [sys.executable, str(RUNNER), "--shard", "63", "--n-shards", "64", "--p", str(P), "--reps", "1",
+           "--out-dir", str(out)]
+    res = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
+    assert res.returncode == 0, res.stderr
+    (f,) = out.glob("shard_*.npz")
+    d = np.load(f, allow_pickle=True)
+    assert len(d["p"]) == 0 and len(d["rep"]) == 0 and "config_json" in d.files
+
+
+@pytest.mark.parametrize("extra, message", [
+    (("--reps", "0"), "--reps"),
+    (("--tol", "0"), "--tol"),
+    (("--method", "adaptive", "--direction", "up"), "--direction"),
+    (("--loss", "loglik", "--convention", "ncvreg"), "--convention"),
+    (("--loss", "loglik", "--solver", "skglm"), "--solver"),
+    (("--refit", "loglik"), "--refit"),
+    (("--select", "bic", "--refit", "loglik", "--add-screen", "3"), "--add-screen"),
+    (("--select", "search", "--add-screen", "3"), "--add-screen"),
+    (("--select", "bic", "--ebic-gamma", "15"), "one decimal"),
+    (("--select", "bic", "--ebic-gamma", "1.5", "1.5"), "distinct"),
+])
+def test_settings_without_effect_or_out_of_range_are_refused(tmp_path, extra, message):
+    """Code review C5: a setting that would be recorded in config_json without having any effect,
+    or a value that silently fell back to the default, is refused before anything runs."""
+    res, shard = run(tmp_path, *extra)
+    assert res.returncode != 0 and shard is None
+    assert message in res.stderr, res.stderr

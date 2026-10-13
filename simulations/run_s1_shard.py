@@ -6,11 +6,15 @@ everything needed to recompute any downstream quantity without re-running:
 
   per dataset      p, k, c_choice, rep, seed, lambda_max, timing, n_true_edges
   per (dataset, l) lambda, tp/fp/tn/fn off-diagonal AND including the diagonal,
-                   nnz, penalised objective; for the covariance losses also the
-                   first-order violation (kkt) and the solver's step counts
+                   nnz, penalised objective, the first-order violation (kkt), the
+                   solver's step count (iterations; newton_steps for the covariance
+                   losses) and whether the solver met its tolerance (converged) --
+                   for the direct loss as well since 13 October 2026 (code review A4;
+                   older shards hold NaN / -1 there and no ``converged``)
   per dataset      M* as a sparse triple, and M_hat at the best-F1 and best-acc
                    lambdas (also sparse)
-  once             the full S1Config, so the run is self-describing
+  once             the full S1Config, so the run is self-describing, and the
+                   provenance (host, versions, git commit, timing)
 
 Storing the raw confusion counts (rather than only max_acc/max_f1/auc/aupr)
 means every metric -- including ones not yet defined, and the
@@ -23,16 +27,25 @@ next_steps/051026/cluster_campaign_051026.md) each dataset additionally gets
                    with :func:`unpack_supports`), and ``scale``, the standard
                    deviations the data were divided by
   bic_*            the likelihood score (BIC penalty) of every support of the
-                   path after an unpenalised least-squares refit
-                   (gclm.solvers.search), the index of the best one, its
-                   confusion counts and its orientation breakdown (order: ORIENT)
+                   path after an unpenalised refit -- least squares on the direct
+                   loss by default, the maximised likelihood with ``--refit loglik``
+                   (gclm.solvers.search) -- the index of the best one, its
+                   confusion counts and its orientation breakdown (order: ORIENT);
+                   ``bic_dead`` flags a path on which every score is +inf (no stable
+                   refit: the index is then argmin's 0 and not a selection, code
+                   review A3), ``bic_unconverged`` counts refits that stopped at the
+                   solver's iteration cap (likelihood refit; code review A2)
   search_*         (``search`` only) the graph reached from the selected support
                    by the greedy search on the score with add / delete / reverse
                    moves: its support (``m_search_support``, packed like one
                    lambda of ``supports_packed``), its unpenalised refit
-                   ``m_search_i/j/v`` (sparse), counts, score, moves
+                   ``m_search_i/j/v`` (sparse), counts, score, moves; and
+                   ``search_dead``, ``search_unconverged``, ``search_capped`` (stopped
+                   by the step cap), ``search_mismatches`` (gclm.solvers.search)
 
-Without ``--select`` the output is exactly what it was before these options existed.
+Without ``--select`` the output is what it was before these options existed, plus
+``converged``.  Shards are written to a temporary name and renamed into place, so a
+task killed while saving leaves no truncated file (code review C4).
 
     python simulations/run_s1_shard.py --shard 0 --n-shards 64 \
         --out-dir runs/s1_dettling_reproduction/s1_shards
@@ -49,8 +62,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
 import socket
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -63,8 +78,8 @@ from gclm import __name__ as _pkg  # noqa: F401  (ensures src/ is importable)
 from gclm.objective import covariance
 from gclm.config import S1Config, parse_n_obs
 from gclm.data.simulate import C_SCALES, CChoice, draw_instance, estimation_volatility
-from gclm.objective.direct import direct_loss, lambda_max
-from gclm.objective.penalties import penalty_weights
+from gclm.objective.direct import direct_grad, direct_loss, lambda_max
+from gclm.objective.penalties import penalty_scale, penalty_weights, stationarity
 from gclm.solvers.path import (UP_STARTS, adaptive_covloss_path, adaptive_lasso_path, covloss_path,
                                lambda_grid, lasso_path,
                                lla_path)
@@ -84,13 +99,74 @@ EBIC_FORM = "dettling"
 
 
 def ebic_tag(gamma: float) -> str:
-    """Field prefix of one gamma of the eBIC penalty: 0.5 -> ``ebic05``, 1 -> ``ebic1``."""
+    """Field prefix of one gamma of the eBIC penalty: 0.5 -> ``ebic05``, 1 -> ``ebic1``,
+    1.5 -> ``ebic15``.  The prefix drops the decimal point, so gamma is restricted to
+    ``0 < gamma < 10`` with at most one decimal, which keeps it unambiguous (code review C5,
+    13 October 2026: 1.5 and 15 used to give the same prefix)."""
+    if not 0 < gamma < 10 or round(gamma, 1) != gamma:
+        raise ValueError(f"--ebic-gamma takes values in (0, 10) with at most one decimal, got {gamma}")
     return f"ebic{gamma:g}".replace(".", "")
+
+
+def git_revision() -> dict:
+    """The commit the code was run from (code review C3): its short hash and whether the
+    working tree had uncommitted changes; ``"unknown"`` when git or the repository is not
+    available.  A queued cluster task runs whatever is checked out when it starts, so the
+    shard records it, not the submission."""
+    root = Path(__file__).resolve().parents[1]
+    try:
+        head = subprocess.run(["git", "rev-parse", "--short=12", "HEAD"], cwd=root, capture_output=True,
+                              text=True, timeout=20, check=True).stdout.strip()
+        dirty = bool(subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=root,
+                                    capture_output=True, text=True, timeout=20, check=True).stdout.strip())
+    except (OSError, subprocess.SubprocessError):
+        return {"commit": "unknown", "dirty": None}
+    return {"commit": head, "dirty": dirty}
+
+
+def provenance(shard: int, n_shards: int, t0: float) -> str:
+    """The provenance record of a shard as JSON: host, versions, the git commit, timing."""
+    return json.dumps({
+        "host": socket.gethostname(), "python": sys.version.split()[0], "numpy": np.__version__,
+        "platform": platform.platform(), **git_revision(),
+        "shard": shard, "n_shards": n_shards, "wall_seconds": time.time() - t0,
+        "finished_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+
+
+def save_npz(out: Path, payload: dict) -> None:
+    """Write a shard atomically: to a temporary name first, then renamed into place, so that a
+    task killed while saving leaves no truncated shard that ``--fill`` would count as written
+    (code review C4, 13 October 2026)."""
+    tmp = out.with_name(out.name + ".tmp")
+    with open(tmp, "wb") as fh:
+        np.savez_compressed(fh, **payload)
+    os.replace(tmp, out)
 #: order of the entries of ``bic_orient`` / ``search_orient`` (gclm.metrics.orientation_breakdown)
 ORIENT = ("correct", "reversed", "hedged", "both", "half", "missed_single", "missed_double",
           "fp_single", "fp_double")
 #: per-dataset fields whose length depends on p or on the graph: stored as object arrays
 RAGGED = ("m_", "supports_packed", "scale")
+
+
+def pack(store: dict[str, list], ids=("p", "k", "c_choice", "rep")) -> dict:
+    """The arrays of a shard from per-data-set lists.  Ragged fields (sparse triples, packed
+    supports, the scale: different lengths per data set) become object arrays, built
+    explicitly because ``np.array(list_of_arrays, dtype=object)`` silently collapses to 2-D
+    when the lengths happen to coincide, which would make the layout depend on the data.  A
+    shard with no data set at all (more shards than tasks) still gets the identifier columns,
+    empty, so that the analysis can read it (code review C5, 13 October 2026)."""
+    payload = {}
+    for key, vals in store.items():
+        if key.startswith(RAGGED):
+            arr = np.empty(len(vals), dtype=object)
+            for i, v in enumerate(vals):
+                arr[i] = v
+        else:
+            arr = np.array(vals)
+        payload[key] = arr
+    for key in ids:
+        payload.setdefault(key, np.zeros(0, dtype=int))
+    return payload
 
 
 def task_list(cfg: S1Config):
@@ -182,7 +258,12 @@ def select_graph(supports, sigma_hat, c_est, n_obs, m_true, search: bool,
     ib, scores = bic_along_path(sigma_hat, c_est, n_obs, supports, scorer=scorer)
     conf, orient = _counts(supports[ib], m_true)
     out = {"bic_index": ib, "bic_scores": np.array(scores, dtype=float),
-           "bic_evaluations": scorer.evaluations, "bic_conf": conf, "bic_orient": orient}
+           "bic_evaluations": scorer.evaluations, "bic_conf": conf, "bic_orient": orient,
+           # every support of the path scored +inf (no stable refit): argmin then gives 0, the
+           # densest graph, which is not a selection; the analysis counts these (code review A3)
+           "bic_dead": not np.isfinite(scores).any(),
+           # refits that stopped at the solver's iteration cap (likelihood refit; code review A2)
+           "bic_unconverged": scorer.unconverged}
     if search:
         t1 = time.perf_counter()
         # Every accepted move lowers the score, so the search ends by itself.  The cap
@@ -203,9 +284,23 @@ def select_graph(supports, sigma_hat, c_est, n_obs, m_true, search: bool,
             "search_moves": np.array([kinds.count("add"), kinds.count("delete"),
                                       kinds.count("reverse")], dtype=np.int32),
             "search_seconds": time.perf_counter() - t1,
+            "search_dead": not np.isfinite(res.score),           # ended at a graph without a stable refit
+            "search_unconverged": res.unconverged,               # refits at the cap during the search
+            "search_capped": res.capped,                         # stopped by max_steps, not by the score
+            "search_mismatches": res.mismatches,                 # gclm.solvers.search._consistent
         })
     out["select_seconds"] = time.perf_counter() - t0
     return out
+
+
+def _direct_kkt(path, sigma_hat, c_est, lams, weights, penalty, gamma, scale) -> np.ndarray:
+    """The first-order violation of every estimate of a direct-loss path
+    (:func:`gclm.objective.penalties.stationarity`), the same diagnostic the covariance-loss
+    paths report.  An entry the adaptive lasso excludes (weight ``inf``) satisfies its condition
+    whatever the gradient, which a large finite weight expresses."""
+    w = np.where(np.isinf(weights), 1e300, weights)
+    return np.array([stationarity(m, direct_grad(m, sigma_hat, c_est), lam, w, penalty, gamma, scale)
+                     for lam, m in zip(lams, path.estimates)])
 
 
 def run_one(p, k, c_choice, rep, cfg, select: str = "none", refit: str = "direct",
@@ -227,11 +322,14 @@ def run_one(p, k, c_choice, rep, cfg, select: str = "none", refit: str = "direct
     c_est = estimation_volatility(scale, cfg.c_scale)
     weights = penalty_weights(p, penalize_diagonal=cfg.penalize_diagonal)
     n_l = cfg.n_lambda
-    # solver diagnostics; the direct-loss solvers report none (FISTA stops on
-    # the coefficient change), so those columns are NaN / -1 for loss="direct"
+    # solver diagnostics per lambda: the first-order violation, the solver's steps and whether
+    # it met its tolerance.  The covariance-loss paths report them; for the direct loss the
+    # steps and the flag come from FISTA (code review A4) and the violation is computed here;
+    # newton_steps exist for the covariance losses only (-1 otherwise)
     kkt = np.full(n_l, np.nan)
     iters = np.full(n_l, -1, dtype=np.int32)
     newton = np.full(n_l, -1, dtype=np.int32)
+    converged = np.ones(n_l, dtype=bool)
     if cfg.loss == "direct" and cfg.method == "adaptive":
         # the adaptive lasso has its own weights and therefore its own grid
         path = adaptive_lasso_path(sigma_hat, c_est, n_lambda=n_l, ratio=cfg.lambda_ratio,
@@ -240,6 +338,8 @@ def run_one(p, k, c_choice, rep, cfg, select: str = "none", refit: str = "direct
         obj = np.array([direct_loss(m_hat, sigma_hat, c_est)
                         + lam * float(np.sum(path.weights[m_hat != 0] * np.abs(m_hat[m_hat != 0])))
                         for lam, m_hat in zip(lams, path.estimates)])
+        kkt = _direct_kkt(path, sigma_hat, c_est, lams, path.weights, "lasso", None, None)
+        iters, converged = path.iterations.astype(np.int32), path.converged
     elif cfg.loss == "direct":
         lmax = lambda_max(sigma_hat, c_est, penalize_diagonal=cfg.penalize_diagonal)
         lams = lambda_grid(lmax, n_lambda=n_l, ratio=cfg.lambda_ratio)
@@ -256,6 +356,9 @@ def run_one(p, k, c_choice, rep, cfg, select: str = "none", refit: str = "direct
         obj = np.array([objective(m_hat, sigma_hat, c_est, lam, weights,
                                   cfg.penalty, cfg.gamma, cfg.convention)
                         for lam, m_hat in zip(lams, path.estimates)])
+        kkt = _direct_kkt(path, sigma_hat, c_est, lams, weights, cfg.penalty, cfg.gamma,
+                          penalty_scale(sigma_hat, cfg.convention))
+        iters, converged = path.iterations.astype(np.int32), path.converged
     else:
         if cfg.penalize_diagonal:
             raise ValueError("the covariance losses leave the diagonal unpenalised")
@@ -272,7 +375,7 @@ def run_one(p, k, c_choice, rep, cfg, select: str = "none", refit: str = "direct
                 gamma=cfg.gamma, direction=cfg.direction, tol=cfg.tol, start=cfg.up_start,
             )
         obj, kkt = path.objective, path.kkt
-        iters, newton = path.iterations, path.newton_steps
+        iters, newton, converged = path.iterations, path.newton_steps, path.converged
 
     off = np.empty((n_l, 4), dtype=np.int32)      # tp, fp, tn, fn  (off-diagonal)
     inc = np.empty((n_l, 4), dtype=np.int32)      # ... including the diagonal
@@ -300,7 +403,7 @@ def run_one(p, k, c_choice, rep, cfg, select: str = "none", refit: str = "direct
         "p": p, "k": k, "c_choice": list(CChoice).index(c_choice), "rep": rep,
         "lambda_max": lmax, "lambdas": lams,
         "conf_offdiag": off, "conf_incdiag": inc, "nnz": nnz, "objective": obj,
-        "kkt": kkt, "iterations": iters, "newton_steps": newton,
+        "kkt": kkt, "iterations": iters, "newton_steps": newton, "converged": converged,
         "n_true_edges": int(np.sum(m_true[~eye] != 0)),
         "m_true_i": ti, "m_true_j": tj, "m_true_v": tv,
         "best_f1_index": i_f1, "best_acc_index": i_acc,
@@ -363,9 +466,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="also record the graph of the path selected by the score (bic) and "
                          "the graph the greedy search reaches from it (search), plus the "
                          "support at every lambda; default none = the original output")
-    ap.add_argument("--refit", default="direct", choices=list(REFITS),
+    ap.add_argument("--refit", default=None, choices=list(REFITS),
                     help="refit behind the score: least squares on the direct loss (default) "
-                         "or the maximised Gaussian likelihood (the likelihood refit; slow)")
+                         "or the maximised Gaussian likelihood (the likelihood refit; slow); "
+                         "needs --select")
     ap.add_argument("--add-screen", type=int, default=None, metavar="N",
                     help="with --refit loglik and --select search: score only the N add "
                          "moves with the largest gradient per step (default: all of them)")
@@ -381,12 +485,18 @@ def config_from_args(args: argparse.Namespace) -> S1Config:
     whatever was given on the command line.  Raises ``ValueError`` for a
     combination that is not implemented (:func:`check_method`)."""
     base = S1Config()
+    if args.reps is not None and args.reps < 1:
+        raise ValueError("--reps must be at least 1")
+    if args.tol is not None and not args.tol > 0:
+        raise ValueError("--tol must be positive")
+    if args.p is not None and (len(args.p) == 0 or any(p < 2 for p in args.p)):
+        raise ValueError("--p takes sizes of at least 2")
     cfg = S1Config(
         p_values=tuple(args.p) if args.p else base.p_values,
-        n_rep=args.reps if args.reps else base.n_rep,
+        n_rep=args.reps if args.reps is not None else base.n_rep,
         n_obs=args.n_obs if args.n_obs is not None else base.n_obs,
         solver=args.solver or base.solver,
-        tol=args.tol if args.tol else base.tol,
+        tol=args.tol if args.tol is not None else base.tol,
         penalty=args.penalty or base.penalty,
         gamma=args.gamma if args.gamma is not None else base.gamma,
         convention=args.convention or base.convention,
@@ -396,6 +506,13 @@ def config_from_args(args: argparse.Namespace) -> S1Config:
         method=args.method or base.method,
         up_start=args.up_start or base.up_start,
     )
+    # settings that would be recorded in config_json without having any effect (code review C5)
+    if args.direction and cfg.method != "path":
+        raise ValueError(f"--direction applies to --method path only; --method {cfg.method} ignores it")
+    if args.convention and cfg.loss != "direct":
+        raise ValueError("--convention applies to the direct loss only (the covariance losses have no design)")
+    if args.solver and cfg.loss != "direct":
+        raise ValueError("--solver applies to the direct loss only (the covariance losses have their own solver)")
     check_method(cfg)
     return cfg
 
@@ -405,10 +522,19 @@ def main() -> None:
     args = ap.parse_args()
     if not 0 <= args.shard < args.n_shards:
         ap.error(f"--shard must be in 0..{args.n_shards - 1}, got {args.shard}")
-    if any(g <= 0 for g in args.ebic_gamma) or len(set(args.ebic_gamma)) < len(args.ebic_gamma):
-        ap.error("--ebic-gamma takes distinct positive values (0 is the BIC penalty, always recorded)")
+    try:
+        tags = [ebic_tag(g) for g in args.ebic_gamma]
+    except ValueError as err:
+        ap.error(str(err))
+    if len(set(tags)) < len(tags):
+        ap.error("--ebic-gamma takes distinct values (0 is the BIC penalty, always recorded)")
     if args.ebic_gamma and args.select == "none":
         ap.error("--ebic-gamma needs --select bic or search")
+    if args.refit is not None and args.select == "none":
+        ap.error("--refit has no effect without --select bic or search")
+    refit = args.refit or "direct"
+    if args.add_screen is not None and (refit != "loglik" or args.select != "search"):
+        ap.error("--add-screen applies to the search with the likelihood refit (--select search --refit loglik)")
     try:
         cfg = config_from_args(args)
     except ValueError as err:
@@ -421,13 +547,13 @@ def main() -> None:
     print(f"shard {args.shard}/{args.n_shards}: {len(tasks)} datasets "
           f"[n={cfg.n_obs}, loss={cfg.loss}, penalty={cfg.penalty}, method={cfg.method}, "
           f"direction={cfg.direction}, c_scale={cfg.c_scale}, select={args.select}, "
-          f"refit={args.refit}, ebic_gamma={args.ebic_gamma}] -> {out}",
+          f"refit={refit}, ebic_gamma={args.ebic_gamma}] -> {out}",
           flush=True)
 
     store: dict[str, list] = {}
     t0 = time.time()
     for n, (p, k, c, r) in enumerate(tasks, 1):
-        row = run_one(p, k, c, r, cfg, select=args.select, refit=args.refit,
+        row = run_one(p, k, c, r, cfg, select=args.select, refit=refit,
                       add_screen=args.add_screen, ebic_gammas=tuple(args.ebic_gamma))
         for key, val in row.items():
             store.setdefault(key, []).append(val)
@@ -436,27 +562,14 @@ def main() -> None:
             print(f"  {n}/{len(tasks)}  {el/60:.1f} min elapsed, "
                   f"eta {(len(tasks)-n)*el/n/60:.1f} min", flush=True)
 
-    # Sparse-triple fields are ragged (different p and sparsity per dataset).
-    # Build the object array explicitly: np.array(list_of_arrays, dtype=object)
-    # silently collapses to 2-D when the lengths happen to coincide, which would
-    # make the layout depend on the data.
-    payload = {}
-    for key, vals in store.items():
-        if key.startswith(RAGGED):
-            arr = np.empty(len(vals), dtype=object)
-            for i, v in enumerate(vals):
-                arr[i] = v
-        else:
-            arr = np.array(vals)
-        payload[key] = arr
-
+    payload = pack(store)
     payload["config_json"] = json.dumps({
         **{f: getattr(cfg, f) for f in (
             "n_rep", "n_obs", "n_lambda", "lambda_ratio", "penalize_diagonal",
             "metrics_include_diagonal", "standardize", "metzler", "seed",
             "solver", "loss", "direction", "up_start", "penalty", "convention", "tol", "c_scale",
             "method")},
-        "select": args.select, "refit": args.refit, "add_screen": args.add_screen,
+        "select": args.select, "refit": refit, "add_screen": args.add_screen,
         "ebic_gammas": list(args.ebic_gamma), "ebic_form": EBIC_FORM,
         "p_values": list(cfg.p_values),
         "k_values": list(cfg.k_values),
@@ -465,17 +578,8 @@ def main() -> None:
         "gamma": resolve_gamma(cfg.penalty, cfg.gamma),
     })
     payload["c_choice_names"] = np.array([c.value for c in CChoice])
-    payload["provenance_json"] = json.dumps({
-        "host": socket.gethostname(),
-        "python": sys.version.split()[0],
-        "numpy": np.__version__,
-        "platform": platform.platform(),
-        "shard": args.shard, "n_shards": args.n_shards,
-        "wall_seconds": time.time() - t0,
-        "finished_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-    })
-
-    np.savez_compressed(out, **payload)
+    payload["provenance_json"] = provenance(args.shard, args.n_shards, t0)
+    save_npz(out, payload)
     print(f"done: {len(tasks)} datasets in {(time.time()-t0)/60:.1f} min -> {out} "
           f"({out.stat().st_size/1e6:.1f} MB)", flush=True)
 

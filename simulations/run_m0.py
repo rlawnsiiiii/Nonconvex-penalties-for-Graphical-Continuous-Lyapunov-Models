@@ -6,6 +6,10 @@ that the whole pipeline is right: G1 should approach perfect recovery, G2 should
 not, even at n = infinity.
 
     python simulations/run_m0.py --reps 100 --out runs/local/m0_reps100.csv
+
+The random stream is seeded per (setting, sample size, replicate), so a data set does not
+depend on ``--reps`` or on the settings run before it (code review C5, 13 October 2026; the
+runs before that date, S1_reproduction.md Section 8.1, drew everything from one stream).
 """
 
 from __future__ import annotations
@@ -51,14 +55,14 @@ def main() -> None:
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     c = 2.0 * np.eye(5)
-    rng = np.random.default_rng(args.seed)
     rows = []
     detail = []
     t0 = time.time()
 
-    for setting in SETTINGS:
-        for n in cfg.sample_sizes:
+    for si, setting in enumerate(SETTINGS):
+        for ni, n in enumerate(cfg.sample_sizes):
             for rep in range(args.reps):
+                rng = np.random.default_rng([args.seed, si, ni, rep])
                 m_star = draw_target(setting, rng)
                 sigma_true = solve_lyapunov(m_star, c)
                 if np.isinf(n):

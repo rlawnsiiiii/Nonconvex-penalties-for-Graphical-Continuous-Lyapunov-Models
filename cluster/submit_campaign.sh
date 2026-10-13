@@ -76,10 +76,21 @@
 # again except by --fill, and keeps its shard count.  If sbatch refuses a cell
 # (LRZ allows about 200 queued tasks per user), nothing is recorded for it and the
 # script stops: run the same command again later and it continues there.
+#
+# Bookkeeping per cell (code review C1, C3; 13 October 2026).  Besides n_shards the folder
+# gets `submission`: "wave|runner|arguments|time limit" as submitted.  --fill resubmits with
+# that record, never with another wave's definition of the same cell name (six names belong
+# to wave 5 and wave 8 with different runners and shard counts); a cell recorded by another
+# wave is reported and skipped.  A folder without a record (submitted before 13 October) is
+# filled only if its shard count equals the wave's definition (or the --shards given).  Every
+# sbatch call is appended to logs/submissions.log with the time and the git commit (the
+# shards themselves record the commit they ran with).  --only that matches no cell is an
+# error (exit 2), so that a typo in a plan line is noticed instead of logged as "done".
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 ROOT=${CAMPAIGN_ROOT:-runs/campaign}         # override only for tests
+SUBMIT_LOG=${SUBMIT_LOG:-logs/submissions.log}   # every sbatch call, with time and commit
 BATCH=cluster/campaign_array.sbatch
 NS=(1000 1e4 inf)
 NS_GIVEN=0
@@ -316,9 +327,11 @@ fi
 
 n_cells=0
 n_tasks=0
+n_wanted=0
 for n in "${NS[@]}"; do
   while IFS='|' read -r name tag runner shards time args; do
     wanted "$name" || continue
+    n_wanted=$((n_wanted + 1))
     run="$ROOT/${name}_n${n}"
     shards=${SHARDS:-$shards}
     if [ -f "$run/n_shards" ]; then
@@ -335,6 +348,19 @@ for n in "${NS[@]}"; do
       n_missing=$(echo "$missing" | tr ',' '\n' | wc -l | tr -d ' ')
       if [ "$FILL" -eq 0 ] || [ "$STATUS" -eq 1 ]; then
         echo "submitted   $run  ($((prev - n_missing))/$prev shards written)"
+        continue
+      fi
+      # a fill resubmits what the cell was submitted with (its record), never another wave's
+      # definition of the same name (code review C1)
+      if [ -f "$run/submission" ]; then
+        IFS='|' read -r rec_wave rec_runner rec_args rec_time < "$run/submission"
+        if [ "$rec_wave" != "$WAVE" ]; then
+          echo "other wave  $run  (submitted by wave $rec_wave: fill it with --wave $rec_wave --fill)"
+          continue
+        fi
+        runner=$rec_runner; args=$rec_args; time=$rec_time
+      elif [ "$prev" != "$shards" ]; then
+        echo "mismatch    $run  (has $prev shards, wave $WAVE defines $shards: not filled -- another wave's cell? pass --shards $prev to confirm)"
         continue
       fi
       array="$missing"
@@ -354,20 +380,30 @@ for n in "${NS[@]}"; do
     if [ "$DRY" -eq 1 ]; then
       echo "${cmd[*]}"
     else
-      mkdir -p "$run" logs
+      mkdir -p "$run" logs "$(dirname "$SUBMIT_LOG")"
       new=0
-      [ -f "$run/n_shards" ] || { echo "$prev" > "$run/n_shards"; new=1; }
+      if [ ! -f "$run/n_shards" ]; then
+        echo "$prev" > "$run/n_shards"
+        echo "$WAVE|$runner|$args|$time" > "$run/submission"
+        new=1
+      fi
       if ! "${cmd[@]}" < /dev/null; then
-        [ "$new" -eq 1 ] && rm -f "$run/n_shards"
+        [ "$new" -eq 1 ] && rm -f "$run/n_shards" "$run/submission"
         echo "!! sbatch failed for $run -- nothing recorded for this cell." >&2
         echo "!! $n_tasks tasks in $n_cells cells were submitted before it; run the same command again later to continue." >&2
         exit 1
       fi
+      printf '%s | %s | %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" \
+        "$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)" "${cmd[*]}" >> "$SUBMIT_LOG"
     fi
     n_cells=$((n_cells + 1))
     n_tasks=$((n_tasks + count))
   done <<< "$CELLS"
 done
+if [ ${#ONLY[@]} -gt 0 ] && [ "$n_wanted" -eq 0 ]; then
+  echo "no cell of wave $WAVE matches --only ${ONLY[*]}" >&2
+  exit 2
+fi
 if [ "$STATUS" -eq 0 ]; then
   verb=submitted
   [ "$DRY" -eq 1 ] && verb="would submit"

@@ -184,6 +184,9 @@ def test_start_blocks_split_the_starts_of_a_graph_exactly(tmp_path):
 
 def test_start_blocks_need_whole_blocks(tmp_path):
     for extra in (["--restarts", "3", "--start-blocks", "2"],           # 3 starts in 2 blocks
+                  ["--restarts", "0", "--start-blocks", "2"],           # a block without a start (crashed before)
+                  ["--reps", "0"],
+                  ["--add-screen", "5"],                                # screening needs the likelihood refit
                   ["--restarts", "4", "--start-blocks", "2", "--n-shards", "3"],
                   ["--restarts", "4", "--start-blocks", "2", "--methods", "truth"],
                   ["--restarts", "4", "--start-blocks", "0"]):
@@ -191,3 +194,15 @@ def test_start_blocks_need_whole_blocks(tmp_path):
                "--reps", "1", "--out-dir", str(tmp_path / "x"), *extra]
         res = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
         assert res.returncode == 2, extra
+
+
+def test_dead_and_unconverged_flags_are_stored(tmp_path):
+    """Code review A2 / A3 (13 October 2026): per graph, whether the best start (and the search
+    from the truth) ended at +inf, how many refits hit the solver's cap and how many searches
+    the step cap; with the least-squares refit nothing is capped and nothing is dead here."""
+    shard = run(tmp_path, "--n-obs", "10000")
+    assert not shard["pure_dead"].any() and not shard["truth_dead"].any()
+    assert np.all(shard["pure_unconverged"] == 0) and np.all(shard["truth_unconverged"] == 0)
+    assert np.all(shard["pure_capped"] == 0) and not shard["truth_capped"].any()
+    prov = json.loads(str(shard["provenance_json"]))
+    assert "commit" in prov

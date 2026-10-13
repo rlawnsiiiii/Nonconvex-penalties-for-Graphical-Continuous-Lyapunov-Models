@@ -9,11 +9,31 @@ design matrix; the only backend that reaches ``p = 50``.  The default solver.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from gclm.lyapunov import lyapunov_residual
 from gclm.objective.direct import direct_grad, lipschitz_bound
 from gclm.objective.penalties import canonical, penalty_scale, penalty_weights, prox, resolve_gamma, value
+
+
+@dataclass
+class ProxInfo:
+    """What a solve reports besides the solution (code review A4, 13 October 2026):
+    the number of proximal-gradient steps taken and whether the stopping rule was met
+    before ``max_iter``.  Without it a solve that hits the cap returns silently."""
+
+    iterations: int
+    converged: bool
+
+
+def _check_symmetric(c: np.ndarray) -> None:
+    """The gradient ``2 R Sigma`` of the direct loss assumes a symmetric residual, i.e. a
+    symmetric ``C`` (:func:`gclm.objective.direct.direct_grad`); checked once per solve."""
+    c = np.asarray(c, dtype=float)
+    if c.ndim != 2 or c.shape[0] != c.shape[1] or not np.allclose(c, c.T, rtol=1e-10, atol=1e-12):
+        raise ValueError("C must be symmetric: the direct-loss gradient 2 R(M) Sigma is only valid then")
 
 
 def _soft_threshold(z: np.ndarray, t: np.ndarray | float) -> np.ndarray:
@@ -31,7 +51,8 @@ def solve_fista(
     penalty: str = "lasso",
     gamma: float | None = None,
     convention: str = "textbook",
-) -> np.ndarray:
+    return_info: bool = False,
+):
     """Accelerated proximal gradient.
 
     ``penalty="lasso"``: FISTA with the adaptive restart of O'Donoghue &
@@ -41,12 +62,17 @@ def solve_fista(
     of Li & Lin (2015), which converges to a stationary point.  See
     :func:`_solve_mapg` and docs/NONCONVEX.md.
 
-    Stops when the max-norm coefficient change falls below ``tol``.
+    Stops when the max-norm coefficient change falls below ``tol``, or after
+    ``max_iter`` steps.  ``return_info=True`` returns ``(M, ProxInfo)`` -- the
+    number of steps and whether the stopping rule was met -- so that a solve at
+    the cap does not pass unnoticed (the campaign shards store both).  ``C`` must
+    be symmetric (checked here, not in the gradient).
     """
     if canonical(penalty) != "lasso":
         return _solve_mapg(sigma, c, lam, weights=weights, m_init=m_init, tol=tol,
                            max_iter=max_iter, step=step, penalty=penalty, gamma=gamma,
-                           convention=convention)
+                           convention=convention, return_info=return_info)
+    _check_symmetric(c)
     p = sigma.shape[0]
     weights = penalty_weights(p) if weights is None else weights
     lstep = lipschitz_bound(sigma) if step is None else 1.0 / step
@@ -58,8 +84,10 @@ def solve_fista(
     m = np.zeros((p, p)) if m_init is None else np.array(m_init, dtype=float)
     y = m.copy()
     t = 1.0
+    iterations, converged = 0, False
 
     for _ in range(max_iter):
+        iterations += 1
         grad = direct_grad(y, sigma, c)
         m_new = _soft_threshold(y - t_step * grad, thresh)
         # adaptive restart: momentum is dropped when it points uphill
@@ -73,7 +101,10 @@ def solve_fista(
         delta = np.max(np.abs(m_new - m))
         m, t = m_new, t_next
         if delta < tol:
+            converged = True
             break
+    if return_info:
+        return m, ProxInfo(iterations, converged)
     return m
 
 def _solve_mapg(
@@ -88,7 +119,8 @@ def _solve_mapg(
     penalty: str = "MCP",
     gamma: float | None = None,
     convention: str = "textbook",
-) -> np.ndarray:
+    return_info: bool = False,
+):
     """Monotone accelerated proximal gradient for MCP / SCAD.
 
     Li & Lin (2015), "Accelerated Proximal Gradient Methods for Nonconvex
@@ -109,7 +141,9 @@ def _solve_mapg(
 
     Residuals are cached so each candidate point costs one residual, used for
     both its objective value and (if it is kept) the next gradient.
+    ``return_info`` as in :func:`solve_fista`.
     """
+    _check_symmetric(c)
     penalty = canonical(penalty)
     gamma = resolve_gamma(penalty, gamma)
     p = sigma.shape[0]
@@ -131,8 +165,10 @@ def _solve_mapg(
     r_x = resid(x)
     x_prev, z = x.copy(), x.copy()
     t_prev, t = 0.0, 1.0
+    iterations, converged = 0, False
 
     for _ in range(max_iter):
+        iterations += 1
         y = x + (t_prev / t) * (z - x) + ((t_prev - 1.0) / t) * (x - x_prev)
         z = pstep(y, resid(y))
         v = pstep(x, r_x)
@@ -145,5 +181,8 @@ def _solve_mapg(
         else:
             x, r_x = v, r_v
         if np.max(np.abs(x - x_prev)) < tol:
+            converged = True
             break
+    if return_info:
+        return x, ProxInfo(iterations, converged)
     return x

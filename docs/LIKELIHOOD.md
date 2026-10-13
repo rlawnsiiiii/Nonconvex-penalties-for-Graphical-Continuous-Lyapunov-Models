@@ -189,11 +189,35 @@ being reset to $t=1$ every iteration, which is what makes the Frobenius loss, wh
 far from 1, workable. For MCP/SCAD the step is capped below $\gamma$ (resp. $\gamma-1$), where
 the proximal problem is strictly convex and the closed-form prox of docs/NONCONVEX.md §3 exact.
 
+*How the test is decided (13 October 2026, code review A1).* Near a stationary point the bound's
+predicted change of $L$, $\langle\nabla L(Y),M^+-Y\rangle+\|M^+-Y\|^2/(2t)\approx -t\|G\|^2/2$, is far
+below the rounding level of a loss value ($10^{-13}\max(1,|L|)$), so the difference $L(M^+)-L(Y)$ is
+noise and a test on it passes at every $t$. Until that date the test allowed an absolute slack of
+that size, and so, once the predicted change had fallen below it, the step was no longer
+controlled: a warm start that already solved the problem was moved by one uncontrolled step at
+$t=1$ and reported converged (up to 3,000 times less stationary than before), and on badly scaled
+problems (a $C$ with a diagonal ratio of 100 or more, as the rescaled $C$ produces) the
+Barzilai–Borwein steps were too long in the stiff directions and 255 to 970 of the 40,000 solves of
+a log-likelihood cell ran to the cap of 50,000 steps. Now the loss values decide only while the
+predicted change is at least 100 rounding units; below that the same bound is tested on the
+gradients, $\langle\nabla L(M^+)-\nabla L(Y),M^+-Y\rangle\le\|M^+-Y\|^2/t$ (exact for a quadratic
+$L$; the secant condition), which rounding does not spoil. A start that is already stationary is
+returned unchanged, and convergence is judged on the first-order residual of the accepted iterate,
+not on the step. A copy of the stiff solves converges in 200 to 900 steps. **The log-likelihood
+cells of the campaign stored before 13 October (waves 3, 7 and 8) were computed with the old
+test**; measured on their data sets, the one-step solves moved $M$ by about $10^{-8}$ and changed no
+support, and a full path with the corrected test differs at 2 of 100 $\lambda$ by one entry with
+the same oracle $F_1$ (`next_steps/121026/code_review_121026.md`, A1). Whether to re-run them is
+open.
+
 **`"apg"` — accelerated proximal gradient with adaptive restart (the default).** Nesterov
 momentum on top of the proximal step; a momentum step is accepted only if it lowers $F$ below the
 current iterate (Beck & Teboulle's MFISTA rule), otherwise a plain step is taken and the momentum
-reset (O'Donoghue & Candès 2015). It stops when the gradient mapping $\max|M^+-Y|/t$ is below
-`tol` $=10^{-6}$, the level at which the support metrics of Section 4.1 have stabilised. It
+reset (O'Donoghue & Candès 2015). It stops when the first-order residual of the iterate
+(`penalties.stationarity`: $|\nabla L_{ij}|\le\lambda$ on the zeros, $\nabla L_{ij}+P'(M_{ij})=0$
+elsewhere, up to `tol`) is below `tol` $=10^{-6}$, the level at which the support metrics of
+Section 4.1 have stabilised (the campaign runs it at $10^{-8}$; before 13 October the rule was the
+gradient mapping $\max|M^+-Y|/t\le$ `tol`, which a too-long step can satisfy spuriously). It
 converges to the same stationary points as the plain method (Section 5) in a fraction of the
 iterations.
 
@@ -335,9 +359,10 @@ python simulations/run_s1_shard.py --loss loglik --penalty SCAD --shard 0 --n-sh
 sbatch cluster/s1_array.sbatch runs/s2_loglik_scad --loss loglik --penalty SCAD
 ```
 
-`--solver` is ignored for these losses; `--direction up|down` selects the path order. The shard
-output carries, per $\lambda$, the first-order violation (`kkt`), the number of proximal and
-Newton steps, and the objective, so convergence can be audited after the fact.
+`--solver` is refused for these losses (it would have no effect); `--direction up|down` selects
+the path order. The shard output carries, per $\lambda$, the first-order violation (`kkt`), the
+number of proximal and Newton steps, whether the solver met its tolerance (`converged`, stored
+since 13 October 2026) and the objective, so convergence can be audited after the fact.
 
 ```python
 from gclm.objective.covariance import lambda_max

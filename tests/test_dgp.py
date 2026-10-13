@@ -88,3 +88,15 @@ def test_standardize_preserves_support():
     m, _, _, sigma_hat = draw_instance(8, 2, 500, CChoice.RANDOM_DIAG, rng,
                                        standardize=True)
     assert np.allclose(np.diag(sigma_hat), 1.0)
+
+
+def test_invalid_edge_probability_and_sample_size_are_refused():
+    """Code review D (13 October 2026): k > p gave numpy's message; nan or -inf as n silently gave
+    the population covariance.  None and inf mean the population covariance."""
+    with pytest.raises(ValueError):
+        sample_drift(5, 6 / 5, np.random.default_rng(2))
+    for n in (float("nan"), -np.inf, 0, 2.5):
+        with pytest.raises(ValueError):
+            draw_instance(5, 2, n, CChoice.ID, np.random.default_rng(2))
+    _, _, sigma_true, sigma_hat = draw_instance(5, 2, None, CChoice.ID, np.random.default_rng(2))
+    assert np.allclose(sigma_true, sigma_hat)

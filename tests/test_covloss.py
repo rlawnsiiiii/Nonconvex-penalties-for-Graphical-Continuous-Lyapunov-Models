@@ -545,3 +545,74 @@ def test_lambda_max_is_the_threshold_with_the_rescaled_c(loss, pen):
     np.testing.assert_allclose(above, md, atol=1e-10)
     below = solve(s, c, 0.95 * lm, loss, m_init=md, penalty=pen)
     assert np.count_nonzero(below - np.diag(np.diag(below))) > 0
+
+
+# --------------------------------------------------------------------------- #
+# The step test and the stopping rule (code review A1, 13 October 2026), and the
+# degenerate inputs of code review D
+# --------------------------------------------------------------------------- #
+
+
+def _stiff_instance(ratio=100.0, p=6, seed=7):
+    """Standardised data with a diagonal C whose entries span ``ratio``: the badly scaled
+    problems the rescaled C produces, on which the old step test ran to the iteration cap."""
+    _, s_hat, _ = _instance(p=p, seed=seed)
+    return s_hat, np.diag(np.logspace(0.0, np.log10(ratio), p))
+
+
+@pytest.mark.parametrize("loss", LOSSES)
+@pytest.mark.parametrize("penalty", PENALTIES)
+def test_a_stationary_start_is_returned_unchanged(loss, penalty):
+    """A warm start that already solves the problem (the flat end of a dense -> sparse MCP path,
+    for instance) is returned as it is: no step, zero iterations.  The old solver took one
+    uncontrolled step at t = 1 from it and reported convergence."""
+    _, s_hat, c = _instance()
+    lam = 0.2 * lambda_max(s_hat, c, loss)
+    m = solve(s_hat, c, lam, loss, penalty=penalty, tol=1e-10)
+    again, info = solve(s_hat, c, lam, loss, penalty=penalty, m_init=m, tol=1e-8, return_info=True)
+    assert info.converged and info.iterations == 0
+    assert np.array_equal(again, m)
+    assert info.stationarity <= 1e-8
+
+
+@pytest.mark.parametrize("loss", LOSSES)
+@pytest.mark.parametrize("penalty", ("lasso", "MCP"))
+def test_badly_scaled_c_converges_well_below_the_iteration_cap(loss, penalty):
+    """A C with a diagonal ratio of 100: every solve of a path, sparse -> dense and dense ->
+    sparse from the exact fit, meets tol = 1e-8 on the first-order residual before the cap of
+    50,000 steps the old test ran into (255 to 970 capped solves per campaign cell), and most
+    solves need a few thousand steps at most (the dense end, where the loss is flat along the
+    fibre of exact fits, legitimately needs more)."""
+    s_hat, c = _stiff_instance()
+    w = penalty_weights(6)
+    for direction in ("down", "up"):
+        path = covloss_path(s_hat, c, loss, n_lambda=12, penalty=penalty, direction=direction, tol=1e-8)
+        assert path.converged.all(), direction
+        assert path.iterations.max() < 50_000 and np.median(path.iterations) < 5_000, (direction, path.iterations)
+        for lam, m, kkt in zip(path.lambdas, path.estimates, path.kkt):
+            assert kkt <= 1e-8
+            assert stationarity(m, loss_grad(m, s_hat, c, loss), lam, w, penalty) <= 1.01e-8
+
+
+@pytest.mark.parametrize("loss", LOSSES)
+def test_converged_means_the_first_order_residual_is_below_tol(loss):
+    """The flag is judged on the accepted iterate itself, not on the size of the last step."""
+    _, s_hat, c = _instance()
+    for penalty in PENALTIES:
+        path = covloss_path(s_hat, c, loss, n_lambda=10, penalty=penalty, tol=1e-8)
+        assert path.converged.all() and np.all(path.kkt <= 1e-8)
+
+
+def test_degenerate_inputs():
+    """p = 1 has no off-diagonal entry (lambda_max undefined); a non-finite M is treated as
+    unstable (loss +inf) instead of raising inside scipy; a grid of one value is lambda_max."""
+    from gclm.solvers.path import lambda_grid
+    _, s_hat, c = _instance()
+    for loss in LOSSES:
+        with pytest.raises(ValueError):
+            lambda_max(np.eye(1), np.eye(1), loss)
+        assert loss_value(np.full((6, 6), np.nan), s_hat, c, loss) == np.inf
+    assert lambda_grid(2.0, n_lambda=1).tolist() == [2.0]
+    with pytest.raises(ValueError):
+        lambda_grid(2.0, n_lambda=0)
+    assert np.all(np.diff(lambda_grid(2.0, n_lambda=5)) > 0) and lambda_grid(2.0, 5)[-1] == 2.0

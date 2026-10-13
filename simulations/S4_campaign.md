@@ -7,8 +7,9 @@ the eBIC penalty inside the search for every wave 1 cell, and 300 starting graph
 the log-likelihood loss at $p = 10$ and 20 with the dense-start estimators, §6); wave 8 (the
 likelihood refit on every stored path, §5 and §6; the 100-start search with the likelihood refit,
 §4a) complete at $n = 10^4$ but for the 100-start search, which is at 27 of 32 graphs for $C = 2I$
-and 1 of 32 for the rescaled $C$, and queued at $n = 10^3$. One wave 5a cell is at 350 of 400
-graphs. Numbers:
+and 1 of 32 for the rescaled $C$, and queued at $n = 10^3$. Every cell of waves 1 to 7 holds its
+full 400 or 800 graphs (the last missing shard, of a wave 5a cell, arrived on 12 October; the
+numbers and figures below are from the complete cells, 13 October). Numbers:
 `runs/campaign/campaign_{means,paired,per_dataset}.csv` from `simulations/diagnostics/campaign.py`;
 figures: `simulations/diagnostics/plot_campaign.py` → `runs/campaign/figures/`. Terms: a graph is
 selected by its score, the sum of a loss and a penalty (the BIC penalty or the eBIC penalty);
@@ -94,7 +95,7 @@ settings of the true $C$), the answer is:
 
 | figure | what | section | data behind it |
 |---|---|---|---|
-| `by_p`, `gain_by_p` | the six estimators over $p = 10 \dots 50$ at $n = 10^3$, both $C$; and as paired gains over the lasso | §6a | final (one $p = 50$ cell at 350 of 400 graphs) |
+| `by_p`, `gain_by_p` | the six estimators over $p = 10 \dots 50$ at $n = 10^3$, both $C$; and as paired gains over the lasso | §6a | final |
 | `twobytwo_max_f1`, `_aupr`, `_bic_f1`, `_search_f1` | the 2 × 2 over $n$ at $p = 10, 20$ | §2, §5 | final |
 | `by_true_c_max_f1`, `_bic_f1`, `_search_f1` | the gains per setting of the true $C$ | §3 | final |
 | `selection_p20`, `orientation_p20` | oracle $\lambda$ against the selected graph (BIC penalty) against the search; what the selected graphs consist of | §4, §5 | final |
@@ -102,7 +103,7 @@ settings of the true $C$), the answer is:
 | `loglik_p10` | the log-likelihood loss, wave 3: lasso and MCP in both path orders, $p = 10$ | §6 | final (wave 3 complete) |
 | `loglik_wave7` | the log-likelihood loss with the dense-start estimators, $p = 10, 20$, $n = 10^3, 10^4$; rows: oracle $F_1$, AUPR, selected graph, after the search | §6 | final (wave 7 complete) |
 | `restarts` | the pure search with 100 and 300 starting graphs, sparse and uniform, over $n$; and with the likelihood refit | §4a | final (waves 5b, 6; wave 8 (c) at 27 graphs) |
-| `selection_checks` | the score with the likelihood refit; the eBIC term inside the search | §5 | final (one cell at 350 of 400 graphs) |
+| `selection_checks` | the score with the likelihood refit; the eBIC term inside the search | §5 | final |
 | `refit_n1e4` | the likelihood refit against the least-squares refit, paired, every cell of wave 8 (b) at $n = 10^4$ | §5 | final (wave 8 (b) at $n = 10^4$ complete) |
 | `bic_vs_ebic` | the BIC penalty against the eBIC penalty: $F_1$ difference and edges selected, over $p$ and $n$ | §5 | final (wave 6 complete) |
 | `../runs/campaign/figures_ebic1/*` | every rule-dependent figure with the eBIC penalty in the score | §5 | final (wave 6 complete) |
@@ -390,6 +391,14 @@ search compared with the global optimum from every start.
   MCP dense → sparse by +0.06 / +0.04 / +0.03, the adaptive lasso by +0.03 / +0.03 / 0.00; afterwards
   all lasso-based starts lie within 0.02 of each other, the adaptive lasso on top (+0.01 over
   lasso + search, $z$ 3 to 5). At $p = 10$ the search adds little to anyone.
+- **Dead selections** (code review A3, 13 October 2026). On 22 of the stored rows every support
+  of the path has score $+\infty$ (no stable least-squares refit; 15 cells, all with the rescaled
+  $C$, mostly the adaptive lasso at $p \ge 15$: 5 of its 400 graphs at $p = 50$), one searched graph
+  and one pure search (all 11 starts) end at $+\infty$, and six searches from the truth end there
+  with $F_1 = 1$, which is then no ceiling. The stored index is in those cases the densest graph of
+  the path, not a selection. They are kept in the tables as stored and counted (`campaign_means.csv`,
+  columns `bic_dead`, `search_dead`); the largest effect on a cell mean is 0.003
+  (`direct_adaptive_Cresc_p50_n1000`, standard error 0.008). `campaign.py --drop-dead` blanks them.
 
 ![](../runs/campaign/figures/search_ceilings.png)
 
@@ -424,20 +433,22 @@ eBIC penalty inside the selection and the search (wave 5c). $n = 10^4$.*
 **The score with the likelihood refit changes nothing (wave 5a).** The score above uses the likelihood
 *at the least-squares refit*, not the maximised likelihood (`docs/SEARCH.md` §2a); Améndola et al.
 and Dettling use the maximised one. The cells `direct_<lasso|MCP-up|adaptive>-ml_<C>` ($p = 10$,
-$n = 10^4$, `--refit loglik`; 400 graphs, the lasso cell with the rescaled $C$ at 350) repeat the
-selection and the search with the maximised likelihood on the same paths:
+$n = 10^4$, `--refit loglik`; 400 graphs each, complete since 12 October) repeat the selection and
+the search with the maximised likelihood on the same paths:
 
 | $p = 10$, $n = 10^4$, $F_1$ | selected, LS → ML | after the search, LS → ML |
 |---|---|---|
-| lasso, $C = 2I$ / rescaled $C$ | 0.570 → 0.571 / 0.566 → 0.572 | 0.570 → 0.570 / 0.597 → 0.602 |
+| lasso, $C = 2I$ / rescaled $C$ | 0.570 → 0.571 / 0.566 → 0.568 | 0.570 → 0.570 / 0.597 → 0.600 |
 | MCP dense → sparse | 0.564 → 0.563 / 0.591 → 0.594 | 0.566 → 0.565 / 0.596 → 0.605 |
 | adaptive lasso | 0.575 → 0.575 / 0.606 → 0.608 | 0.567 → 0.570 / 0.608 → 0.612 |
 
-Every difference is within 0.01 and within one standard error; the ranking is unchanged; the
-likelihood refit costs 30 to 180 times more (12 to 67 CPU-h per cell against 0.4 to 5). The
-least-squares refit is a valid stand-in for the likelihood refit at this size. (The lasso cell
-with the rescaled $C$ has 350 graphs; on those 350 the least-squares selection is 0.569, so its
-gain in the table above, 0.566 → 0.572, is half that on paired graphs.)
+Every difference is within 0.01 and within one standard error of a cell mean; the ranking is
+unchanged. Paired graph by graph the likelihood refit is ahead by 0.001 to 0.003 with $C = 2I$
+and by 0.002 to 0.010 with the rescaled $C$, the largest for MCP dense → sparse after the search
+(+0.0095, $z = 3.8$): real, but a tenth of the differences between the estimators. The likelihood
+refit costs 12 to 85 CPU-h per cell against 0.4 to 5 for the least-squares one (3 to 200 times
+more; the ratio is smallest for MCP dense → sparse, whose path is the expensive part). The
+least-squares refit is a valid stand-in for the likelihood refit at this size.
 
 ![](../runs/campaign/figures/refit_n1e4.png)
 
@@ -520,6 +531,16 @@ The ranking of the estimators never changes.
 
 ## 6. The log-likelihood loss (waves 3 and 7, $p = 10, 20$, complete)
 
+*Solver note (13 October 2026).* The cells of this section were computed with the covariance-loss
+solver before its backtracking test was corrected (`docs/LIKELIHOOD.md` §4.3; code review A1 in
+`next_steps/121026/code_review_121026.md`): the old test let a step pass once the predicted
+decrease of the loss was at rounding level, which moved stationary warm starts by one uncontrolled
+step and ran 255 to 970 of the 40,000 solves of a cell with the rescaled $C$ to the iteration cap.
+Measured on the stored data sets the one-step solves moved $M$ by about $10^{-8}$ and changed no
+support, and a full path with the corrected test differs at 2 of 100 $\lambda$ by one entry with
+the same oracle $F_1$; the numbers below are stated as stored. Whether to re-run waves 3, 7 and 8
+with the corrected solver (about 700 CPU-h per sample size for wave 7) is open.
+
 ![](../runs/campaign/figures/loglik_wave7.png)
 
 *The log-likelihood loss with the five estimators of wave 7 (and wave 3's lasso, MCP sparse →
@@ -593,8 +614,8 @@ lasso's *selected* graph, because wave 3 ran no search; at $p = 20$ both are sea
 ![](../runs/campaign/figures/by_p.png)
 
 *Figure 5's setting, $n = 10^3$, 800 graphs per cell at $p = 10, 20$ and 400 at $p = 15, 25, 30, 40,
-50$ (the SCAD dense → sparse cell with the rescaled $C$ at $p = 50$: 350). Rows: $F_1$ at the oracle
-$\lambda$, area under the precision–recall curve, $F_1$ of the selected graph (BIC penalty).*
+50$. Rows: $F_1$ at the oracle $\lambda$, area under the precision–recall curve, $F_1$ of the
+selected graph (BIC penalty).*
 
 ![](../runs/campaign/figures/gain_by_p.png)
 

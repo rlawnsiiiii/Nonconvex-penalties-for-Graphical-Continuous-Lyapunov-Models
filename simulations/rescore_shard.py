@@ -27,7 +27,15 @@ not recomputed, which is most of a cell's cost; the output has the fields that
 ``simulations/diagnostics/campaign.py`` can overlay them on the source cell's rows.
 
 As a check that the data set was rebuilt exactly, the scores (BIC penalty) are recomputed and
-compared with the stored ones (``rebuilt_exact`` per data set; the runner stops on a mismatch).
+compared with the stored ones (``rebuilt_exact`` per data set; the runner stops on a mismatch;
+relative tolerance 1e-6, which separates a wrong seed or setting, differences of order 1 and
+more, from the rounding differences of another machine's BLAS, code review C5).
+
+In refit mode ``seconds`` is the rescoring's own cost per data set (the selection and the
+search), and the source's ``seconds`` (its path and least-squares selection) is kept as
+``source_seconds``, so that ``campaign.py``'s CPU-hours are those of the cell itself (code
+review B3, 13 October 2026).  Shards are written to a temporary name and renamed into place
+(C4); the provenance records the git commit (C3).
 
     python simulations/rescore_shard.py --shard 0 --n-shards 4 --n-obs 1e4 \
         --source-cell direct_lasso_Cresc --ebic-gamma 1 --select search \
@@ -43,8 +51,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import platform
-import socket
 import sys
 import time
 from pathlib import Path
@@ -55,7 +61,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from gclm.data.simulate import CChoice, draw_instance, estimation_volatility  # noqa: E402
-from run_s1_shard import RAGGED, ebic_tag, select_graph, unpack_supports  # noqa: E402
+from run_s1_shard import ebic_tag, pack, provenance, save_npz, select_graph, unpack_supports  # noqa: E402
+
+#: the rebuilt data set must reproduce the source's stored scores to this relative tolerance
+REBUILD_RTOL, REBUILD_ATOL = 1e-6, 1e-4
 
 SELECT = ("bic", "search")
 #: fields of a shard that are not one entry per data set
@@ -86,9 +95,10 @@ def rescore_file(src: Path, gammas, select: str) -> dict:
         supports = list(unpack_supports(d["supports_packed"][i], n_l, p))
         row = {"p": p, "k": k, "c_choice": ci, "rep": rep}
         # recomputed with the BIC penalty: must reproduce the stored scores (same data, same refit)
-        plain = select_graph(supports, sigma_hat, c_est, n_obs, m_true, search=False)
+        plain = select_graph(supports, sigma_hat, c_est, n_obs, m_true, search=False,
+                             refit=cfg.get("refit", "direct"))
         stored = np.asarray(d["bic_scores"][i], float)
-        same = np.allclose(plain["bic_scores"], stored, rtol=1e-8, atol=1e-6, equal_nan=True)
+        same = np.allclose(plain["bic_scores"], stored, rtol=REBUILD_RTOL, atol=REBUILD_ATOL, equal_nan=True)
         row["rebuilt_exact"] = bool(same)
         if not same:
             raise RuntimeError(f"{src.name} data set {i} (p={p} k={k} C={names[ci]} rep={rep}): the "
@@ -102,15 +112,7 @@ def rescore_file(src: Path, gammas, select: str) -> dict:
                 row[f"m_{tag}_{key[2:]}" if key.startswith("m_") else f"{tag}_{key}"] = val
         for key, val in row.items():
             store.setdefault(key, []).append(val)
-    payload = {}
-    for key, vals in store.items():
-        if key.startswith(RAGGED):
-            arr = np.empty(len(vals), dtype=object)
-            for j, v in enumerate(vals):
-                arr[j] = v
-        else:
-            arr = np.array(vals)
-        payload[key] = arr
+    payload = pack(store)
     payload["c_choice_names"] = d["c_choice_names"]
     payload["source_config_json"] = d["config_json"]
     return payload
@@ -136,9 +138,11 @@ def refit_file(src: Path, refit: str, select: str, p_keep=()) -> dict:
     n_obs = cfg["n_obs"]
     n_obs = math.inf if n_obs in ("inf", "Infinity") or (isinstance(n_obs, float) and math.isinf(n_obs)) else float(n_obs)
     keep = [i for i in range(len(d["p"])) if not p_keep or int(d["p"][i]) in p_keep]
-    stale = ("bic_", "search_", "m_search_", "select_seconds", "rebuilt_exact", "ebic", "m_ebic")
+    stale = ("bic_", "search_", "m_search_", "select_seconds", "rebuilt_exact", "ebic", "m_ebic",
+             "seconds", "source_seconds")
     payload = {key: d[key][keep] for key in d.files
                if key not in NOT_PER_DATASET and not key.startswith(stale)}
+    payload["source_seconds"] = d["seconds"][keep]              # the source's path + selection
     new: dict[str, list] = {}
     for i in keep:
         p, m_true, sigma_hat, c_est, supports = _rebuild(d, i, cfg, n_obs)
@@ -146,22 +150,16 @@ def refit_file(src: Path, refit: str, select: str, p_keep=()) -> dict:
         own = select_graph(supports, sigma_hat, c_est, n_obs, m_true, search=False,
                            refit=cfg.get("refit", "direct"))
         if not np.allclose(own["bic_scores"], np.asarray(d["bic_scores"][i], float),
-                           rtol=1e-8, atol=1e-6, equal_nan=True):
+                           rtol=REBUILD_RTOL, atol=REBUILD_ATOL, equal_nan=True):
             raise RuntimeError(f"{src.name} data set {i}: the recomputed scores differ from the "
                                f"stored ones; the data set was not rebuilt as the source cell saw it")
         out = select_graph(supports, sigma_hat, c_est, n_obs, m_true, search=select == "search",
                            refit=refit)
         out["rebuilt_exact"] = True
+        out["seconds"] = out["select_seconds"]                   # this cell's own cost (code review B3)
         for key, val in out.items():
             new.setdefault(key, []).append(val)
-    for key, vals in new.items():
-        if key.startswith(RAGGED):
-            arr = np.empty(len(vals), dtype=object)
-            for j, v in enumerate(vals):
-                arr[j] = v
-        else:
-            arr = np.array(vals)
-        payload[key] = arr
+    payload.update(pack(new, ids=()))                           # the ids are the source's, kept above
     payload["c_choice_names"] = d["c_choice_names"]
     cfg.update({"select": select, "refit": refit, "add_screen": None, "ebic_gammas": [],
                 "p_values": sorted({int(d["p"][i]) for i in keep})})
@@ -224,11 +222,8 @@ def main() -> None:
         payload["config_json"] = json.dumps({"source_cell": args.source_cell, "n_obs": args.n_obs,
                                              "source_shard": src.name, "ebic_gammas": list(args.ebic_gamma),
                                              "ebic_form": "dettling", "select": args.select, "refit": "direct"})
-    payload["provenance_json"] = json.dumps({
-        "host": socket.gethostname(), "python": sys.version.split()[0], "numpy": np.__version__,
-        "platform": platform.platform(), "shard": args.shard, "n_shards": args.n_shards,
-        "wall_seconds": time.time() - t0, "finished_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
-    np.savez_compressed(out, **payload)
+    payload["provenance_json"] = provenance(args.shard, args.n_shards, t0)
+    save_npz(out, payload)
     print(f"done: {len(payload['p'])} data sets in {(time.time() - t0) / 60:.1f} min -> {out}", flush=True)
 
 

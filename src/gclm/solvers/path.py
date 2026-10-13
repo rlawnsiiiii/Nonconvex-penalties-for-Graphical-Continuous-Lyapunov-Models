@@ -75,8 +75,14 @@ def lambda_grid(lam_max: float, n_lambda: int = 100, ratio: float = 1e-4) -> np.
     """``lambda_1 = lam_max * ratio < ... < lambda_n = lam_max``, log-equidistant.
 
     Dettling Section 5 / Varando ``10^(seq(-4, 0, length = 100))``.
-    Returned in *increasing* order, as written in the papers.
+    Returned in *increasing* order, as written in the papers.  ``n_lambda=1``
+    gives ``[lam_max]`` (code review D, 13 October 2026: it used to give
+    ``[ratio * lam_max]``, against this docstring).
     """
+    if n_lambda < 1:
+        raise ValueError("n_lambda must be at least 1")
+    if n_lambda == 1:
+        return np.array([float(lam_max)])
     return lam_max * np.logspace(np.log10(ratio), 0.0, n_lambda)
 
 def _snap(estimates: list[np.ndarray], zero_tol: float) -> list[np.ndarray]:
@@ -92,10 +98,17 @@ def _snap(estimates: list[np.ndarray], zero_tol: float) -> list[np.ndarray]:
 
 @dataclass
 class LassoPath:
-    """Solutions along the regularization path, ordered by increasing lambda."""
+    """Solutions along the regularization path, in the order of ``lambdas``
+    (increasing, when the grid comes from :func:`lambda_grid`)."""
 
     lambdas: np.ndarray
     estimates: list[np.ndarray] = field(default_factory=list)
+    #: per lambda, when the solver reports them (``fista``; the closed form at ``lambda_max``
+    #: counts as 0 steps, converged): proximal-gradient steps taken, and whether the stopping
+    #: rule was met before ``max_iter`` (code review A4, 13 October 2026).  Empty for the
+    #: backends that report nothing.
+    iterations: np.ndarray = field(default_factory=lambda: np.zeros(0, int))
+    converged: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
 
     def supports(self, include_diagonal: bool = False) -> list[np.ndarray]:
         out = []
@@ -240,6 +253,7 @@ def lasso_path(
         order = np.argsort(lambdas, kind="stable")
         warm = dense.estimates[order[0]]
         up: list[np.ndarray | None] = [None] * len(lambdas)
+        iters, conv = np.zeros(len(lambdas), int), np.ones(len(lambdas), bool)
         for i in order:
             lam = lambdas[i]
             if lam_max is not None and not penalize_diagonal and lam >= lam_max:
@@ -247,21 +261,32 @@ def lasso_path(
                 #    standard path does (it is a stationary point there).
                 warm = diagonal_fit(sigma, c)
             else:
-                warm = fit(sigma, c, lam, weights=weights, m_init=warm, **solver_kwargs)
+                warm, info = fit(sigma, c, lam, weights=weights, m_init=warm, return_info=True,
+                                 **solver_kwargs)
+                iters[i], conv[i] = info.iterations, info.converged
             up[i] = warm.copy()
-        return LassoPath(lambdas=lambdas, estimates=_snap(up, zero_tol))
+        return LassoPath(lambdas=lambdas, estimates=_snap(up, zero_tol), iterations=iters, converged=conv)
 
     # ---- sparse -> dense (every penalty; and the lasso in either "direction") ----
-    estimates: list[np.ndarray] = []
+    # walked from the largest lambda down, whatever order the grid was given in (code review D:
+    # this loop used to assume an increasing grid)
+    estimates: list[np.ndarray | None] = [None] * len(lambdas)
+    iters, conv = np.zeros(len(lambdas), int), np.ones(len(lambdas), bool)
     warm = None
-    for lam in lambdas[::-1]:
+    for i in np.argsort(-lambdas, kind="stable"):
+        lam = lambdas[i]
         if lam_max is not None and not penalize_diagonal and lam >= lam_max:
             warm = diagonal_fit(sigma, c)  # exact: KKT holds by definition of lam_max
+        elif solver == "fista":
+            warm, info = fit(sigma, c, lam, weights=weights, m_init=warm, return_info=True,
+                             **solver_kwargs)
+            iters[i], conv[i] = info.iterations, info.converged
         else:
             warm = fit(sigma, c, lam, weights=weights, m_init=warm, **solver_kwargs)
-        estimates.append(warm.copy())
-    estimates.reverse()
-    return LassoPath(lambdas=lambdas, estimates=_snap(estimates, zero_tol))
+        estimates[i] = warm.copy()
+    if solver != "fista":                                  # the design solver reports nothing
+        iters, conv = np.zeros(0, int), np.zeros(0, bool)
+    return LassoPath(lambdas=lambdas, estimates=_snap(estimates, zero_tol), iterations=iters, converged=conv)
 
 
 def lla_path(
@@ -322,18 +347,22 @@ def lla_path(
     lam_max = lambda_max(sigma, c)
 
     estimates: list[np.ndarray] = []
-    for lam, m in zip(lambdas, lasso.estimates):
+    iters, conv = np.zeros(len(lambdas), int), np.ones(len(lambdas), bool)
+    for i, (lam, m) in enumerate(zip(lambdas, lasso.estimates)):
         m = np.array(m, dtype=float)
         if lam < lam_max:          # at lam_max the start is diagonal and every weight is 1
             for _ in range(steps):
                 w = off * lla_weights(m, lam, penalty, gamma)
-                m_new = solve_fista(sigma, c, lam, weights=w, m_init=m, tol=tol, max_iter=max_iter)
+                m_new, info = solve_fista(sigma, c, lam, weights=w, m_init=m, tol=tol, max_iter=max_iter,
+                                          return_info=True)
+                iters[i] += info.iterations                # summed over the LLA steps
+                conv[i] &= info.converged
                 fixed = np.array_equal(m_new != 0, m != 0) and np.max(np.abs(m_new - m)) < 10 * tol
                 m = m_new
                 if fixed:
                     break
         estimates.append(m)
-    return LassoPath(lambdas=lambdas, estimates=_snap(estimates, zero_tol))
+    return LassoPath(lambdas=lambdas, estimates=_snap(estimates, zero_tol), iterations=iters, converged=conv)
 
 
 @dataclass
@@ -388,6 +417,7 @@ def adaptive_lasso_path(
     if not kept.any():             # nothing to select from: the path is the diagonal fit
         lambdas = lambda_grid(1.0, n_lambda, ratio) if lambdas is None else np.asarray(lambdas, float)
         return AdaptiveLassoPath(lambdas=lambdas, estimates=[m_diag.copy() for _ in lambdas],
+                                 iterations=np.zeros(len(lambdas), int), converged=np.ones(len(lambdas), bool),
                                  weights=weights, pilot=pilot)
     weights[kept] = size[kept] ** (-power)
     weights[kept] /= weights[kept].min()
@@ -399,16 +429,19 @@ def adaptive_lasso_path(
     lambdas = np.asarray(lambdas, dtype=float)
 
     estimates: list[np.ndarray | None] = [None] * len(lambdas)
+    iters, conv = np.zeros(len(lambdas), int), np.ones(len(lambdas), bool)
     warm = m_diag
     for i in np.argsort(-lambdas, kind="stable"):
         lam = lambdas[i]
         if lam >= lam_max:
             warm = m_diag
         else:
-            warm = solve_fista(sigma, c, lam, weights=weights, m_init=warm, tol=tol, max_iter=max_iter)
+            warm, info = solve_fista(sigma, c, lam, weights=weights, m_init=warm, tol=tol, max_iter=max_iter,
+                                     return_info=True)
+            iters[i], conv[i] = info.iterations, info.converged
         estimates[i] = warm.copy()
-    return AdaptiveLassoPath(lambdas=lambdas, estimates=_snap(estimates, zero_tol),
-                             weights=weights, pilot=pilot)
+    return AdaptiveLassoPath(lambdas=lambdas, estimates=_snap(estimates, zero_tol), iterations=iters,
+                             converged=conv, weights=weights, pilot=pilot)
 
 
 DIRECTIONS = ("up", "down")

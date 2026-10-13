@@ -212,10 +212,15 @@ Reported per dataset: `max_acc`, `max_f1` (maxima over the $\lambda$-path), `auc
 **Curve construction** (following Dettling's "interpolation and extrapolation if necessary",
 implemented as in Varando's `util.R`, which is the concrete recipe Dettling inherited):
 
-- **ROC**: collect $(fpr,tpr)$ along the path, order by increasing $fpr$, prepend $(0,0)$ and
-  append $(1,1)$, integrate by the trapezoid rule.
-- **PR**: plot $pr$ vs. $tpr$ (recall), trapezoid rule, plus a closing segment from the
-  highest-recall point to $(recall=0, pr=1)$ — this mirrors `AUCPR` in `util.R`.
+- **ROC**: collect $(fpr,tpr)$ along the path in path order (sparse to dense; *not* sorted by
+  $fpr$, exactly as `AUROC` in `util.R` does), prepend $(0,0)$ and append $(1,1)$, integrate by
+  the trapezoid rule.
+- **PR**: plot $pr$ vs. $tpr$ (recall), trapezoid rule over consecutive points of the path, plus a
+  closing segment from the *lowest*-recall point (the sparsest fit) to $(recall=0, pr=1)$ — this
+  mirrors `AUCPR` in `util.R`. (Until 13 October 2026 this text said "order by increasing $fpr$"
+  and "from the highest-recall point"; the code and its test against the R port were always as
+  described here, and the two conventions differ by about 0.005 in AUPR on real paths — code review
+  B4.)
 - Degenerate cases: $tpr := 1$ if $tp+fn=0$; $fpr := 1$ if $fp+tn=0$; $pr := 1$ if $tp+fp=0$;
   $F_1 := 0$ if undefined. (Exactly the `NaN` handling in `evaluatePathB`.)
 
@@ -450,7 +455,10 @@ laptop.
 ### 8.1 M0 reproduces Figure 3 (validated)
 
 `python simulations/run_m0.py --reps 100`. Five replicates per cell already match the published
-figure closely:
+figure closely (the table below is from the run of September 2026, which drew every data set from
+one random stream; since 13 October 2026 the stream is seeded per setting, sample size and
+replicate, so a data set no longer depends on `--reps` — code review C5 — and a re-run gives
+different draws, not different conclusions):
 
 | setting | n=100 | 200 | 500 | 1000 | 5000 | 10⁴ | 10⁵ | ∞ |
 |---|---|---|---|---|---|---|---|---|

@@ -42,7 +42,7 @@ def cluster(tmp_path):
     stub.chmod(0o755)
     root = tmp_path / "campaign"
     env = {**os.environ, "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}",
-           "CAMPAIGN_ROOT": str(root)}
+           "CAMPAIGN_ROOT": str(root), "SUBMIT_LOG": str(tmp_path / "submissions.log")}
     logs_existed = (ROOT / "logs").exists()            # the script creates it for sbatch -o
 
     def submit(*args):
@@ -161,7 +161,7 @@ def test_every_cell_is_accepted_by_its_runner(cluster, wave):
                                               (25, (20,)) if "p20" in name else
                                               (2, (10,)) if ml else (25, (10,)))
             continue
-        assert ns.refit == ("loglik" if "-ml" in name else "direct") and ns.add_screen is None
+        assert (ns.refit or "direct") == ("loglik" if "-ml" in name else "direct") and ns.add_screen is None
         assert ns.ebic_gamma == ([0.5, 1.0] if "-ebic" in name else [])
         cfg = run_s1_shard.config_from_args(ns)                   # raises if not implemented
         assert cfg.loss == name.split("_")[0]
@@ -255,3 +255,41 @@ def test_dry_run_and_argument_errors(cluster):
                 ["--wave", "1", "--shards", "0"], ["--wave", "1", "--frobnicate"]):
         res, _ = submit(*bad)
         assert res.returncode == 2, bad
+
+
+def test_fill_uses_the_cells_record_and_refuses_another_waves(cluster):
+    """Code review C1 / C3 (13 October 2026): a cell folder records what it was submitted with
+    (wave, runner, arguments, time), --fill resubmits that, and a cell recorded by another wave
+    -- six names belong to wave 5 and wave 8 with different runners and shard counts -- is
+    reported and skipped instead of being filled with the wrong runner.  A folder without a
+    record is filled only when its shard count matches the wave's definition.  Every sbatch
+    call is appended to the submissions log with the commit."""
+    submit, root, _ = cluster
+    res, calls = submit("--wave", "5", "--n", "1e4", "--only", "lasso-ml_C2I")
+    assert res.returncode == 0, res.stderr
+    assert len(calls) == 1
+    run = root / "direct_lasso-ml_C2I_n1e4"
+    record = (run / "submission").read_text().strip().split("|")
+    assert record[:2] == ["5", "simulations/run_s1_shard.py"] and "--refit loglik" in record[2] and record[3] == "12:00:00"
+    (run / "shards").mkdir()
+    for i in range(7):
+        (run / "shards" / f"shard_{i:04d}_of_0008.npz").touch()
+    res, calls = submit("--wave", "8", "--n", "1e4", "--only", "lasso-ml_C2I", "--fill")
+    assert res.returncode == 0 and len(calls) == 1
+    assert "other wave" in res.stdout and "--wave 5 --fill" in res.stdout
+    res, calls = submit("--wave", "5", "--n", "1e4", "--only", "lasso-ml_C2I", "--fill")
+    assert res.returncode == 0 and len(calls) == 2
+    assert "--array=7" in calls[1] and "run_s1_shard.py" in calls[1] and "--refit loglik" in calls[1]
+    # a folder from before the record existed: filled only if the shard count matches the wave
+    legacy = root / "direct_MCP-up-ml_Cresc_n1e4"
+    (legacy / "shards").mkdir(parents=True)
+    (legacy / "n_shards").write_text("8\n")
+    res, calls = submit("--wave", "8", "--n", "1e4", "--only", "MCP-up-ml_Cresc", "--fill")   # wave 8: 16 shards
+    assert res.returncode == 0 and len(calls) == 2 and "mismatch" in res.stdout
+    res, calls = submit("--wave", "5", "--n", "1e4", "--only", "MCP-up-ml_Cresc", "--fill")   # wave 5: 8 shards
+    assert res.returncode == 0 and len(calls) == 3 and "--array=0,1,2,3,4,5,6,7" in calls[2]
+    log = (root.parent / "submissions.log").read_text().splitlines()
+    assert len(log) == 3 and all(line.count(" | ") == 2 for line in log)
+    # --only matching no cell is an error, not "nothing to do"
+    res, calls = submit("--wave", "1", "--only", "no-such-cell")
+    assert res.returncode == 2 and "matches --only" in res.stderr and len(calls) == 3

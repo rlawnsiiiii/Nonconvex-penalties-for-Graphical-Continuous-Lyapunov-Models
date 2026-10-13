@@ -35,7 +35,9 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "simulations"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from campaign import load_shards  # noqa: E402  -- the shard checks of code review B2
 from gclm.metrics import confusion  # noqa: E402
 from run_s1_shard import unpack_supports  # noqa: E402
 
@@ -57,12 +59,13 @@ def load_cell(folder: Path) -> list[dict]:
     graph last), the final supports if stored, and the true matrix.  A cell run with start
     blocks (``run_search_shard.py --start-blocks B``) has one row per graph and block; the
     blocks of a graph are put back together in block order, and a graph with a block missing
-    is left out."""
+    is left out.  The shards are read with ``campaign.load_shards`` (an unreadable file is
+    named, duplicate graphs are refused, an incomplete cell is reported)."""
     import json
     graphs, starts, restarts = [], None, None
     pieces: dict[tuple, dict] = {}                 # (p, k, c_choice, rep) -> block -> piece
-    for f in sorted((folder / "shards").glob("shard_*.npz")):
-        d = np.load(f, allow_pickle=True)
+    files, _ = load_shards(folder)
+    for f, d in files:
         cfg = json.loads(str(d["config_json"]))
         starts, restarts = cfg.get("starts", "sparse"), int(cfg["restarts"])
         blocks = int(cfg.get("start_blocks", 1))

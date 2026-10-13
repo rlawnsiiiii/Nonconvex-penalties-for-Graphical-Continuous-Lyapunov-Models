@@ -817,7 +817,9 @@ One `.npz` per array task, one entry per graph.
 | `supports_packed`, `scale` | the support at every $\lambda$ (packed bits) and the standard deviations $s_i$ |
 | `bic_index`, `bic_scores`, `bic_conf`, `bic_orient` | the $\lambda$ selected by the score (BIC penalty), the scores of all 100 supports, the counts of the selected graph and its orientation breakdown |
 | `m_search_support`, `m_search_i/j/v`, `search_conf`, `search_orient`, `search_score`, `search_moves` | the graph after the greedy search on the score: support, unpenalised refit, counts, score, number of add / delete / reverse moves |
-| `config_json`, `provenance_json` | every setting of the run; host, versions, time |
+| `config_json`, `provenance_json` | every setting of the run; host, versions, time, and (13 October 2026) the git commit the task ran from |
+| `kkt`, `iterations`, `newton_steps`, `converged` | per $\lambda$: the first-order violation, the solver's steps and whether it met its tolerance (code review A4; before 13 October the direct-loss cells stored NaN / −1 and no `converged`) |
+| `bic_dead`, `search_dead`, `bic_unconverged`, `search_unconverged`, `search_capped`, `search_mismatches` | (13 October 2026, code reviews A2 / A3) a path on which every score is $+\infty$ or a searched graph at $+\infty$; refits that stopped at the solver's iteration cap; a search stopped by its step cap; accepted moves whose recomputed matrix scored above the cached score. Wave 2 files: `pure_dead`, `pure_unconverged`, `pure_capped`, `truth_*` |
 
 The orientation breakdown has the order `ORIENT` of `run_s1_shard.py`: correct, reversed, hedged
 (both directions kept for a single true edge), both, half (for a true 2-cycle), missed single,

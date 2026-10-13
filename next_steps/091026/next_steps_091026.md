@@ -283,7 +283,7 @@ largest part of the plan, about 2,150 CPU-h per sample size (§3, item 2).
      `--only search100sml` lines of the plan by hand once the queue has room.
 
      ```bash
-     for j in 8si4 8sr4 8si3 8sr3; do scancel -u $USER --name=$j; done   # part (c) at n = 1e4 and 1000
+     for j in 8si4 8sr4 8si3 8sr3; do scancel -M serial -u $USER --name=$j; done   # part (c) at n = 1e4 and 1000
      rm -rf runs/campaign/search100sml_p10_*
      git pull
      ```

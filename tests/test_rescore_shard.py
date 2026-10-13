@@ -113,6 +113,12 @@ def test_refit_mode_writes_a_complete_cell_with_the_likelihood_bic(tmp_path):
         assert r["search_score"][j] <= r["bic_scores"][j][ib] + 1e-9
     rows = [x for x in campaign.load(root) if x["cell"] == "direct_lasso-ml_Cresc_n1e4"]
     assert len(rows) == len(keep) and all(x["estimator"] == "lasso-ml" for x in rows)
+    # the cell's own cost (code review B3): `seconds` is the rescoring's, the source path's time
+    # is kept apart, and the analysis uses the former
+    assert np.array_equal(r["seconds"], r["select_seconds"])
+    assert np.array_equal(r["source_seconds"], s["seconds"][keep])
+    assert [x["seconds"] for x in rows] == pytest.approx([float(v) for v in r["seconds"]])
+    assert not list(out.glob("*.tmp"))
 
 
 @pytest.mark.parametrize("mode", [["--ebic-gamma", "1", "--select", "search"],

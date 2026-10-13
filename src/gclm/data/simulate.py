@@ -43,6 +43,8 @@ def sample_drift(
         code (``rStableMetzler``) rather than the papers' text.  Default False
         follows the text.  See S1_reproduction.md Section 3.1.
     """
+    if not 0.0 <= d <= 1.0:
+        raise ValueError(f"the edge probability d = k / p must lie in [0, 1], got {d} (k > p?)")
     eps = rng.normal(size=(p, p))
     omega = rng.binomial(1, d, size=(p, p))
     off = omega * (np.abs(eps) if metzler else eps)
@@ -99,6 +101,11 @@ def draw_instance(
 ):
     """One replicate: ``(M_true, C_true, Sigma_true, Sigma_hat)``.
 
+    ``n`` is the sample size; ``inf`` (or ``None``) feeds the population covariance
+    instead of a sample.  Anything else that is not a positive integer is refused
+    (``nan`` and ``-inf`` used to give the population covariance silently; code
+    review D, 13 October 2026).
+
     Edge probability is ``d = k / p``.  ``standardize=True`` reproduces Varando's
     ``simulate.R`` (which feeds the empirical *correlation* matrix); this leaves the
     support of the drift matrix unchanged.
@@ -110,8 +117,10 @@ def draw_instance(
     m_true = sample_drift(p, k / p, rng, metzler=metzler)
     c_true = sample_volatility(p, c_choice, rng)
     sigma_true = solve_lyapunov(m_true, c_true)
-    if n is None or not np.isfinite(n):
-        sigma_hat = sigma_true
+    if n is None or n == np.inf:
+        sigma_hat = sigma_true                          # the population covariance
+    elif not (np.isfinite(n) and n >= 1 and n == int(n)):
+        raise ValueError(f"n must be a positive integer or inf (the population covariance), got {n!r}")
     else:
         sigma_hat = sample_covariance(sample_data(int(n), sigma_true, rng))
     s = np.ones(p)

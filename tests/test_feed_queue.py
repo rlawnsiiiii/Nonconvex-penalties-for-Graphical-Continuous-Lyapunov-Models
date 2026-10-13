@@ -1,6 +1,8 @@
 """cluster/feed_queue.sh against stub sbatch / squeue: a plan line waits while the queue
 has no room, is submitted once there is, is skipped once its dry run has nothing left,
-and a --fill line waits until no job of its wave is queued."""
+and a --fill line waits until no job of its wave is queued.  Also the safeguards of code
+review C1 / C2 (13 October 2026): one feeder at a time, a fill that makes no progress is
+given up on, a squeue failure makes a fill wait."""
 
 from __future__ import annotations
 
@@ -28,9 +30,10 @@ def wait_for(log: Path, text: str, timeout: float = 40.0) -> str:
 
 
 def stubs(tmp_path, queued: int):
-    """A stub squeue (task count from a file; job names from another with -o %j), a stub
-    sbatch that logs its calls and refuses from the N-th call on if ``fail_from`` holds N,
-    a private campaign root and the environment for the feeder (LIMIT 50, 1 s rounds)."""
+    """A stub squeue (task count from a file; job names from another with -o %j; fails while
+    the file ``squeue_fail`` exists), a stub sbatch that logs its calls and refuses from the
+    N-th call on if ``fail_from`` holds N, a private campaign root and the environment for the
+    feeder (LIMIT 50, 1 s rounds, its own log, lock and submissions log)."""
     bindir = tmp_path / "bin"
     bindir.mkdir()
     count, names, slog, fail = (tmp_path / n for n in ("queued", "names", "sbatch.log", "fail_from"))
@@ -38,6 +41,7 @@ def stubs(tmp_path, queued: int):
     names.write_text("")
     (bindir / "squeue").write_text(
         "#!/bin/bash\n"
+        f'[ -f "{tmp_path / "squeue_fail"}" ] && exit 1\n'
         f'if [[ " $* " == *" -o "* ]]; then cat "{names}"; else n=$(cat "{count}"); '
         'for ((i = 0; i < n; i++)); do echo task; done; fi\n')
     (bindir / "sbatch").write_text(
@@ -51,7 +55,8 @@ def stubs(tmp_path, queued: int):
     log = tmp_path / "feed.log"                                 # never the repository's own log
     env = {**os.environ, "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}",
            "CAMPAIGN_ROOT": str(tmp_path / "campaign"), "LIMIT": "50", "INTERVAL": "1",
-           "USER": os.environ.get("USER", "tester"), "FEED_LOG": str(log)}
+           "USER": os.environ.get("USER", "tester"), "FEED_LOG": str(log),
+           "FEED_LOCK": str(tmp_path / "feed.lock"), "SUBMIT_LOG": str(tmp_path / "submissions.log")}
     return count, names, slog, fail, log, env
 
 
@@ -86,6 +91,7 @@ def test_feeder_waits_for_room_submits_once_and_guards_fills(tmp_path):
         text = log.read_text()
         assert "--fill --time 24:00:00': nothing left to submit, done" in text
         assert calls(slog) == 3                                    # the fill submitted nothing
+        assert not (tmp_path / "feed.lock").exists()               # the lock is released on exit
     finally:
         if proc.poll() is None:
             proc.kill()
@@ -113,6 +119,33 @@ def test_a_line_larger_than_the_cap_goes_in_parts(tmp_path):
         assert proc.wait(timeout=20) == 0
         assert calls(slog) == 12 and "submitted 200 tasks in 10 cells" in log.read_text()
         assert "giving up" not in log.read_text()
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+
+
+def test_one_feeder_at_a_time_fail_closed_squeue_and_a_fill_without_progress(tmp_path):
+    """A second feeder on the same lock exits at once; while squeue fails a --fill line waits
+    instead of proceeding; a fill whose jobs have ended without writing a shard is given up
+    on, so a task that fails deterministically is not resubmitted forever (code review C1, C2)."""
+    count, names, slog, _, log, env = stubs(tmp_path, queued=0)
+    plan = tmp_path / "plan.txt"
+    plan.write_text("--wave 2 --n 1e4 --only search_p10_C2I\n--wave 2 --n 1e4 --only search_p10_C2I --fill\n")
+    proc = subprocess.Popen(["bash", str(FEED), str(plan)], cwd=ROOT, env=env,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    try:
+        wait_for(log, "submitted 2 tasks in 1 cells")
+        assert calls(slog) == 1
+        second = subprocess.run(["bash", str(FEED), str(plan)], cwd=ROOT, env=env, capture_output=True, text=True)
+        assert second.returncode == 1 and "another feeder" in second.stderr
+        (tmp_path / "squeue_fail").touch()
+        wait_for(log, "squeue failed, cannot tell")
+        assert calls(slog) == 1
+        (tmp_path / "squeue_fail").unlink()
+        wait_for(log, "giving up on it")                          # the fill ran once (2 missing), then nothing changed
+        assert calls(slog) == 2 and "--array=0,1" in slog.read_text().splitlines()[1]
+        wait_for(log, "plan complete")
+        assert proc.wait(timeout=20) == 0
     finally:
         if proc.poll() is None:
             proc.kill()

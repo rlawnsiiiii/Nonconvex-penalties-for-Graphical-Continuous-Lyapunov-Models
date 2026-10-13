@@ -79,13 +79,22 @@ def design_column_sq_norms(sigma: np.ndarray) -> np.ndarray:
     return 2.0 * ((sigma ** 2).sum(axis=1)[None, :] + sigma ** 2)
 
 
-def solve_lyapunov(m: np.ndarray, c: np.ndarray) -> np.ndarray:
+def solve_lyapunov(m: np.ndarray, c: np.ndarray, check: bool = True) -> np.ndarray:
     """Equilibrium covariance: the unique ``Sigma`` with ``M Sigma + Sigma M' + C = 0``.
 
-    Requires ``M`` stable.  The result is symmetrized to kill roundoff asymmetry.
+    Requires ``M`` stable: only then is the solution the stationary covariance of
+    the process.  The linear equation itself is solvable for other ``M`` too (as
+    long as no two eigenvalues sum to zero), and scipy returns that solution without
+    complaint, so ``check=True`` (the default) raises ``ValueError`` for an unstable
+    or non-finite ``M``.  A caller that has just checked stability itself passes
+    ``check=False`` and saves the eigenvalue computation (``gclm.solvers.search.bic``;
+    code review D, 13 October 2026).  The result is symmetrized to kill roundoff
+    asymmetry.
     """
     m = np.asarray(m, dtype=float)
     c = np.asarray(c, dtype=float)
+    if check and not (np.all(np.isfinite(m)) and is_stable(m)):
+        raise ValueError("M is not stable: the Lyapunov equation has no stationary covariance")
     sigma = solve_continuous_lyapunov(m, -c)
     return 0.5 * (sigma + sigma.T)
 
@@ -116,19 +125,24 @@ class SchurLyapunov:
         return bool(np.max(np.diag(self.t)) < 0.0)
 
     def _trsyl(self, y: np.ndarray, trana: str, tranb: str) -> np.ndarray:
+        y = np.asarray(y, dtype=float)
         x, scale, info = dtrsyl(self.t, self.t, self.q.T @ y @ self.q,
                                 trana=trana, tranb=tranb)
         if info < 0:                                       # pragma: no cover
             raise RuntimeError(f"dtrsyl: illegal argument {-info}")
         x = self.q @ (x / scale) @ self.q.T
-        return 0.5 * (x + x.T)                             # symmetric input -> symmetric output
+        if np.array_equal(y, y.T):                         # symmetric input -> symmetric output:
+            return 0.5 * (x + x.T)                         # kill the roundoff asymmetry, only then
+        return x
 
     def solve(self, y: np.ndarray) -> np.ndarray:
-        """``X`` with ``M X + X M' = y``."""
+        """``X`` with ``M X + X M' = y``.  A symmetric ``y`` (the package's case: ``-C``
+        and ``dL/dSigma``) gives a symmetrised ``X``; any other ``y`` is solved as it is
+        (code review D, 13 October 2026: the output used to be symmetrised always)."""
         return self._trsyl(y, "N", "T")
 
     def solve_adjoint(self, y: np.ndarray) -> np.ndarray:
-        """``X`` with ``M' X + X M = y``."""
+        """``X`` with ``M' X + X M = y``; symmetrised for a symmetric ``y``, as :meth:`solve`."""
         return self._trsyl(y, "T", "N")
 
     def sigma(self, c: np.ndarray) -> np.ndarray:

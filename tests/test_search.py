@@ -158,7 +158,12 @@ def test_direct_loss_score_is_n_log_rss_plus_the_bic_penalty(cycle):
     fitted = DirectRefit(sigma_hat, C5).fit(truth)
     r = fitted @ sigma_hat + sigma_hat @ fitted.T + C5
     big_n = 5 * 6 / 2                                   # distinct equations of the Lyapunov system
-    expected = big_n * math.log(float(np.sum(r * r)) / big_n) + math.log(n) * (5 + k)
+    # the RSS sums the N distinct residuals once each: the upper triangle of the symmetric
+    # residual (the full Frobenius norm counts every off-diagonal equation twice; code review D)
+    assert np.allclose(r, r.T)
+    rss = float(np.sum(np.triu(r) ** 2))
+    assert rss == pytest.approx((float(np.sum(r * r)) + float(np.sum(np.diag(r) ** 2))) / 2)
+    expected = big_n * math.log(rss / big_n) + math.log(n) * (5 + k)
     base = bic_direct(fitted, sigma_hat, C5, n, k)
     assert base == pytest.approx(expected)
     assert bic_direct(fitted, sigma_hat, C5, n, k + 1) - base == pytest.approx(math.log(n))
@@ -205,3 +210,45 @@ def test_simple_graphs_only_when_two_cycles_are_not_allowed(cycle):
     start = truth | truth.T                       # every true edge in both directions
     res = greedy_search(sigma, C5, 1000, start, allow_two_cycles=False)
     assert not (res.support & res.support.T).any()
+
+
+# --------------------------------------------------------------------------- #
+# convergence of the refits, the flags of a search (code review A2 / A2b, 13 October 2026)
+# --------------------------------------------------------------------------- #
+
+
+def test_refits_report_whether_they_converged(cycle):
+    """An iterative refit stopped at its iteration cap is counted, so that a support whose
+    likelihood has no maximiser (2-cycles) does not pass as converged; least squares never fails."""
+    m, sigma, truth = cycle
+    capped = CovRefit(sigma, C5, "loglik", max_iter=2)
+    capped.fit(truth)
+    assert capped.fits == 1 and capped.unconverged == 1 and not capped.last_converged
+    fine = CovRefit(sigma, C5, "loglik")
+    fine.fit(truth)
+    assert fine.fits == 1 and fine.unconverged == 0 and fine.last_converged
+    ls = DirectRefit(sigma, C5)
+    ls.fit(truth)
+    assert ls.fits == 1 and ls.unconverged == 0
+    sc = Scorer(sigma, C5, 1000, "loglik")
+    sc.score(truth)
+    assert sc.unconverged == 0
+
+
+def test_search_result_flags_and_the_matrix_behind_the_score(cycle):
+    """``capped`` says the search was stopped by max_steps; the scorer masks the diagonal; the
+    matrix a search returns scores what the result says (or the mismatch is counted)."""
+    m, sigma, truth = cycle
+    sigma_hat = _noisy(sigma)
+    res = greedy_search(sigma_hat, C5, 1000, OFF5, max_steps=1)     # from the dense graph: one deletion, then stopped
+    assert res.capped and len(res.moves) == 1
+    full = greedy_search(sigma_hat, C5, 1000, OFF5)
+    assert not full.capped and full.unconverged == 0 and full.mismatches == 0
+    assert full.score == pytest.approx(Scorer(sigma_hat, C5, 1000).criterion(full.support, full.m))
+    sc = Scorer(sigma_hat, C5, 1000)
+    assert sc.score(truth | np.eye(5, dtype=bool)) == sc.score(truth)
+    sc = Scorer(sigma_hat, C5, 1000, "loglik")
+    start = random_support(5, np.random.default_rng(2), 0.6)
+    res = greedy_search(sigma_hat, C5, 1000, start, scorer=sc, loss="loglik")
+    assert res.unconverged == sc.unconverged
+    assert res.mismatches > 0 or res.score == pytest.approx(sc.criterion(res.support, res.m), rel=1e-9, abs=1e-6)

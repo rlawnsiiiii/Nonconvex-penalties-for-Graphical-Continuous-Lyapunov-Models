@@ -28,6 +28,13 @@ def direct_loss(m: np.ndarray, sigma: np.ndarray, c: np.ndarray) -> float:
     return 0.5 * float(np.sum(r * r))
 
 def direct_grad(m: np.ndarray, sigma: np.ndarray, c: np.ndarray) -> np.ndarray:
+    """``2 R(M) Sigma`` -- the gradient of :func:`direct_loss` for a **symmetric** ``C``.
+
+    In general the gradient is ``(R + R') Sigma``; it equals ``2 R Sigma`` when the
+    residual is symmetric, i.e. when ``C`` is.  Every ``C`` in this repository is,
+    and the solvers check it once at entry (``gclm.solvers.proxgrad``), not here in
+    the inner loop.
+    """
     return 2.0 * lyapunov_residual(m, sigma, c) @ sigma
 
 def lipschitz_bound(sigma: np.ndarray) -> float:
@@ -73,8 +80,13 @@ def lambda_max(
     If the diagonal *is* penalized, "diagonal" is no longer a single well-defined
     stopping point (large lambda drives M to 0, which is also diagonal), so fall
     back to bisection on log-lambda for the smallest lambda with zero off-diagonal.
+
+    Needs ``p >= 2``: a ``1 x 1`` drift matrix has no off-diagonal entry, so the
+    quantity is undefined (``ValueError``).
     """
     p = sigma.shape[0]
+    if p < 2:
+        raise ValueError("lambda_max needs p >= 2: a 1 x 1 drift matrix has no off-diagonal entry")
     if not penalize_diagonal:
         m_diag = diagonal_fit(sigma, c)
         grad = 2.0 * lyapunov_residual(m_diag, sigma, c) @ sigma

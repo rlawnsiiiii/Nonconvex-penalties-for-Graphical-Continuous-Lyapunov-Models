@@ -80,11 +80,13 @@ class _Point:
     """One iterate with everything computed at it."""
 
     m: np.ndarray
-    fac: SchurLyapunov
+    fac: SchurLyapunov | None         # None if M is not finite
     sigma: np.ndarray | None
-    f: float                          # smooth loss; inf if M is not stable
+    f: float                          # smooth loss; inf if M is not stable (or not finite)
 
 def _evaluate(m, c, sigma_hat, loss) -> _Point:
+    if not np.all(np.isfinite(m)):    # not a drift matrix at all: treated like an unstable one
+        return _Point(m, None, None, np.inf)
     fac = SchurLyapunov(m)
     if not fac.stable:
         return _Point(m, fac, None, np.inf)
@@ -152,8 +154,10 @@ def lambda_max(sigma_hat: np.ndarray, c: np.ndarray, loss: str = "loglik") -> fl
     graphical lasso's ``lambda_max`` (docs/LIKELIHOOD.md Section 3).  For these
     nonconvex problems it is the smallest ``lam`` for which the *diagonal*
     solution is stationary; other, non-diagonal stationary points may exist
-    above it.
+    above it.  Needs ``p >= 2`` (``ValueError`` otherwise, as the direct loss's).
     """
+    if sigma_hat.shape[0] < 2:
+        raise ValueError("lambda_max needs p >= 2: a 1 x 1 drift matrix has no off-diagonal entry")
     g = loss_grad(diagonal_fit(sigma_hat, c), sigma_hat, c, loss)
     np.fill_diagonal(g, 0.0)
     return float(np.max(np.abs(g)))
