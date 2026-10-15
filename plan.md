@@ -18,6 +18,10 @@ Thesis - Joon Kim
 - [Structure Learning for Cyclic Linear Causal Models](https://arxiv.org/abs/2006.05978)
 - [Distributional Equivalence and Structure Learning for Bow-free Acyclic Path Diagrams](https://arxiv.org/abs/1508.01717)
 
+### LLA from Lasso
+- [STRONG ORACLE OPTIMALITY OF FOLDED CONCAVE
+PENALIZED ESTIMATION](https://arxiv.org/pdf/1210.5992)
+
 
 ## Meeting 1 (2026 Sept 22)
 ### Questions
@@ -32,6 +36,10 @@ Thesis - Joon Kim
     - --> look for student clusters, else contact Stephan Haug <haug@tum.de>
 - Registration
     - -> contact Prof. MD around Oct 10-11
+
+- Score-based search with e.g. BIC 
+    - initialize random graphs, define neighborhood of graphs (define perturbations - how many edge changes e.g.?), compute BIC for newer graphs, greedily pick the best graph according to BIC, paper- not many local optima, thomas nagler - asymptotics for diverging number of parameters sparsity
+
 
 ### Simulations
 
@@ -48,3 +56,20 @@ Thesis - Joon Kim
 - when this is done, you can consider a score-based search method as an alternative (with quadratic loss + BIC-type penalty or likelihood + BIC-type penalty) 
     - [again you would need to code up something]
     - <span style="color: green">Similar simulations done in [Structure Learning for Cyclic Linear Causal Models](https://arxiv.org/abs/2006.05978), does the "expected dimension" still hold in our case of GCLM?</span>
+
+## Meeting 2 (151026)
+### Questions
+- does this rescaling of C make sense?
+- current status: pruning (MCP/SCAD or adaptive lasso) from a dense start (minimum l1 fit) makes sense
+    - Intuition: in general A($\Sigma$) has null space of p(p-1)/2 dimension (due to symmetry of lyapunov equation ...) -> irrepresentability condition often fails ...
+    - Define $M_{Lasso, 0}$ as lasso solution with $\lambda$ -> $0$ (similar to "ridgeless estimation" of ridge regression)
+    - Hope: $M_{Lasso, 0}$ "bypasses" the problem with null space so that A($\hat\Sigma$) gets independent columns?
+    - nonconvex penalties more "forced" to choose a direction than lasso
+    - adaptive lasso achieves similar effects as nonconvex penalties
+- Which direction should the thesis go?
+    - Investigate this more? 
+        - How is the effect for other "dense starts" (e.g. minimum l2 fit, exact fit...)
+        - How is the effect for other "prunings" (e.g. threshold lasso...)
+        - How is the effect for differently strong edges (e.g. playing with beta-min condition)
+        - How is the effect in different graph classes - DAG, 2-cycles ...
+- 
