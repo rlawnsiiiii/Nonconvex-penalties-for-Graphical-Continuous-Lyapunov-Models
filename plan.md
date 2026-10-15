@@ -79,7 +79,7 @@ PENALIZED ESTIMATION](https://arxiv.org/pdf/1210.5992)
     - Estimate how nonconvex our objective is - how large the deviations between the landing points for nonconvex penalties?
     - Try to draw some conclusions
 - Theory part:
-    - Dettling: Lasso with irr. condition -> find the equivalent condition for nonconvex penalties, find M that fulfills this condition (start with diagonal M)
+    - Dettling: Lasso with irrepresentability condition -> find the equivalent condition for nonconvex penalties, find M that fulfills this condition (start with diagonal M)
         - Look for the theoretical results for linear regression kind of models (consistency...)
         - Final goal: to arrive at some theoretical results, hope: comparison to lasso, better support recovery (regarding growth of n or p ...) for nonconvex penalties in certain settings (graph classes .....)
         - PDW kind of proof - what is the equivalent kind for nonconvex penalties?
