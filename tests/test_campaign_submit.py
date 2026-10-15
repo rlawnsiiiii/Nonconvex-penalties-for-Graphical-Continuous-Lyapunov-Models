@@ -120,12 +120,71 @@ def test_waves_have_the_planned_cells(cluster):
     for name, _, n_shards, _, runner, args in wave8:              # one task per source shard
         if runner == "rescore_shard.py":
             assert n_shards == shards[args[args.index("--source-cell") + 1]], name
-    for wave in (1, 2, 3, 4, 5, 6, 7, 8):                         # job names: unique, short enough
+    for wave in (1, 2, 3, 4, 5, 6, 7, 8, 9):                      # job names: unique, short enough
         tags = [c[1] for c in listed(submit, wave)]
         assert len(set(tags)) == len(tags) and all(len(t) + 1 < 10 for t in tags)
 
 
-@pytest.mark.parametrize("wave", [1, 2, 3, 4, 5, 6, 7, 8])
+STARTS9 = ("exact", "l1", "l2", "truth0.05", "truth0.2")
+FOUR = ("lasso", "MCP", "MCP-up", "adaptive")
+
+
+def test_wave_9_has_the_planned_groups(cluster):
+    """Plan of 13 October 2026: E1 starts (20 cells per n), E2 threshold (4), E3 betamin (32), E4 class
+    (16) and the optional loglik starts (20); --group selects one, the knob cells run at n = 1000 and
+    1e4 only."""
+    submit, root, _ = cluster
+    wave9 = listed(submit, 9)
+    names = [c[0] for c in wave9]
+    # shards: starts 2 C x 5 starts x (16 + 4); threshold 4 x 4; betamin 4 w x 2 C x 32; class 2 g x 2 C x 32;
+    # loglik starts 5 x 2 x (8 + 16)
+    assert len(wave9) == 92 and sum(c[2] for c in wave9) == 200 + 16 + 256 + 128 + 240
+    groups = {"starts": [f"direct_{pr}-{st}_{c}" for c in ("C2I", "Cresc") for st in STARTS9 for pr in ("MCP-up", "adaptive")],
+              "threshold": [f"direct_threshold{v}_{c}" for c in ("C2I", "Cresc") for v in ("", "-norefit")],
+              "betamin": [f"direct_{e}_{c}_w{w}" for w in ("0", "01", "025", "05") for c in ("C2I", "Cresc") for e in FOUR],
+              "class": [f"direct_{e}_{c}_{g}" for g in ("no2c", "dag") for c in ("C2I", "Cresc") for e in FOUR],
+              "starts-loglik": [f"loglik_{pr}-{st}_{c}" for c in ("C2I", "Cresc") for st in STARTS9 for pr in ("MCP-up", "adaptive")]}
+    assert names == sum(groups.values(), [])
+    for group, cells in groups.items():
+        res, _ = submit("--wave", "9", "--group", group, "--list")
+        assert [line.split()[0] for line in res.stdout.splitlines()[1:]] == cells, group
+    for name, _, shards, time, runner, args in wave9:
+        a = " ".join(args)
+        assert runner == "run_s1_shard.py" and "--select search" in a
+        if name.startswith("loglik"):
+            assert "--loss loglik --p 10 " in a and time == "24:00:00" and shards == (8 if "C2I" in name else 16)
+        else:
+            assert "--p 10 20 " in a and time == "12:00:00" and "--loss" not in a
+        est = name.split("_")[1]
+        if "-" in est and est.split("-", 1)[0] in ("MCP", "adaptive") and est not in ("MCP-up",):
+            start = est.rsplit("-", 1)[1].replace("truth", "truth-")
+            assert (f"--up-start {start}" in a) == est.startswith("MCP-up") and (f"--pilot {start}" in a) == est.startswith("adaptive")
+        if "_w" in name:
+            w = name.rsplit("_w", 1)[1]
+            assert f"--weights uniform --w-min {w[0]}{'.' + w[1:] if len(w) > 1 else ''}" in a
+        if name.endswith(("_no2c", "_dag")):
+            assert f"--graph {name.rsplit('_', 1)[1]}" in a
+    # the knob cells and the loglik starts are not planned at n = inf: reported, nothing submitted
+    res, calls = submit("--wave", "9", "--group", "betamin", "--n", "inf", "--dry-run")
+    assert res.returncode == 0 and not calls and res.stdout.count("not planned") == 32
+    assert "would submit 0 tasks in 0 cells" in res.stdout
+    res, calls = submit("--wave", "9", "--group", "class", "--n", "1000", "--dry-run")
+    assert res.returncode == 0 and res.stdout.count("sbatch --array=") == 16 and "would submit 128 tasks in 16 cells" in res.stdout
+    res, calls = submit("--wave", "9", "--group", "starts", "--n", "inf", "--only", "adaptive-l1", "--dry-run")
+    assert res.returncode == 0 and res.stdout.count("sbatch --array=") == 2
+    assert f"{root / 'direct_adaptive-l1_Cresc_ninf'} --p 10 20 --reps 25 --select search --c-scale variance --method adaptive --pilot l1 --n-obs inf" in res.stdout
+    for bad in (["--wave", "9", "--group", "bogus", "--list"], ["--wave", "1", "--group", "starts", "--list"]):
+        res, _ = submit(*bad)
+        assert res.returncode == 2, bad
+    # a trailing $ anchors an --only pattern at the end of the name: three weight levels without w_min = 0.1
+    res, _ = submit("--wave", "9", "--group", "betamin", "--only", "_w0$", "_w025", "_w05", "--list")
+    names = [line.split()[0] for line in res.stdout.splitlines()[1:]]
+    assert len(names) == 24 and not any(n.endswith("_w01") for n in names) and sum(n.endswith("_w0") for n in names) == 8
+    res, _ = submit("--wave", "9", "--group", "betamin", "--only", "_w0", "--list")
+    assert len(res.stdout.splitlines()) - 1 == 32                   # without the anchor every level matches
+
+
+@pytest.mark.parametrize("wave", [1, 2, 3, 4, 5, 6, 7, 8, 9])
 def test_every_cell_is_accepted_by_its_runner(cluster, wave):
     """The arguments the submit script would pass parse with the runner's own
     command line and describe an implemented combination, with the C and the
@@ -169,12 +228,23 @@ def test_every_cell_is_accepted_by_its_runner(cluster, wave):
         assert (cfg.method == "lla") == ("-lla" in name)
         assert (cfg.method == "adaptive") == ("adaptive" in name)
         est = name.split("_")[1]
-        assert cfg.penalty == ("lasso" if est.startswith(("lasso", "adaptive")) else est.split("-")[0])
+        assert cfg.penalty == ("lasso" if est.startswith(("lasso", "adaptive", "threshold")) else est.split("-")[0])
         assert (cfg.up_start == "lasso") == ("-up-lasso" in name)
         label = re.search(r"_p(\d+)$", name)
         expected_p = ((int(label.group(1)),) if label else
-                      (10, 20) if wave == 1 or "-ebic" in name else (10,))
+                      (10, 20) if wave == 1 or "-ebic" in name or (wave == 9 and cfg.loss == "direct") else (10,))
         assert cfg.n_rep == 25 and cfg.p_values == expected_p
+        if wave == 9:                                             # the start, the pilot and the generator knobs
+            start = est.rsplit("-", 1)[1].replace("truth", "truth-") if est.startswith(("MCP-up-", "adaptive-")) else "lasso"
+            assert cfg.start_name == (start if est.startswith("MCP-up-") else "lasso" if cfg.loss == "direct" else "exact")
+            assert cfg.pilot == (start if est.startswith("adaptive-") else "lasso")
+            assert cfg.method == ("threshold" if est == "threshold" else "threshold-norefit" if est == "threshold-norefit"
+                                  else "adaptive" if est.startswith("adaptive") else "path")
+            m = re.search(r"_w([0-9]+)_|_(no2c|dag)_", name + "_")
+            assert cfg.weights == ("uniform" if m and m.group(1) else "normal")
+            assert cfg.w_min == (float(f"{m.group(1)[0]}.{m.group(1)[1:]}") if m and m.group(1) and len(m.group(1)) > 1
+                                 else 0.0)
+            assert cfg.graph == (m.group(2) if m and m.group(2) else "random")
 
 
 def test_submits_once_reports_status_and_fills_missing_shards(cluster):
@@ -251,7 +321,7 @@ def test_dry_run_and_argument_errors(cluster):
     assert res.stdout.count("sbatch --array=") == 24 and "would submit 168 tasks in 24 cells" in res.stdout
     res, calls = submit("--wave", "1", "--n", "1000", "--shards", "3", "--only", "lasso_C2I")
     assert "--array=0-2" in calls[0] and (root / "direct_lasso_C2I_n1000" / "n_shards").read_text().strip() == "3"
-    for bad in (["--list"], ["--wave", "9", "--list"], ["--wave", "1", "--n", "500"],
+    for bad in (["--list"], ["--wave", "10", "--list"], ["--wave", "1", "--n", "500"],
                 ["--wave", "1", "--shards", "0"], ["--wave", "1", "--frobnicate"]):
         res, _ = submit(*bad)
         assert res.returncode == 2, bad

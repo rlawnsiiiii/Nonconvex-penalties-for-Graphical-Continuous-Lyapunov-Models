@@ -23,6 +23,10 @@ question is *why*. The four experiments below each isolate one part of the mecha
 | E3 | Does the gain grow with the minimum edge weight (beta-min)? | the weight distribution of the DGP | analysis of stored shards first (laptop), then cluster cells |
 | E4 | Is the gain concentrated in identifiable graph classes? | the graph class of the DGP (DAG / no 2-cycles / random) | analysis of stored shards first (laptop), then cluster cells |
 
+Each experiment's section opens with its motivation (§2.0, §3.0, §4.0, §5.0; added 13 October): where
+the question comes from in the campaign and the theory note, what each arm isolates, and what each
+possible outcome would mean for the thesis.
+
 Everything goes through the existing shard runner (`simulations/run_s1_shard.py`), so that
 `simulations/diagnostics/campaign.py` aggregates the new cells like any other and every comparison is
 paired with wave 1 through `(p, k, c_choice, rep)`.
@@ -75,7 +79,7 @@ def min_l2_exact_fit(sigma_hat, c) -> np.ndarray
     # p(p-1)/2 unknowns, p(p-1) equations; numpy.linalg.lstsq.  p ≤ 50 is trivial.
 def min_l1_exact_fit(sigma_hat, c, *, solver="highs") -> np.ndarray
     # argmin ||M_off||_1 over exact solutions: LP in (w, t) with |M(w)_ij| ≤ t_ij, scipy.optimize.linprog.
-    # This is the "BP" solution of claude_docs/.. main_claim_and_theory_071026.md §2.4 / §4.
+    # This is the "BP" solution of claude_docs/dense_start_theory_081026.md §2 / §4 (the count in §4).
 def noisy_truth_start(m_true, tau, rng) -> np.ndarray
     # M* + tau * N(0,1) on every off-diagonal entry (dense); diagonal unchanged.  A ceiling, not an estimator.
 def exact_fit_residual(m, sigma_hat, c) -> float   # ||M Σ̂ + Σ̂ Mᵀ + C||_F, for tests and diagnostics
@@ -175,6 +179,85 @@ isolated 2-cycle and > 0 for a chain.
 
 ## 2. E1 — Which dense start?
 
+### 2.0 Motivation
+
+**Where the question comes from.** The campaign's positive result is a statement about a *start*, not
+about a penalty: MCP and SCAD run dense → sparse from the lasso's dense end beat the lasso by up to +0.15 in
+oracle $F_1$ (S4 §0, item 2), the adaptive lasso built on the same dense end does as well or better (item 3),
+and on the log-likelihood loss the same estimators win only once their start is the lasso's dense end
+(wave 7) and not when it is Varando & Hansen's exact fit $-\tfrac12 C\hat\Sigma^{-1}$ (wave 3; S4 §6,
+"the start matters, not the loss"). So the estimator that works is "a dense start, then pruning", and the
+one dense start that has been tried in both losses is the lasso at $\lambda_{\min} = 10^{-4}\lambda_{\max}$.
+The theory note (`claude_docs/dense_start_theory_081026.md`, §3–§4) says what that start is: up to
+$O(\lambda_{\min})$ the minimum-$\ell_1$ exact fit of the Lyapunov equation, which (Lemma 1) has at most
+$p(p-1)/2$ nonzero off-diagonal entries with independent design columns, and which under the BP condition
+(the true $M^*$ is the unique minimum-$\ell_1$ exact fit; 11 to 15 of 100 graphs at $p = 10$) contains every
+true edge and gives the adaptive lasso the oracle property (Theorem 5). Three properties of this start are
+therefore candidates for *why* it works, and they are confounded in the campaign because the lasso's dense
+end has all three at once:
+
+1. it is an **exact fit** of the sample Lyapunov equation, i.e. it sits on the fibre
+   $\{M : M\hat\Sigma + \hat\Sigma M^\top + C = 0\}$ on which the direct loss is zero;
+2. it is the **$\ell_1$-smallest** point of that fibre: a vertex, sparse (saturated at $p(p-1)/2$ off-diagonal
+   entries in two thirds of the $p = 10$ graphs), keeping *both* directions of an uncertain pair ("hedging",
+   S3a) rather than committing to one, as the sparse → dense path does at its first entry (a coin flip; the
+   lock-in of `next_steps/051026/orientation_lock_in.md`);
+3. it is **oriented**: on the population scale the dense end contains every true edge whenever the BP
+   condition holds, and in the campaign's graphs it contains the true direction of most true edges even when
+   that condition fails (the "dense-start content" counts of the 7 October note).
+
+E1 separates these by changing the start and keeping everything else fixed: the data sets, the two pruners
+(MCP dense → sparse and the adaptive lasso), the grid, the selection by the score and the search.
+
+**Why these starts.**
+
+- `lasso` (wave 1's `MCP-up` and `adaptive` cells; nothing new runs): the reference, with all three
+  properties. It is also an *approximate* minimum-$\ell_1$ fit (FISTA at $\lambda_{\min}$, tolerance
+  $10^{-8}$), so the difference to `l1` measures how much the approximation costs.
+- `l1`, the exact minimum-$\ell_1$ fit from the LP: properties 1–3 exactly, with a vertex solution whose
+  columns are independent (Lemma 1), which removes the question whether FISTA returns the sparse minimiser
+  (Lemma 3's caveat). If `l1` ≈ `lasso` the dense end is what the theory says it is; if `l1` is clearly
+  better, the thesis should use the LP as the pilot (it costs well under a second per data set).
+- `l2`, the minimum-Frobenius exact fit: property 1 without property 2. It is on the same fibre, as close to
+  the origin as an exact fit can be, fully dense (no exact zeros: the $\ell_2$ ball has no corners) and
+  symmetric in its treatment of the two directions of a pair, so it hedges in a different way — both
+  directions are present with graded sizes. It asks whether the *geometry* ($\ell_1$ vs $\ell_2$) of the
+  start matters once the start is exact.
+- `exact`, Varando & Hansen's $-\tfrac12 C\hat\Sigma^{-1}$: property 1 only, and a particular point of the
+  fibre with no minimum-norm property at all (the one that solves $M\hat\Sigma = -\tfrac12 C$ entrywise).
+  Wave 3 showed it fails as a start on the log-likelihood loss at finite $n$; E1 runs it on the direct loss
+  with the two pruners that work from the lasso's dense end. If it fails here too, the failure is the
+  start's, not the loss's; if it works on the direct loss, the loss-specific part of the wave 3 result needs
+  its own explanation.
+- `truth-0.05` and `truth-0.2`, the true $M^*$ plus Gaussian noise on every off-diagonal entry: property 3
+  taken to its limit and the other two dropped (a dense matrix that is *not* an exact fit of the sample
+  equation). This is a ceiling, not an estimator: it says how good the two pruners are when the start is
+  right up to noise, and therefore whether the gap between the data-driven starts and the truth (the search
+  from the truth ends 0.10 to 0.24 above every data-driven method, S4 §0 item 6) is in the start or in the
+  pruner. Two noise levels because the pruners may tolerate small perturbations of a correctly oriented start
+  (every true edge still the larger of its pair at $\tau = 0.05$, when the smallest true weights are around
+  0.1) and not large ones ($\tau = 0.2$ swaps the order of a sizeable share of pairs).
+
+**Why both pruners.** MCP dense → sparse and the adaptive lasso prune in different ways — a warm-started
+nonconvex continuation against a convex reweighted problem — and in the campaign the adaptive lasso is
+ahead in `aupr` and in the selected graph while MCP is slightly ahead in oracle $F_1$ at $p = 10$. If the
+ranking of the starts is the same under both pruners, the result is about the start; if a start helps one
+pruner and not the other, it is about the interaction, which the thesis should say.
+
+**Readings** (§2.5 lists them as hypotheses): (a) `l1` ≈ `lasso` ≫ `l2` ≈ `exact` means the $\ell_1$
+geometry of the start is the mechanism — the hedge and the vertex structure, as in the theory note; (b)
+`l2` ≈ `l1` ≈ `lasso` ≫ `exact` or `l2` ≈ `l1` ≈ `exact` means any exact fit (or any minimum-norm exact fit)
+does, and the message is simply "start on the fibre and prune"; (c) `truth-τ` far above every data start
+means the pruners are not the bottleneck and the remaining gap to the search from the truth is in the start's
+orientation, which points to a start that uses the score or the search rather than a norm. The start's own
+diagnostics stored per data set (§2.2: its orientation content, $F_1$, norms, residual) make (c) checkable
+graph by graph: `starts_by_pruner.png` plots the pruned estimator's $F_1$ against the start's orientation
+recall, and under hypothesis 3 above the points of all starts should fall on one line.
+
+**What E1 cannot settle.** It uses the campaign's data-generating process and $p \le 20$; whether the ranking
+of the starts changes with the graph class or the weights is E3's and E4's question, and the log-likelihood
+loss is only an optional second line (§2.6).
+
 ### 2.1 Arms
 
 All on the **direct loss**, textbook convention, diagonal unpenalised, p ∈ {10, 20} (one cell, as wave 1),
@@ -252,6 +335,59 @@ The same 10 arms on the log-likelihood loss at p = 10, n ∈ {10³, 10⁴} (`cov
 
 ## 3. E2 — Thresholding the dense end
 
+### 3.0 Motivation
+
+**Where the question comes from.** The adaptive lasso is the best estimator of the campaign: convex,
+deterministic, cheapest, and as good as or better than MCP dense → sparse on every metric (S4 §0 item 3;
+§8). It has two ingredients: the dense end of the lasso path as the pilot, and a *reweighted* $\ell_1$
+problem with weights $1/\lvert\hat M^{\mathrm{pilot}}_{ij}\rvert$ whose own path is then followed from
+sparse to dense. The thesis needs to know which ingredient carries the gain, because the two lead to
+different statements. If it is the pilot alone, then the simplest estimator that starts from the pilot — rank
+its entries by size, keep the $k$ largest, refit by least squares, choose $k$ by the score — must do as
+well, and "start dense, then prune" is the whole finding, with the reweighting an implementation detail. If
+the reweighting matters, then *how* the pruning weighs the evidence matters, and the thesis should say where
+it does.
+
+**Why thresholding is the right comparison.** Thresholding the pilot is pruning in its purest form: the only
+information used is the ranking of the pilot's entries by absolute size. The adaptive lasso uses the same
+ranking as weights but lets the loss re-decide: an entry with a small pilot value can survive if the data
+insist, and a pair whose two directions are both in the pilot is resolved by the loss *and* the weights
+together rather than by size alone. For an orthogonal design the two select the same entries (the adaptive
+lasso is then a thresholding rule itself, with shrunken values); in the general case the literature compares
+them directly (van de Geer, Bühlmann & Zhou 2011, *The adaptive
+and the thresholded Lasso for potentially misspecified models*; Zhou 2010 on the thresholded lasso — check
+the statements) and finds similar selection guarantees under similar conditions, with thresholding the
+simpler of the two. Here the design has a $p(p-1)/2$-dimensional null space and the pilot sits on its
+boundary (Lemma 1 of the theory note), so the comparison is not covered by that literature and has to be
+run.
+
+**Why the same pilot in both arms.** The comparison is paired at the pilot level: the thresholded lasso and
+the adaptive lasso of the same graph start from the identical matrix, so every difference between them is
+the pruning step. (`adaptive_lasso_path` computes the pilot internally; `thresholded_lasso_path` takes it as
+an argument and recomputes the same one when it is not given — §1.3.)
+
+**Why two variants.** `threshold` refits the kept support by least squares on the direct loss, which is what
+the score and the search need and what makes it an estimator of $M$. `threshold-norefit` keeps the pilot's
+own values on the kept support: it is the pilot's ranking as a path, and its `aupr` is the area under the
+precision–recall curve of ranking the entries of the dense end by size — the cleanest measure of how well the
+dense end *orders* the edges, which the adaptive lasso's `aupr` (+0.07 to +0.14 over the lasso) is then
+compared with. The two variants share their supports at every threshold, so their `max_f1` and `bic_f1`
+coincide and only `aupr` differs; the second variant is for that one number.
+
+**Readings.** A paired difference adaptive − threshold within ±0.01 in `max_f1` and `bic_f1` at every (p, C,
+n) means the pruning is the whole story and the thesis can present the thresholded lasso as the minimal
+version of the method, with the adaptive lasso as its smooth relative. A clear positive difference means the
+reweighting matters; §3.3 then locates it with the edge-level columns of E3 and the class columns of E4:
+is the gain on the pairs where the pilot keeps both directions (the thresholded estimator keeps the larger
+pilot entry, the adaptive one may keep the other), on the weak edges (which thresholding removes first and
+the reweighted loss can keep), or on graphs with 2-cycles (where the pilot's size ranking is not
+informative about direction at all)? A negative difference — thresholding better — would mean the reweighted
+loss re-admits false edges, which the false-positive bins of `campaign_false_positives.csv` would show.
+
+**What E2 cannot settle.** It compares two pruners of one pilot; which pilot is E1's question. And at
+$n = \infty$ with the rescaled $C$ both are expected to be near their ceiling, so the informative cells are
+$n = 10^3$ and $10^4$.
+
 ### 3.1 Design
 
 Wave 1's datasets. One new estimator arm, `threshold`, on the direct loss: the thresholded lasso of §1.3 with
@@ -286,6 +422,59 @@ one may not. That difference is the candidate mechanism if the adaptive lasso wi
 ---
 
 ## 4. E3 — Beta-min curve
+
+### 4.0 Motivation
+
+**Where the question comes from.** Every selection guarantee for a lasso-type estimator has a minimum-signal
+("beta-min") condition: the nonzero coefficients must exceed a multiple of the noise level for the estimator
+to find them. In the theory note the condition appears concretely: the population adaptive-lasso path misses
+the true support in 1 of 15 BP graphs at $p = 10$ and 3 of 7 at $p = 20$, and every miss has a true entry of
+size 0.003 to 0.008 that the smallest $\lambda$ of the grid already removes (`dense_start_theory_081026.md`
+§4). The campaign's weights are $N(0, 1)$ draws (Dettling's generator), so about 8 % of the true edges have
+$\lvert w\rvert < 0.1$ and 20 % have $\lvert w\rvert < 0.25$: a fixed share of edges that no method at these
+$n$ can be expected to find, and that caps the $F_1$ of every estimator alike. The question for the mechanism
+is whether the *gain* of the dense-start estimators over the lasso lives on the strong edges — where the
+problem is to orient an edge whose presence is clear — or on the weak ones, where the problem is to detect
+it at all.
+
+**Why this separates the two mechanisms.** The campaign's explanation of the gain is about direction: the
+lasso hedges, keeping both directions of a pair, and the pruning resolves the hedge in favour of the right
+one (S3a; `docs/DENSE_START.md` §7.3); the sparse → dense path's deficit is also about direction: it commits
+to one direction at the first entry and MCP freezes it (lock-in). Both mechanisms act on edges strong enough
+to be detected; neither can create a weak edge. So the prediction is sharp: recall curves against
+$\lvert w\rvert$ should show the dense-start estimators separated from the lasso on the strong edges (where
+the lasso's hedging costs it a false positive per pair, hence precision, and the sparse → dense path's lock-in
+costs it the true direction, hence recall) and tied with it on the weak edges, where nobody finds the edge.
+If instead the gain sits on the weak edges, the mechanism is detection, not direction — a different story,
+closer to the usual "nonconvex penalties have less bias" argument, which the campaign's other findings
+(the adaptive lasso matching MCP) speak against.
+
+**Why the analysis comes first.** Every stored shard has $M^*$ and the three graphs (best-$F_1$, selected,
+searched), so the recall curve by weight bin can be read off the campaign without a single new run
+(`campaign.py --edges`, §4.1, done 13 October). That costs nothing and may already answer the question;
+the new cells are then a confirmation with the weight distribution as an *exogenous* knob rather than a
+split of one distribution into bins, which conditions on the realised weights.
+
+**Why the knob is `weights="uniform"` with `w_min`.** Replacing the $N(0, 1)$ law by $\lvert w\rvert \sim
+U[w_{\min}, 1]$ with a random sign fixes a lower bound on every true weight and changes nothing else in the
+generator: the same supports (the Bernoulli draws are unchanged), the same diagonal rule, the same
+stability. Four levels — $w_{\min} = 0$ (a uniform law without a gap, the reference for the knob itself),
+0.1, 0.25 and 0.5 — give a curve rather than a before/after. The $w_{\min} = 0$ arm is needed because the
+uniform law differs from the thesis DGP in shape (no heavy tails, no mass near zero beyond the uniform
+density), so the comparison with wave 1 has to go through it, and the figures carry one wave 1 line as the
+reference. The independent study of 2 October ran one such cell (`|w| ~ U[0.5, 1]`, $n = 10^4$) and found
+much larger gains than on the thesis weights, which is the observation this experiment turns into a curve.
+
+**Why these estimators.** `lasso` (reference), `MCP` sparse → dense (the lock-in: its deficit should *not*
+shrink with $w_{\min}$, because the first entry's direction is a coin flip whatever the weight), `MCP-up`
+and `adaptive` (the two pruners: their gain should grow with $w_{\min}$, because a strong true edge whose
+reverse the lasso hedges is exactly the case the pruning resolves).
+
+**Readings.** Gains growing with $w_{\min}$ for the dense-start estimators and a flat sparse → dense deficit
+confirm the direction mechanism. A gain that does not grow with $w_{\min}$ while the recall of the strong
+edges is already near one would mean the remaining errors are false positives, and the figures should then
+be read together with `campaign_false_positives.csv`. If the sparse → dense deficit shrinks with $w_{\min}$,
+the lock-in is partly a signal-strength effect, and the thesis should soften that claim.
 
 ### 4.1 Analysis first, on the stored campaign (laptop, no runs)
 
@@ -326,6 +515,68 @@ direction, not signal).
 ---
 
 ## 5. E4 — Graph class
+
+### 5.0 Motivation
+
+**Where the question comes from.** A graphical continuous Lyapunov model is identified from its covariance
+only up to what the Lyapunov equation can tell apart, and the equation is blind in one well-defined place:
+an isolated pair with both directions, $i \leftrightarrow j$, has two off-diagonal unknowns for the one
+off-diagonal equation of the pair, so no estimator can recover both directions from $\Sigma$. The campaign's
+generator draws every ordered pair independently with probability $d = k/p$, so a 2-cycle appears on a pair
+with probability $d^2$, and at $k = 4$, $p = 10$ almost every graph has one. S3a showed that the lasso
+keeps both directions of such pairs (and hedges on single edges) while MCP keeps one; the orientation
+breakdown stored with every selected graph (`hedged`, `reversed`, `both`, `half`) counts exactly these cases.
+`gclm.graphs.identified_on_support` turns the identifiability question into a number per graph: the smallest
+eigenvalue of the design's Gram matrix restricted to the true support, positive iff $M^*$ is the only drift
+matrix with that support that fits the population covariance.
+
+**Why the gain may be concentrated in a class.** The direction mechanism of E3 and of the campaign's
+explanation can only work where direction *is* identified. In a DAG every edge's direction is identified on
+the true support; in a cyclic graph without 2-cycles it is as well (the restricted design has full column
+rank); with a 2-cycle the two entries of the pair are confounded, so the dense end contains both, no pruning
+can tell them apart, and the pruned estimator's choice between them is arbitrary — a case in which the lasso's
+hedge (keep both) is *right* and the pruning is wrong. So the prediction is that the dense-start gain is
+largest on DAGs and on cyclic graphs without 2-cycles and smallest on graphs with 2-cycles, and that the
+sparse → dense deficit, which comes from the lock-in at the first entry rather than from identifiability, is
+present in every class. If the gain turned out to be *largest* with 2-cycles, the explanation would have to
+change: the pruning would then be helping by removing one direction of a 2-cycle at random, gaining
+precision at the cost of a true edge, and the skeleton metrics would show it.
+
+**Why within $k$.** At $p = 10$ the class is almost a function of the density: $k = 1$ graphs rarely have a
+2-cycle (45 pairs, each with probability $d^2 = 0.01$: 0.45 expected), $k = 4$ graphs almost always do
+(45 pairs at $d^2 = 0.16$: about 7). The campaign
+already knows that the gain depends on density (verdict 12 of `VERDICTS.md`), so a comparison of classes
+pooled over $k$ would mostly repeat that. Comparing within $k$ holds the density fixed and lets the class
+vary through the randomness of the draw; the price is that some (class, $k$) cells are nearly empty at
+$p = 10$, which is why the figure prints the number of graphs per cell and why the generated classes of
+§5.2 are needed for a clean answer.
+
+**Why the analysis comes first, and why generated classes after.** As for E3, the stored shards already
+hold $M^*$ and the three graphs per data set, so the class columns and the within-$k$ gains cost nothing
+(`campaign.py`, `graph_class.py`, done 13 October). But in the stored campaign the class is realised, not
+assigned: a $k = 2$ graph with a 2-cycle differs from one without in more than the 2-cycle (it has, on
+average, one more edge among fewer pairs). The generated classes `no2c` (drop one direction of every
+2-cycle at random) and `dag` (orient every edge along a random permutation, at a density that keeps the
+expected number of edges) make the class exogenous and leave everything else of the generator alone: same
+weights, same diagonal rule, same $C$. `dag` is also the class in which the direction of *every* edge is
+identified and the one most of the graphical-model literature studies, so the thesis can state the gain
+there directly; `no2c` sits between `dag` and the thesis generator and isolates the 2-cycle question from the
+question of long cycles. The share of graphs with `identified_min_eig > 0` per class is the check that the
+classes do what they are meant to (it should be about 1 for `dag` and `no2c`).
+
+**Why the same four estimators as E3.** The lasso as the reference; the sparse → dense MCP, whose deficit
+is predicted to be class-independent; the two pruners, whose gain is predicted to be class-dependent. If
+the four behave as predicted, E3 and E4 together give the thesis a mechanism with two testable parts:
+the dense start wins by orienting strong, identifiable edges, and the sparse → dense path loses by committing
+to a direction before the data can tell.
+
+**Readings.** Gains ordered `dag` ≥ `no2c` > `random` (with 2-cycles) for the pruners, a deficit of about
+the same size in every class for `MCP` sparse → dense, and the orientation breakdown of the 2-cycle graphs
+showing the pruners at `half` where the lasso is at `both`, confirm the picture. An equal gain in every
+class would mean identifiability is not the limiting factor at these sizes — the gain would then come from
+the hedge on *single* edges alone, which is consistent with the theory note's finding that the dense end
+contains the true direction of most true edges even where the BP condition fails. The within-$k$ requirement
+applies to the generated classes too, since `dag` and `no2c` change the edge count per pair as well.
 
 ### 5.1 Analysis first, on the stored campaign (laptop, no runs)
 

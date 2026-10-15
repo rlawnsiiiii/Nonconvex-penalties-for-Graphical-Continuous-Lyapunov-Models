@@ -536,10 +536,14 @@ solver before its backtracking test was corrected (`docs/LIKELIHOOD.md` §4.3; c
 `next_steps/121026/code_review_121026.md`): the old test let a step pass once the predicted
 decrease of the loss was at rounding level, which moved stationary warm starts by one uncontrolled
 step and ran 255 to 970 of the 40,000 solves of a cell with the rescaled $C$ to the iteration cap.
-Measured on the stored data sets the one-step solves moved $M$ by about $10^{-8}$ and changed no
-support, and a full path with the corrected test differs at 2 of 100 $\lambda$ by one entry with
-the same oracle $F_1$; the numbers below are stated as stored. Whether to re-run waves 3, 7 and 8
-with the corrected solver (about 700 CPU-h per sample size for wave 7) is open.
+Measured on the stored data set with the largest diagonal ratio of $C$ (250): the lasso path is
+unchanged at every $\lambda$ (and no longer caps), the MCP dense → sparse path from the exact fit
+differs at 8 of 100 $\lambda$ by one to three entries with the oracle $F_1$ 0.493 → 0.507, and a
+third of its solves still end at the cap because the first-order method crawls along a flat valley
+of the nonconvex objective (a property of the problem, `docs/LIKELIHOOD.md` §4.3 and §5, flagged
+per $\lambda$ by `converged` in the shards); the numbers below are stated as stored. Whether to
+re-run waves 3, 7 and 8 with the corrected solver (about 700 CPU-h per sample size for wave 7) is
+open.
 
 ![](../runs/campaign/figures/loglik_wave7.png)
 

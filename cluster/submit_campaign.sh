@@ -55,6 +55,25 @@
 #           cells <loss>_<estimator>-ml_<C>[_p<p>].  Run it after wave 7 is complete.
 #           (c) The search from 100 random graphs, the empty graph and the truth with the
 #           likelihood refit, p = 10, the starts of a graph in 4 tasks (search100sml_p10_<C>).
+#   wave 9  (14 October) the mechanism experiments of next_steps/131026/plan_mechanism_131026.md,
+#           direct loss, wave 1's graphs, selection and search, in five groups (--group NAME selects
+#           one; without it the whole wave):
+#           starts     E1: the dense start of MCP dense -> sparse (--up-start) and the pilot of the
+#                      adaptive lasso (--pilot) from exact / l1 / l2 / truth-0.05 / truth-0.2 instead of
+#                      the lasso's dense end; both C; cells direct_MCP-up-<start>_<C>,
+#                      direct_adaptive-<start>_<C> (<start> without the dash: truth0.05); 20 cells per n.
+#           threshold  E2: the thresholded lasso, refitted and not (--method threshold[-norefit]);
+#                      cells direct_threshold[-norefit]_<C>; 4 per n.
+#           betamin    E3: the weights |w| ~ U[w_min, 1] with w_min = 0 / 0.1 / 0.25 / 0.5
+#                      (--weights uniform --w-min), lasso / MCP / MCP-up / adaptive, both C, n = 1000 and
+#                      1e4 only; cells direct_<estimator>_<C>_w<wmin> (w0, w01, w025, w05); 32 per n.
+#           class      E4: the graph class no2c / dag (--graph), the same four estimators, both C,
+#                      n = 1000 and 1e4 only; cells direct_<estimator>_<C>_<graph>; 16 per n.
+#           starts-loglik  E1 on the log-likelihood loss, p = 10, n = 1000 and 1e4 only (the plan's
+#                      optional second line); cells loglik_MCP-up-<start>_<C>, loglik_adaptive-<start>_<C>.
+#           Shard counts start from wave 1's per estimator and are to be set from the rehearsal
+#           (plan §6, step 5).  A wave 9 cell asked for at an n it is not planned at is reported
+#           and skipped.
 #
 # From ~/repo on the login node (nothing needs to be activated first):
 #     bash cluster/submit_campaign.sh --wave 1 --list            # the cells of a wave
@@ -62,13 +81,16 @@
 #     bash cluster/submit_campaign.sh --wave 1 --n 1000          # submit one sample size
 #     bash cluster/submit_campaign.sh --wave 4 --p 15 25         # wave 4: one or more p
 #     bash cluster/submit_campaign.sh --wave 5 --n 1e4 --only -ml # wave 5a at one n
+#     bash cluster/submit_campaign.sh --wave 9 --group class --n 1000 1e4   # one group of wave 9
 #     bash cluster/submit_campaign.sh --wave 1 --status          # state of every cell
 #     bash cluster/submit_campaign.sh --wave 1 --fill            # resubmit missing shards,
 #                                                                # once the jobs have ended
 # Options: --n takes one or more of 1000 1e4 1e5 inf (default: 1000 1e4 inf; for
 # wave 4 the default is 1000 alone).  --p takes one or more of 15 25 30 40 50 (wave 4 only; default
 # all five).  --only PATTERN... restricts to cells whose name contains one of the
-# patterns (e.g. --only MCP-up, --only Cresc).  --time HH:MM:SS overrides the time
+# patterns (e.g. --only MCP-up, --only Cresc); a pattern ending in $ must end the name (--only _w0$
+# is w_min = 0 alone).  --group NAME (wave 9 only) selects one of its groups: starts, threshold,
+# betamin, class, starts-loglik.  --time HH:MM:SS overrides the time
 # limit (e.g. with --fill after a TIMEOUT; the partition's cap is 24 h).  --shards N
 # overrides the shard count of cells not yet submitted.
 #
@@ -103,6 +125,8 @@ STATUS=0
 LIST=0
 TIME=""
 SHARDS=""
+GROUP=""
+GROUPS9=(starts threshold betamin class starts-loglik)
 
 # The cells of a wave, one per line:
 #     name | job tag | runner | shards | time limit | runner arguments (without --n-obs)
@@ -266,7 +290,87 @@ cells() {
       run=simulations/run_search_shard.py
       echo "search100sml_p10_C2I|8si|$run|128|24:00:00|--p 10 --reps 2 --c-scale identity --methods pure truth --restarts 100 --starts sparse --refit loglik --add-screen 20 --start-blocks 4"
       echo "search100sml_p10_Cresc|8sr|$run|128|24:00:00|--p 10 --reps 2 --c-scale variance --methods pure truth --restarts 100 --starts sparse --refit loglik --add-screen 20 --start-blocks 4" ;;
-    *) echo "unknown wave: $1 (1 to 8)" >&2; return 2 ;;
+    9)
+      # the mechanism experiments (plan of 13 October 2026).  Shards per estimator as wave 1
+      # (lasso 4, MCP 8, MCP-up 16, adaptive 4; the thresholded lasso 4: one lasso path plus closed-form
+      # refits); the loglik starts as wave 7's p = 10 cells (C2I 8, Cresc 16).  To be corrected from the
+      # rehearsal timing (plan §6, step 5: LRZ seconds per data set ~ 2 x laptop, a task <= 6 h).
+      local s9="--p 10 20 --reps 25 --select search" s9l="--loss loglik --p 10 --reps 25 --select search"
+      local st stn code e ec w wtag wc g gc sh9
+      if [ -z "$GROUP" ] || [ "$GROUP" = starts ]; then
+        for c in C2I Cresc; do
+          if [ "$c" = C2I ]; then cs=identity; ci=i; else cs=variance; ci=r; fi
+          for st in exact l1 l2 truth-0.05 truth-0.2; do
+            stn=${st/-/}
+            case "$st" in exact) code=ex ;; l1) code=L1 ;; l2) code=L2 ;; truth-0.05) code=t5 ;; truth-0.2) code=t2 ;; esac
+            echo "direct_MCP-up-${stn}_${c}|9M${code}${ci}|$run|16|12:00:00|$s9 --c-scale $cs --penalty MCP --direction up --up-start $st"
+            echo "direct_adaptive-${stn}_${c}|9a${code}${ci}|$run|4|12:00:00|$s9 --c-scale $cs --method adaptive --pilot $st"
+          done
+        done
+      fi
+      if [ -z "$GROUP" ] || [ "$GROUP" = threshold ]; then
+        for c in C2I Cresc; do
+          if [ "$c" = C2I ]; then cs=identity; ci=i; else cs=variance; ci=r; fi
+          echo "direct_threshold_${c}|9th${ci}|$run|4|12:00:00|$s9 --c-scale $cs --method threshold"
+          echo "direct_threshold-norefit_${c}|9tn${ci}|$run|4|12:00:00|$s9 --c-scale $cs --method threshold-norefit"
+        done
+      fi
+      if [ -z "$GROUP" ] || [ "$GROUP" = betamin ]; then
+        for w in 0 0.1 0.25 0.5; do
+          wtag=w${w/./}
+          case "$w" in 0) wc=0 ;; 0.1) wc=1 ;; 0.25) wc=2 ;; 0.5) wc=5 ;; esac
+          for c in C2I Cresc; do
+            if [ "$c" = C2I ]; then cs=identity; ci=i; else cs=variance; ci=r; fi
+            for e in lasso MCP MCP-up adaptive; do
+              case "$e" in
+                lasso) ec=la; sh9=4; ea="--penalty lasso" ;;
+                MCP) ec=Ms; sh9=8; ea="--penalty MCP" ;;
+                MCP-up) ec=Mu; sh9=16; ea="--penalty MCP --direction up" ;;
+                adaptive) ec=ad; sh9=4; ea="--method adaptive" ;;
+              esac
+              echo "direct_${e}_${c}_${wtag}|9b${ec}${wc}${ci}|$run|$sh9|12:00:00|$s9 --c-scale $cs $ea --weights uniform --w-min $w"
+            done
+          done
+        done
+      fi
+      if [ -z "$GROUP" ] || [ "$GROUP" = class ]; then
+        for g in no2c dag; do
+          case "$g" in no2c) gc=n ;; dag) gc=d ;; esac
+          for c in C2I Cresc; do
+            if [ "$c" = C2I ]; then cs=identity; ci=i; else cs=variance; ci=r; fi
+            for e in lasso MCP MCP-up adaptive; do
+              case "$e" in
+                lasso) ec=la; sh9=4; ea="--penalty lasso" ;;
+                MCP) ec=Ms; sh9=8; ea="--penalty MCP" ;;
+                MCP-up) ec=Mu; sh9=16; ea="--penalty MCP --direction up" ;;
+                adaptive) ec=ad; sh9=4; ea="--method adaptive" ;;
+              esac
+              echo "direct_${e}_${c}_${g}|9c${ec}${gc}${ci}|$run|$sh9|12:00:00|$s9 --c-scale $cs $ea --graph $g"
+            done
+          done
+        done
+      fi
+      if [ -z "$GROUP" ] || [ "$GROUP" = starts-loglik ]; then
+        for c in C2I Cresc; do
+          if [ "$c" = C2I ]; then cs=identity; ci=i; sh9=8; else cs=variance; ci=r; sh9=16; fi
+          for st in exact l1 l2 truth-0.05 truth-0.2; do
+            stn=${st/-/}
+            case "$st" in exact) code=ex ;; l1) code=L1 ;; l2) code=L2 ;; truth-0.05) code=t5 ;; truth-0.2) code=t2 ;; esac
+            echo "loglik_MCP-up-${stn}_${c}|9LM${code}${ci}|$run|$sh9|24:00:00|$s9l --c-scale $cs --penalty MCP --direction up --up-start $st"
+            echo "loglik_adaptive-${stn}_${c}|9La${code}${ci}|$run|$sh9|24:00:00|$s9l --c-scale $cs --method adaptive --pilot $st"
+          done
+        done
+      fi ;;
+    *) echo "unknown wave: $1 (1 to 9)" >&2; return 2 ;;
+  esac
+}
+
+# wave 9: the knob cells (betamin, class) and the loglik starts are planned at n = 1000 and 1e4 only
+planned_at_n() {
+  [ "$WAVE" = 9 ] || return 0
+  case "$1" in
+    *_w[0-9]*|*_no2c|*_dag|loglik_*) [ "$2" = 1000 ] || [ "$2" = 1e4 ] ;;
+    *) return 0 ;;
   esac
 }
 
@@ -275,7 +379,8 @@ n_code() { case "$1" in 1000) echo 3 ;; 1e4) echo 4 ;; 1e5) echo 5 ;; inf) echo 
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --wave) WAVE=${2:?--wave needs 1 to 8}; shift 2 ;;
+    --wave) WAVE=${2:?--wave needs 1 to 9}; shift 2 ;;
+    --group) GROUP=${2:?--group needs one of ${GROUPS9[*]}}; shift 2 ;;
     --dry-run) DRY=1; shift ;;
     --fill) FILL=1; shift ;;
     --status) STATUS=1; shift ;;
@@ -297,7 +402,12 @@ while [ $# -gt 0 ]; do
     *) echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
-[ -n "$WAVE" ] || { echo "--wave is required (1 to 8); see --help" >&2; exit 2; }
+[ -n "$WAVE" ] || { echo "--wave is required (1 to 9); see --help" >&2; exit 2; }
+if [ -n "$GROUP" ]; then
+  [ "$WAVE" = 9 ] || { echo "--group applies to wave 9 only" >&2; exit 2; }
+  ok=0; for g in "${GROUPS9[@]}"; do [ "$g" = "$GROUP" ] && ok=1; done
+  [ "$ok" -eq 1 ] || { echo "unknown group: $GROUP (one of ${GROUPS9[*]})" >&2; exit 2; }
+fi
 if [ "$WAVE" = 4 ]; then
   [ "$NS_GIVEN" -eq 1 ] || NS=(1000)          # Figure 5's sample size unless --n says otherwise
   for p in "${PS[@]}"; do
@@ -312,7 +422,13 @@ done
 wanted() {                                    # does the cell name pass --only?
   [ ${#ONLY[@]} -eq 0 ] && return 0
   local pat
-  for pat in "${ONLY[@]}"; do [[ "$1" == *"$pat"* ]] && return 0; done
+  for pat in "${ONLY[@]}"; do
+    if [[ "$pat" == *'$' ]]; then               # a trailing $ anchors the pattern at the end of the name
+      [[ "$1" == *"${pat%?}" ]] && return 0     # (wave 9: _w0$ is w_min = 0 alone, _w0 would be every level)
+    else
+      [[ "$1" == *"$pat"* ]] && return 0
+    fi
+  done
   return 1
 }
 
@@ -333,6 +449,7 @@ for n in "${NS[@]}"; do
     wanted "$name" || continue
     n_wanted=$((n_wanted + 1))
     run="$ROOT/${name}_n${n}"
+    planned_at_n "$name" "$n" || { echo "not planned $run  (wave 9 runs this cell at n = 1000 and 1e4 only)"; continue; }
     shards=${SHARDS:-$shards}
     if [ -f "$run/n_shards" ]; then
       prev=$(cat "$run/n_shards")

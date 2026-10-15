@@ -253,7 +253,11 @@ gives up long before stationarity (§0). Bug A1 is still worth fixing: up to 7 %
    the measured effect of $10^{-8}$ on any path metric is below 0.001.
 2. **Log-likelihood loss: fix A1** (stop on the KKT residual of the accepted iterate; a
    rounding-safe step test). The measured effect on supports is small, so re-running the
-   log-likelihood cells is not required for the current findings.
+   log-likelihood cells is not required for the current findings. *Done on 13 October 2026*
+   (`docs/LIKELIHOOD.md` §4.3): the lasso path then converges everywhere; the MCP dense → sparse
+   path keeps a third of its solves at the cap on the worst-scaled data set, because the
+   first-order method crawls along a flat valley of the nonconvex objective, which no step test
+   changes (`next_steps/121026/code_review_121026.md` §1b).
 3. **In the thesis, define the nonconvex estimators by penalty, path order and algorithm**, and
    report the comparison of §3: with coordinate descent the MCP and SCAD paths follow other
    stationary points, without changing the conclusions.

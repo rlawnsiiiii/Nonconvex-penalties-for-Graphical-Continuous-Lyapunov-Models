@@ -102,6 +102,52 @@ unchanged; for the lasso both orders return the same path.
 **Cost.** One lasso path plus an MCP / SCAD path that starts dense: 2 to 5 times the standard
 MCP / SCAD path (measured, campaign note §3.4).
 
+### 3.1 The exact fits behind the dense start (`src/gclm/objective/exact_fits.py`)
+
+The lasso at $\lambda_1$ is an approximation of a well-defined object: the exact solutions of
+$M\hat\Sigma+\hat\Sigma M^\top+C=0$ form the affine space $\{M_0+W\hat\Sigma^{-1}: W \text{ skew}\}$
+with $M_0=-\tfrac12 C\hat\Sigma^{-1}$ (`dense_fit`), of dimension $p(p-1)/2$ (Dettling, Homs,
+Améndola, Drton & Hansen 2023, Lemma 27), and as $\lambda\to 0$ the lasso tends to the member with
+the smallest off-diagonal $\ell_1$ norm (the theory note of 8 October 2026, §2). The module added on
+14 October 2026 for the dense-start experiments of the plan of 13 October (§1.1) gives members of
+that space exactly, the diagonal free as everywhere else in the code:
+
+| function | member | method |
+|---|---|---|
+| `min_l2_exact_fit(sigma_hat, c)` | smallest off-diagonal Frobenius norm | linear least squares in the skew coordinates $w$, $M(w)=M_0+\sum_k w_k B_k\hat\Sigma^{-1}$ with $B_k=E_{ij}-E_{ji}$ (`skew_basis`, `exact_fit_jacobian`) |
+| `min_l1_exact_fit(sigma_hat, c)` | smallest off-diagonal $\ell_1$ norm ("basis pursuit", the limit of the lasso) | linear program in $(w,t)$, $\lvert M(w)_{ij}\rvert\le t_{ij}$, `scipy.optimize.linprog` with HiGHS at tolerance $10^{-9}$; 0.2 s at $p=20$, 1 s at $p=30$, 10–26 s at $p=50$ |
+| `noisy_truth_start(m_true, tau, rng)` | $M^*+\tau\,N(0,1)$ off the diagonal | a ceiling for the dense starts, not an estimator; on standardised data pass `standardized_drift(M*, s)` |
+| `exact_fit_residual(m, sigma_hat, c)` | $\lVert M\hat\Sigma+\hat\Sigma M^\top+C\rVert_F$ | for tests and diagnostics |
+
+**Uniqueness of the minimum-$\ell_1$ fit.** The theory's *BP condition* (8 October note, §4) asks
+that the standardised truth $\tilde M$ be the *unique* minimiser. `min_l1_exact_fit(..., probes=k,
+return_info=True)` decides this exactly: at the solution, split the off-diagonal entries into the
+nonzero set $N$ (signs $s$) and the zero set $Z$; for a small step $d$ the norm changes by
+$s^\top J_N d+\lVert J_Z d\rVert_1$ exactly, so the minimiser is unique iff this is positive for
+every $d\ne 0$ (a sharp minimum, Burke & Ferris 1993), i.e. iff the polyhedral cone
+$\{d: s^\top J_N d+\lVert J_Z d\rVert_1\le 0\}$ is $\{0\}$. Random linear objectives maximised
+over that cone in the unit box are 0 iff it is, and positive with probability one otherwise
+(`L1Fit.face_extent`). The constraints are homogeneous, so no tolerance on the minimal norm enters;
+only the classification of entries as zero (`zero_tol`). On the campaign graphs the extent is either
+exactly 0 or above 0.047. The earlier idea, re-solving with the norm held at its minimum up to a
+slack, flagged generic sample instances as non-unique (the slack is amplified along weakly sharp
+minima) and was dropped.
+
+**Regression (`tests/test_exact_fits.py::test_bp_condition_count_on_the_campaign_graphs`).** On the
+thesis DGP at $p=10$ ($k=1,\dots,4$, 25 graphs each, $C=2I$, the campaign's seed), population
+covariance on the correlation scale with the rescaled $C$: $\tilde M$ is the unique minimum-$\ell_1$
+fit in **11 of 100** graphs (7 at $k=1$, 4 at $k=2$, none at $k=3,4$), the 7 October count
+reproduced exactly. It attains the minimal norm in 17; in the other 6 the optimal face is flat (the
+direction of an isolated edge is free) and which vertex the LP returns depends on the solver: HiGHS
+1.15 returns $\tilde M$ in 14, the 8 October note counted 15. About 5 s.
+
+**Tests** (`tests/test_exact_fits.py`, 12): the basis and Jacobian against an explicit construction
+and full column rank; all three fits exact to $10^{-8}\lVert C\rVert_F$ at $p=5,10,20$ and distinct;
+each minimum-norm member smallest in its norm by a strict margin; the LP against an independent
+formulation in the $p^2$ entries with the design matrix as equality constraints; the uniqueness
+probe on the flat two-node case, a sharp two-node case, a generic sample and a population graph with
+an isolated edge; the noisy truth and the residual; refused inputs; the regression above.
+
 ---
 
 ## 4. MCP / SCAD by local linear approximation (`--method lla`)
@@ -171,16 +217,66 @@ every support is contained in the pilot's; with equal weights it is the lasso pa
 
 **Cost.** About two lasso paths.
 
+### 5.1 Any matrix as the start or the pilot (`--up-start`, `--pilot`; 14 October 2026)
+
+The dense → sparse paths and the adaptive lasso share one ingredient, a dense matrix to start
+from, and until 14 October 2026 it was always the lasso's dense end (or, on the covariance losses,
+Varando & Hansen's exact fit). Experiment E1 of the plan of 13 October asks which property of that
+start matters, so the start became an argument: `lasso_path(..., direction="up", start=M)`,
+`covloss_path(..., direction="up", start=M)`, `adaptive_lasso_path(pilot=M)` and
+`adaptive_covloss_path(pilot=M)` take any `(p, p)` matrix; without it they compute what they always
+did (`start=` equal to the lasso's dense end reproduces the stored paths bit for bit,
+`tests/test_starts.py`). The path records the start it used (`LassoPath.start`,
+`AdaptiveLassoPath.pilot`). The runner's `--up-start` (paths) and `--pilot` (adaptive and thresholded
+lasso) choose among
+
+| name | the matrix | property kept (plan §2.0) |
+|---|---|---|
+| `lasso` | the lasso solution at the smallest $\lambda$ (the default for the direct loss) | exact fit up to $O(\lambda)$, $\ell_1$-smallest, oriented |
+| `exact` | $-\tfrac12 C\hat\Sigma^{-1}$ (Varando & Hansen; the default for the covariance losses) | exact fit only |
+| `l1` | the minimum-$\ell_1$ exact fit, §3.1 | exact fit, $\ell_1$-smallest, oriented (the limit the lasso approximates) |
+| `l2` | the minimum-Frobenius exact fit, §3.1 | exact fit, dense, both directions of a pair graded |
+| `truth-<τ>` | the standardised truth $\tilde M$ plus $\tau\,N(0,1)$ off the diagonal | oriented only (a ceiling, not an estimator) |
+
+Every cell with a dense start stores the start's own diagnostics per data set (`start_*` in the
+shard: norms, Lyapunov residual, support size at $10^{-8}$, confusion counts and the orientation
+breakdown of that support, i.e. the "dense-start content" of the 7 October note), and `campaign.py`
+turns them into the `start_f1`, `start_recall`, `start_correct`, `start_hedged`, `start_reversed`, …
+columns. The fully dense starts (`l2`, `exact`, `truth-τ`) hit the step cap of the MCP solver at a
+few $\lambda$ in the flat valley of the dense end (`converged` flags them; `LIKELIHOOD.md` §4.3);
+the `l1` start reproduces the lasso-started path on the test instance, as the theory predicts.
+
+### 5.2 The thresholded lasso (`--method threshold`, `--method threshold-norefit`)
+
+Experiment E2 asks whether the adaptive lasso's gain is in its pilot or in its reweighting, so the
+simplest pruning of the same pilot is an estimator of its own: rank the pilot's off-diagonal
+entries by size, keep those with $|M^0_{ij}| \ge t$, refit the kept support by least squares on the
+direct loss with the diagonal free (`DirectRefit`, the closed form behind the score), and let the
+score choose $t$. `thresholded_lasso_path(sigma, c, pilot=None, n_thresholds=100, refit="direct")`
+computes the pilot exactly as `adaptive_lasso_path` does (pass the same `pilot` to both to make the
+pairing explicit), lays a grid of 100 thresholds — 0 at the dense end, 98 values log-spaced between
+the smallest and the largest pilot entry above $10^{-8}$, $\infty$ at the sparse end — and returns a
+`ThresholdedLassoPath`, a `LassoPath` whose `lambdas` are the thresholds in increasing order, so
+`evaluate_path`, `bic_along_path`, the selection and the search treat it like any path. The
+supports are nested. `refit="none"` (`--method threshold-norefit`) keeps the pilot's values on the kept
+support: the pilot's ranking as a path, whose `aupr` measures how well the dense end *orders* the
+edges; `refit="loglik"` is available for the likelihood refit. In the shard the threshold path has
+`lambda_max` = the largest pilot entry, the loss as `objective` (no penalty), `kkt` NaN and no
+solver steps. Tests: `tests/test_threshold.py`; cost: one lasso path plus at most 100 closed-form
+refits.
+
 ---
 
 ## 6. On the cluster
 
-`simulations/run_s1_shard.py` takes the same options (`--c-scale`, `--direction`, `--method`).
+`simulations/run_s1_shard.py` takes the same options (`--c-scale`, `--direction`, `--method`,
+and since 14 October 2026 `--up-start`, `--pilot`, `--weights`, `--w-min`, `--graph`).
 With `--select bic` or `--select search` it also records, for each graph, the support at every
 $\lambda$, the graph that the score selects on the path and the graph the greedy search of
 [`SEARCH.md`](SEARCH.md) reaches from it. `cluster/submit_campaign.sh` defines the cells of the
-campaign. Details, the list of cells and the commands: campaign note §4 and §5, and
-[`REPRODUCTION.md`](REPRODUCTION.md) §2.7.
+campaign; wave 9 holds the mechanism experiments of the plan of 13 October 2026 in five groups
+(`--group starts | threshold | betamin | class | starts-loglik`). Details, the list of cells and the
+commands: campaign note §4 and §5, and [`REPRODUCTION.md`](REPRODUCTION.md) §2.7.
 
 ---
 
@@ -290,3 +386,9 @@ fit and prune are pruning the wrong object.
   from a dense start towards sparser solutions.
 - Dettling, P., Drton, M. & Kolar, M. (2024). On the Lasso for graphical continuous Lyapunov
   models. *CLeaR*. The direct loss and the simulation design.
+- Dettling, P., Homs, R., Améndola, C., Drton, M. & Hansen, N. R. (2023). Identifiability in
+  continuous Lyapunov models. *SIAM Journal on Matrix Analysis and Applications* 44(4). Lemma 27:
+  the exact fits $(W-C/2)\hat\Sigma^{-1}$, $W$ skew (§3.1).
+- Burke, J. V. & Ferris, M. C. (1993). Weak sharp minima in mathematical programming. *SIAM
+  Journal on Control and Optimization* 31(5), 1340–1359. A polyhedral function has a unique minimiser
+  iff the minimum is sharp (§3.1, the uniqueness probe).

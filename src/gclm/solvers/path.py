@@ -5,7 +5,10 @@ losses) and :func:`fit_path` (either, by name).
 Three more ways to compute a path for the direct loss, all of which start from
 the lasso instead of the empty graph (next_steps/051026/cluster_campaign_051026.md):
 ``lasso_path(..., direction="up")`` (MCP / SCAD dense -> sparse), :func:`lla_path`
-(MCP / SCAD by local linear approximation) and :func:`adaptive_lasso_path`.
+(MCP / SCAD by local linear approximation) and :func:`adaptive_lasso_path`.  Since 14 October
+2026 (plan of 13 October, §1.2-1.3) the dense start can be any matrix (``start=`` in
+:func:`lasso_path` and :func:`covloss_path`, ``pilot=`` in the adaptive lassos) and
+:func:`thresholded_lasso_path` prunes the lasso's dense end by size alone.
 
 For the direct loss, interchangeable backends minimise
 
@@ -63,6 +66,7 @@ import numpy as np
 
 from gclm.objective import covariance as cov
 from gclm.objective.direct import diagonal_fit, direct_grad, lambda_max
+from gclm.objective.exact_fits import PRESENT
 from gclm.objective.penalties import (CONVENTIONS, canonical, lla_weights, penalty_scale,
                                       penalty_weights, resolve_gamma)
 from gclm.solvers.backends import _R_BACKENDS, _pyproximal_path, _r_path, _skglm_path
@@ -109,6 +113,9 @@ class LassoPath:
     #: backends that report nothing.
     iterations: np.ndarray = field(default_factory=lambda: np.zeros(0, int))
     converged: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
+    #: the dense start of a dense -> sparse path (``direction="up"``): the lasso's dense end, or the
+    #: ``start=`` that was given (plan of 13 October 2026, §1.2); None for a sparse -> dense path
+    start: np.ndarray | None = None
 
     def supports(self, include_diagonal: bool = False) -> list[np.ndarray]:
         out = []
@@ -130,6 +137,7 @@ def lasso_path(
     solver: str = "fista",
     zero_tol: float = 1e-12,
     direction: str = "down",
+    start: np.ndarray | None = None,
     **solver_kwargs,
 ) -> LassoPath:
     """Fit the whole path by continuation: each lambda is solved starting from
@@ -152,6 +160,12 @@ def lasso_path(
     different stationary points of the same objective: the estimator is the
     objective *plus* the order.  See next_steps/051026/cluster_campaign_051026.md
     and next_steps/051026/orientation_lock_in.md for why the order matters here.
+
+    ``start`` (``direction="up"`` with MCP / SCAD only): the matrix to start the dense ->
+    sparse path from instead of the lasso solution at the smallest lambda -- an exact fit of
+    the Lyapunov equation (:mod:`gclm.objective.exact_fits`), the noisy truth, anything of
+    shape ``(p, p)``.  Everything else is unchanged: the grid, the warm starts along it, the
+    diagonal fit at ``lambda_max``.  The start used is returned as ``LassoPath.start``.
 
     ``zero_tol``: entries with ``|M_ij| < zero_tol`` are snapped to exactly zero.
 
@@ -236,22 +250,32 @@ def lasso_path(
 
     if direction not in ("down", "up"):
         raise ValueError("direction must be 'down' or 'up'")
+    if start is not None and (direction != "up" or penalty == "lasso"):
+        raise ValueError("start= applies to the dense -> sparse MCP / SCAD path only "
+                         "(direction='up' with penalty MCP or SCAD)")
     if direction == "up" and penalty != "lasso":
         # ---- MCP / SCAD, dense -> sparse -------------------------------------
         if solver != "fista":
             raise ValueError("direction='up' is implemented for solver='fista' only")
-        # 1. The dense start: the LASSO solution at the smallest lambda.  The lasso
-        #    is convex, so this start is well defined; it is computed by the usual
-        #    sparse -> dense lasso path on the same grid (not snapped: zero_tol=0).
-        lasso_kwargs = {k: v for k, v in solver_kwargs.items()
-                        if k not in ("penalty", "gamma", "convention")}
-        dense = lasso_path(sigma, c, lambdas=lambdas, penalize_diagonal=penalize_diagonal,
-                           solver="fista", zero_tol=0.0, **lasso_kwargs)
+        order = np.argsort(lambdas, kind="stable")
+        if start is None:
+            # 1. The dense start: the LASSO solution at the smallest lambda.  The lasso
+            #    is convex, so this start is well defined; it is computed by the usual
+            #    sparse -> dense lasso path on the same grid (not snapped: zero_tol=0).
+            lasso_kwargs = {k: v for k, v in solver_kwargs.items()
+                            if k not in ("penalty", "gamma", "convention")}
+            dense = lasso_path(sigma, c, lambdas=lambdas, penalize_diagonal=penalize_diagonal,
+                               solver="fista", zero_tol=0.0, **lasso_kwargs)
+            warm = dense.estimates[order[0]]
+        else:
+            # 1'. A start given by the caller (plan of 13 October 2026, §1.2)
+            warm = np.array(start, dtype=float)
+            if warm.shape != (p, p) or not np.all(np.isfinite(warm)):
+                raise ValueError(f"start must be a finite ({p}, {p}) matrix, got shape {warm.shape}")
+        start_used = warm.copy()
         # 2. Walk the grid from the smallest lambda to the largest.  `fit` is
         #    solve_fista with penalty=MCP/SCAD (the monotone APG of proxgrad.py);
         #    `warm` carries the previous solution into the next problem.
-        order = np.argsort(lambdas, kind="stable")
-        warm = dense.estimates[order[0]]
         up: list[np.ndarray | None] = [None] * len(lambdas)
         iters, conv = np.zeros(len(lambdas), int), np.ones(len(lambdas), bool)
         for i in order:
@@ -265,7 +289,8 @@ def lasso_path(
                                  **solver_kwargs)
                 iters[i], conv[i] = info.iterations, info.converged
             up[i] = warm.copy()
-        return LassoPath(lambdas=lambdas, estimates=_snap(up, zero_tol), iterations=iters, converged=conv)
+        return LassoPath(lambdas=lambdas, estimates=_snap(up, zero_tol), iterations=iters, converged=conv,
+                         start=start_used)
 
     # ---- sparse -> dense (every penalty; and the lasso in either "direction") ----
     # walked from the largest lambda down, whatever order the grid was given in (code review D:
@@ -444,6 +469,96 @@ def adaptive_lasso_path(
                              converged=conv, weights=weights, pilot=pilot)
 
 
+@dataclass
+class ThresholdedLassoPath(LassoPath):
+    """:class:`LassoPath` whose "lambdas" are thresholds on the size of the pilot's entries (plan of
+    13 October 2026, §1.3): ``thresholds`` (the same array as ``lambdas``), the ``pilot`` and the
+    ``refit`` used on every kept support."""
+
+    thresholds: np.ndarray = field(default_factory=lambda: np.zeros(0))
+    pilot: np.ndarray = field(default_factory=lambda: np.zeros((0, 0)))
+    refit: str = "direct"
+
+
+#: how :func:`thresholded_lasso_path` fits the kept support: least squares on the direct loss, the
+#: maximised likelihood, or not at all (the pilot cut at the threshold)
+THRESHOLD_REFITS = ("direct", "loglik", "none")
+
+
+def thresholded_lasso_path(
+    sigma: np.ndarray,
+    c: np.ndarray,
+    pilot: np.ndarray | None = None,
+    n_thresholds: int = 100,
+    refit: str = "direct",
+    *,
+    present: float = PRESENT,
+    n_lambda: int = 100,
+    ratio: float = 1e-4,
+    tol: float = 1e-10,
+    max_iter: int = 50_000,
+    zero_tol: float = 1e-12,
+) -> ThresholdedLassoPath:
+    """The thresholded lasso: rank the entries of the dense end of the lasso path by size, keep
+    the largest, refit (plan of 13 October 2026, §1.3; experiment E2).
+
+    Pilot ``M0``: the lasso solution at the smallest lambda of the lasso's own grid, computed
+    exactly as :func:`adaptive_lasso_path` computes its pilot (same arguments), so that the two
+    estimators are paired at the pilot; pass the same ``pilot`` to both to make that explicit.
+
+    Grid: ``n_thresholds`` values ``t`` in increasing order -- 0 at the dense end,
+    ``n_thresholds - 2`` values log-spaced between the smallest and the largest nonzero
+    ``|M0_ij|`` off the diagonal, and ``inf`` at the sparse end -- so the path runs from the
+    pilot's full support to the empty graph.  Stored in ``thresholds`` and in ``lambdas``, so
+    that :func:`gclm.metrics.evaluate_path`, :func:`gclm.solvers.search.bic_along_path` and the
+    shard runner treat it like any path (increasing order = dense -> sparse, as a lambda grid).
+
+    Estimate at ``t``: the support ``{(i, j) : i != j, |M0_ij| > present, |M0_ij| >= t}`` (``present``:
+    the size above which an entry of the pilot counts at all -- the lasso's dense end has exact
+    zeros, the exact fits used as pilots carry solver dust; :data:`gclm.objective.exact_fits.PRESENT`,
+    the rule the shard runner's start diagnostics use too), refitted with the diagonal free -- least squares on the direct loss (``refit="direct"``, the closed form
+    behind the score, :class:`gclm.solvers.search.DirectRefit`), the maximised Gaussian
+    likelihood (``"loglik"``, :class:`gclm.solvers.search.CovRefit`, slow), or not at all
+    (``"none"``: the pilot cut at ``t`` with its own diagonal -- the pilot's ranking as a path,
+    for the area under its precision-recall curve).  The supports are nested along the grid.
+    Nothing else: diagonal unpenalised, textbook thresholding.
+    """
+    from gclm.solvers.search import make_refit      # search.py imports the covariance solver, not this module
+
+    if refit not in THRESHOLD_REFITS:
+        raise ValueError(f"refit must be one of {THRESHOLD_REFITS}, got {refit!r}")
+    if n_thresholds < 2:
+        raise ValueError("n_thresholds must be at least 2 (the dense end and the empty graph)")
+    p = sigma.shape[0]
+    off = ~np.eye(p, dtype=bool)
+    if pilot is None:
+        pilot = lasso_path(sigma, c, n_lambda=n_lambda, ratio=ratio, tol=tol, max_iter=max_iter,
+                           zero_tol=zero_tol).estimates[0]
+    pilot = np.array(pilot, dtype=float)
+    if pilot.shape != (p, p) or not np.all(np.isfinite(pilot)):
+        raise ValueError(f"pilot must be a finite ({p}, {p}) matrix, got shape {pilot.shape}")
+    size = np.where(off, np.abs(pilot), 0.0)
+    nonzero = size[size > present]
+    if nonzero.size:
+        inner = np.geomspace(nonzero.min(), nonzero.max(), n_thresholds - 2)
+    else:                                       # an empty pilot: every threshold gives the empty graph
+        inner = np.full(n_thresholds - 2, np.inf)
+    thresholds = np.concatenate([[0.0], inner, [np.inf]])
+    fitter = None if refit == "none" else make_refit(sigma, c, refit)
+    estimates = []
+    converged = np.ones(len(thresholds), dtype=bool)
+    for i, t in enumerate(thresholds):
+        support = (size > present) & (size >= t)
+        if fitter is None:
+            estimates.append(np.where(support | ~off, pilot, 0.0))
+        else:
+            estimates.append(fitter.fit(support))
+            converged[i] = bool(fitter.last_converged)
+    return ThresholdedLassoPath(lambdas=thresholds, estimates=estimates, iterations=np.zeros(len(thresholds), int),
+                                converged=converged, start=pilot.copy(), thresholds=thresholds, pilot=pilot,
+                                refit=refit)
+
+
 DIRECTIONS = ("up", "down")
 #: where a covariance-loss dense -> sparse path starts (covloss_path, direction="up")
 UP_STARTS = ("exact", "lasso")
@@ -476,7 +591,7 @@ def covloss_path(
     tol: float | None = None,
     newton_after: float = 1e-4,
     max_iter: int = 50_000,
-    start: str = "exact",
+    start: str | np.ndarray = "exact",
 ) -> CovlossPath:
     """Solutions along a lambda grid, with warm starts, off-diagonal penalised.
 
@@ -506,8 +621,15 @@ def covloss_path(
     loss = cov.check_loss(loss)
     if direction not in DIRECTIONS:
         raise ValueError(f"direction must be one of {DIRECTIONS}")
-    if start not in UP_STARTS:
-        raise ValueError(f"start must be one of {UP_STARTS}")
+    array_start = not isinstance(start, str)
+    if array_start:                     # any matrix as the dense start (plan of 13 October 2026, §1.2)
+        start = np.array(start, dtype=float)
+        if start.shape != sigma_hat.shape or not np.all(np.isfinite(start)):
+            raise ValueError(f"start must be a finite matrix of shape {sigma_hat.shape}, got {start.shape}")
+        if direction != "up":
+            raise ValueError("a matrix start needs direction='up' (the sparse -> dense path starts diagonal)")
+    elif start not in UP_STARTS:
+        raise ValueError(f"start must be one of {UP_STARTS} or a matrix")
     penalty = canonical(penalty)
     gamma = resolve_gamma(penalty, gamma)
     p = sigma_hat.shape[0]
@@ -527,6 +649,8 @@ def covloss_path(
 
     if direction == "down":
         order, warm = np.argsort(-lambdas, kind="stable"), cov.diagonal_fit(sigma_hat, c)
+    elif array_start:
+        order, warm = np.argsort(lambdas, kind="stable"), start.copy()
     elif start == "exact":
         order, warm = np.argsort(lambdas, kind="stable"), cov.dense_fit(sigma_hat, c)
     else:
@@ -535,6 +659,7 @@ def covloss_path(
                              method=method, tol=tol, newton_after=newton_after, max_iter=max_iter)
         order = np.argsort(lambdas, kind="stable")
         warm = lasso.estimates[int(order[0])]
+    start_used = None if direction == "down" else warm.copy()
     for i in order:
         warm, info = solve_covariance(sigma_hat, c, lambdas[i], loss=loss, weights=weights,
                            m_init=warm, penalty=penalty, gamma=gamma, method=method,
@@ -545,7 +670,7 @@ def covloss_path(
         kkt[i], obj[i] = info.stationarity, info.objective
 
     return CovlossPath(lambdas=lambdas, estimates=est, iterations=iters,
-                       newton_steps=newt, converged=conv, kkt=kkt, objective=obj)
+                       newton_steps=newt, converged=conv, kkt=kkt, objective=obj, start=start_used)
 
 
 @dataclass

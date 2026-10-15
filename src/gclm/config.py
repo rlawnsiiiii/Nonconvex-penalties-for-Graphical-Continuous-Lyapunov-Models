@@ -69,10 +69,25 @@ class S1Config:
     # (Varando's order), for the direct loss with MCP/SCAD from the lasso solution
     # at the smallest lambda.  Irrelevant for the direct lasso (convex).
     direction: str = "down"
-    # Where a covariance-loss dense -> sparse path starts (direction "up"; the direct loss's
-    # always starts from the lasso): "exact" = the exact fit -C Sigma_hat^-1 / 2 (Varando &
-    # Hansen), "lasso" = the lasso solution of the same loss at the smallest lambda.
-    up_start: str = "exact"
+    # Where a dense -> sparse path starts (direction "up").  None = the loss's default: the
+    # lasso solution at the smallest lambda for the direct loss (every run before 14 October
+    # 2026), the exact fit -C Sigma_hat^-1 / 2 (Varando & Hansen) for the covariance losses.
+    # Explicit choices, both losses (plan of 13 October 2026, E1): "lasso", "exact", "l1" (the
+    # minimum-l1 exact fit, gclm.objective.exact_fits), "l2" (the minimum-Frobenius exact fit),
+    # "truth-<tau>" (the standardised truth plus tau N(0, 1) off the diagonal; a ceiling).
+    # `start_name` is the resolved value, what the shard records.
+    up_start: str | None = None
+    # The pilot of the adaptive lasso and of the thresholded lasso (methods "adaptive",
+    # "threshold", "threshold-norefit"): the same choices as up_start; "lasso" = the dense end of
+    # the lasso path of the same loss (every run before 14 October 2026).
+    pilot: str = "lasso"
+    # The generator's knobs of 13 October 2026 (gclm.data.simulate.sample_drift): the law of the
+    # weights ("normal" = N(0, 1), "uniform" = |w| ~ U[w_min, 1] with a random sign), the lower
+    # bound of the uniform law, and the graph class ("random", "no2c", "dag").  Defaults = the
+    # thesis generator, bit for bit.
+    weights: str = "normal"
+    w_min: float = 0.0
+    graph: str = "random"
     # The volatility matrix used for estimation: "identity" (2 I, Dettling's
     # pipeline, every run before the campaign of October 2026) or "variance"
     # (2 diag(1 / s_i^2) with s_i the standard deviations the data were divided by:
@@ -96,6 +111,14 @@ class S1Config:
     @property
     def n_datasets(self) -> int:
         return len(self.p_values) * len(self.k_values) * len(self.c_choices) * self.n_rep
+
+    @property
+    def start_name(self) -> str:
+        """``up_start`` with the loss's default filled in (the direct loss starts from the lasso,
+        the covariance losses from the exact fit)."""
+        if self.up_start is not None:
+            return self.up_start
+        return "lasso" if self.loss == "direct" else "exact"
 
 
 @dataclass(frozen=True)

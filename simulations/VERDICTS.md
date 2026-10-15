@@ -422,8 +422,10 @@ and reported in [`S4_campaign.md`](S4_campaign.md).*
    the cluster; verdicts 24 and 25 are stated for what has arrived.
 10. The covariance-loss solver's backtracking test was corrected on 13 October 2026 (code review
     A1, `next_steps/121026/code_review_121026.md`; `docs/LIKELIHOOD.md` §4.3). The log-likelihood
-    cells of waves 3, 7 and 8 were computed with the old test; measured on their data sets it
-    changed no support and no selection, so verdicts 13, 14, 18 and 22 stand as stated, with that
-    caveat. Whether to re-run those cells with the corrected solver (about 700 CPU-h per sample
-    size for wave 7) is to be decided with the supervisor. The other open findings of the review
-    were fixed the same day; its §1 lists them.
+    cells of waves 3, 7 and 8 were computed with the old test; on the stored data set with the
+    worst-scaled $C$ the lasso path is unchanged and the MCP dense → sparse path differs at 8 of
+    100 $\lambda$ with the oracle $F_1$ 0.493 → 0.507, a change well inside a cell's standard
+    error, so verdicts 13, 14, 18 and 22 stand as stated, with that caveat. Whether to re-run those
+    cells with the corrected solver (about 700 CPU-h per sample size for wave 7) is to be decided
+    with the supervisor. The other open findings of the review were fixed the same day; its §1b
+    lists them.

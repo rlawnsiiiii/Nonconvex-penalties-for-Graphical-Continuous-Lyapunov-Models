@@ -27,8 +27,20 @@ and writes into ``<root>``:
                              and p, and to Dettling's lasso (C = 2I), per true-C setting
   campaign_baseline_check.txt  (--check-baseline) the three wave 1 cells that repeat the
                              n-sweep baseline, compared with runs/nsweep_p10-20 graph by graph
+  campaign_edges.csv         (--edges; plan of 13 October 2026, E3) one row per true edge of every
+                             graph of the wave 1 cells: its weight, whether it lies in a 2-cycle,
+                             whether the best-F1 graph, the selected graph and the searched graph
+                             contain it and its reverse
+  campaign_false_positives.csv  (--edges) per graph, the false positives of the best-F1 estimate and
+                             of the searched refit binned by |M_hat_ij| (standardised scale)
+
+Every row of the per-dataset table also carries the class of the true graph (plan E4, §5.1):
+graph_class (dag / simple / two_cycles), n_two_cycles, frac_edges_2c and identified_min_eig, the
+smallest eigenvalue of the design's Gram matrix on the true support (> 0: M* is identified on its
+support), computed once per graph from the stored M* and the regenerated C* (gclm.graphs).
 
     python simulations/diagnostics/campaign.py                       # runs/campaign
+    python simulations/diagnostics/campaign.py --edges               # also the two edge tables
     python simulations/diagnostics/campaign.py --root runs/local/campaign_rehearsal
     python simulations/diagnostics/campaign.py --check-baseline
     python simulations/diagnostics/campaign.py --drop-dead          # dead selections as NaN
@@ -61,12 +73,19 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "simulations"))
 
 from aggregate_s1 import metrics_from_counts  # noqa: E402
+from gclm.data.simulate import CChoice, sample_drift, sample_volatility  # noqa: E402
+from gclm.graphs import frac_edges_in_two_cycles, graph_class, identified_on_support, two_cycles  # noqa: E402
 from run_s1_shard import ORIENT, _counts, unpack_supports  # noqa: E402
 
 DEFAULT = ROOT / "runs" / "campaign"
 BASELINE = ROOT / "runs" / "nsweep_p10-20"
-#: <loss>_<estimator>_<C>_n<n>, or with _p<p> before _n<n> for the wave 4 cells (one p each)
-CELL = re.compile(r"^(?P<loss>direct|loglik|frobenius)_(?P<estimator>[A-Za-z-]+)_(?P<c>C2I|Cresc)(?:_p(?P<p_label>[0-9]+))?_n(?P<n>[0-9e]+|inf)$")
+#: <loss>_<estimator>_<C>_n<n>, or with _p<p> before _n<n> for the wave 4 cells (one p each); the wave 9
+#: cells (plan of 13 October 2026) may carry a dot in the estimator (MCP-up-truth0.05), a weight knob
+#: _w<wmin> (w0, w01, w025, w05) and a graph class _no2c / _dag before _n<n>
+CELL = re.compile(r"^(?P<loss>direct|loglik|frobenius)_(?P<estimator>[A-Za-z][A-Za-z0-9.-]*)_(?P<c>C2I|Cresc)"
+                  r"(?:_p(?P<p_label>[0-9]+))?(?:_w(?P<w_min>[0-9]+))?(?:_(?P<graph>no2c|dag))?_n(?P<n>[0-9e]+|inf)$")
+#: the generator columns of a cell drawn with the thesis generator (every cell before wave 9)
+DGP_DEFAULT = {"weights": "normal", "w_min": "", "graph": "random", "dgp": ""}
 #: wave 2 cells (search_p10_Cresc) and the restart cells of wave 5 (search100s_p10_Cresc:
 #: 100 sparse starts; search100u_...: 100 uniform starts; searche1_...: the eBIC penalty with
 #: gamma = 1 in the score); the variant becomes part of the estimator label ("search-pure-100s")
@@ -85,11 +104,72 @@ REPORT = ("max_f1", "aupr", "auc", "bic_f1", "ebic05_f1", "ebic1_f1", "search_f1
 ID = ("p", "k", "c_choice", "rep")
 #: the per-graph metrics of a selected graph (graph_metrics), blanked by --drop-dead
 GRAPH_METRICS = ("f1", "precision", "recall", "edges", "skeleton_f1", "orientation_accuracy") + ORIENT
+#: the wave 1 cells (p = 10 and 20, every estimator of the direct loss) whose edges --edges tabulates
+EDGE_CELL = re.compile(r"^direct_(?P<estimator>lasso|MCP|SCAD|MCP-up|SCAD-up|MCP-lla|SCAD-lla|adaptive)_(?P<c>C2I|Cresc)_n(?P<n>1000|1e4|inf)$")
+#: |w| bins of the beta-min analysis (plan E3)
+WEIGHT_BINS = (0.0, 0.1, 0.25, 0.5, 1.0, 2.0, math.inf)
+BIN_LABELS = ("0-0.1", "0.1-0.25", "0.25-0.5", "0.5-1", "1-2", "2+")
+
+_GRAPH_CACHE: dict[tuple, dict] = {}
+
+
+def cell_meta(m: re.Match) -> dict:
+    """The columns a cell's name carries: ``loss``, ``estimator``, ``c``, ``n``, and the generator's
+    knobs of the wave 9 cells: ``weights`` / ``w_min`` from ``_w<wmin>`` (the digits after the leading
+    0 are decimals: w025 = 0.25), ``graph`` from ``_no2c`` / ``_dag``.  ``dgp`` is the one token that
+    names the generator ("" for the thesis generator, else "w025", "no2c", "dag"): the tables group
+    by it, so that a knob cell is compared with the lasso drawn with the same knob."""
+    g = m.groupdict()
+    w = g.get("w_min")
+    graph = g.get("graph") or "random"
+    meta = {"loss": g["loss"], "estimator": g["estimator"], "c": g["c"], "n": g["n"], **DGP_DEFAULT}
+    if w:
+        meta.update(weights="uniform", w_min=float(f"{w[0]}.{w[1:]}") if len(w) > 1 else float(w), dgp=f"w{w}")
+    if graph != "random":
+        meta.update(graph=graph, dgp=graph)
+    return meta
+
+
+def true_matrix(d, i: int) -> np.ndarray:
+    p = int(d["p"][i])
+    m = np.zeros((p, p))
+    m[d["m_true_i"][i], d["m_true_j"][i]] = d["m_true_v"][i]
+    return m
+
+
+def graph_diagnostics(d, i: int, cfg: dict) -> dict:
+    """The class of the true graph of data set ``i`` (plan of 13 October 2026, E4 §5.1):
+    ``graph_class``, ``n_two_cycles`` and ``frac_edges_2c`` from the stored ``M*``, and
+    ``identified_min_eig`` (:func:`gclm.graphs.identified_on_support`), which needs ``C*``: the
+    instance is regenerated from its seed -- the two draws of ``draw_instance`` before the data --
+    and the regenerated ``M*`` is checked against the stored one.  Cached per graph, since the same
+    graph appears in every cell."""
+    p, k, ci, rep = (int(d[key][i]) for key in ID)
+    knobs = {"weights": cfg.get("weights", "normal"), "w_min": cfg.get("w_min", 0.0),
+             "graph": cfg.get("graph", "random")}                     # absent before wave 9: the thesis generator
+    key = (int(cfg["seed"]), p, k, ci, rep, bool(cfg["metzler"]), *knobs.values())
+    if key not in _GRAPH_CACHE:
+        m_true = true_matrix(d, i)
+        rng = np.random.default_rng([cfg["seed"], p, k, ci, rep])
+        m_again = sample_drift(p, k / p, rng, metzler=cfg["metzler"], **knobs)
+        c_true = sample_volatility(p, list(CChoice)[ci], rng)
+        if not np.allclose(m_again, m_true, rtol=0.0, atol=1e-12):
+            raise ValueError(f"the stored M* of graph (p={p}, k={k}, c_choice={ci}, rep={rep}) is not the one "
+                             f"its seed draws")
+        support = m_true != 0
+        _GRAPH_CACHE[key] = {"graph_class": graph_class(support), "n_two_cycles": two_cycles(support),
+                             "frac_edges_2c": frac_edges_in_two_cycles(support),
+                             "identified_min_eig": identified_on_support(m_true, c_true)}
+    return _GRAPH_CACHE[key]
 #: the order of the estimators in the tables: reference first, then the standard
 #: paths, then the three that start from the lasso, then the same with the
 #: likelihood refit behind the score (wave 5a, "-ml"), then the searches without a path
 ORDER = ("lasso", "lasso-up", "MCP", "SCAD", "MCP-up", "MCP-up-lasso", "SCAD-up", "MCP-lla", "SCAD-lla",
-         "adaptive", "lasso-ml", "lasso-up-ml", "MCP-ml", "MCP-up-ml", "MCP-up-lasso-ml", "adaptive-ml",
+         "adaptive",
+         "MCP-up-exact", "MCP-up-l1", "MCP-up-l2", "MCP-up-truth0.05", "MCP-up-truth0.2",       # wave 9: E1
+         "adaptive-exact", "adaptive-l1", "adaptive-l2", "adaptive-truth0.05", "adaptive-truth0.2",
+         "threshold", "threshold-norefit",                                                      # wave 9: E2
+         "lasso-ml", "lasso-up-ml", "MCP-ml", "MCP-up-ml", "MCP-up-lasso-ml", "adaptive-ml",
          "search-pure", "search-pure-100s", "search-pure-100u", "search-pure-30s", "search-pure-300s",
          "search-pure-e1", "search-pure-ml", "search-pure-100sml", "search-truth", "search-truth-e1",
          "search-truth-ml", "search-truth-100sml")
@@ -186,6 +266,7 @@ def load_estimator_cell(folder: Path, meta: dict, rescored: list[dict] | None = 
     meta = {**meta, "shards": len(files), "n_shards": expected if expected is not None else len(files)}
     for f, d in files:
         names = [str(x) for x in d["c_choice_names"]]
+        cfg = json.loads(str(d["config_json"]))
         has_bic, has_search = "bic_index" in d.files, "search_conf" in d.files
         extras = []
         for overlay in rescored or ():
@@ -206,6 +287,7 @@ def load_estimator_cell(folder: Path, meta: dict, rescored: list[dict] | None = 
                    "c_choice": names[int(d["c_choice"][i])], "rep": int(d["rep"][i]),
                    "n_true_edges": int(d["n_true_edges"][i]),
                    **{key: m[key] for key in PATH_METRICS}, "seconds": secs}
+            row.update(graph_diagnostics(d, i, cfg))
             if has_bic:
                 row.update(graph_metrics(d["bic_conf"][i], d["bic_orient"][i], "bic"))
                 row["bic_index"] = int(d["bic_index"][i])
@@ -225,6 +307,11 @@ def load_estimator_cell(folder: Path, meta: dict, rescored: list[dict] | None = 
                 row["search_moves"] = int(d["search_moves"][i].sum())
                 row["search_seconds"] = float(d["search_seconds"][i])
                 row["search_dead"] = dead([d["search_score"][i]])
+            if "start_conf" in d.files:                 # a dense start or pilot (wave 9, plan §2.2)
+                row.update(graph_metrics(d["start_conf"][i], d["start_orient"][i], "start"))
+                for key in ("start_l1", "start_l2", "start_residual"):
+                    row[key] = float(d[key][i])
+                row["start_nnz"] = int(d["start_nnz"][i])
             rows.append(row)
     return rows
 
@@ -243,10 +330,11 @@ def load_search_cell(folder: Path, meta: dict, variant: str = "") -> list[dict]:
     meta = {**meta, "shards": len(files), "n_shards": expected if expected is not None else len(files)}
     for f, d in files:
         names = [str(x) for x in d["c_choice_names"]]
+        cfg = json.loads(str(d["config_json"]))
         for i in range(len(d["p"])):
             base = {**meta, "p": int(d["p"][i]), "k": int(d["k"][i]),
                     "c_choice": names[int(d["c_choice"][i])], "rep": int(d["rep"][i]),
-                    "n_true_edges": int(d["n_true_edges"][i])}
+                    "n_true_edges": int(d["n_true_edges"][i]), **graph_diagnostics(d, i, cfg)}
             if "start_block" in d.files:
                 key = (base["p"], base["k"], base["c_choice"], base["rep"])
                 entry = blocks.setdefault(key, {"base": base, "n": int(d["start_blocks"][i]), "pure": {}})
@@ -299,12 +387,71 @@ def load(root: Path) -> list[dict]:
             continue
         m, s = CELL.match(folder.name), SEARCH_CELL.match(folder.name)
         if m:
-            meta = {k: v for k, v in m.groupdict().items() if k != "p_label"}
-            rows += load_estimator_cell(folder, {"cell": folder.name, **meta}, rescored.get(folder.name))
+            rows += load_estimator_cell(folder, {"cell": folder.name, **cell_meta(m)}, rescored.get(folder.name))
         elif s:
             rows += load_search_cell(folder, {"cell": folder.name, "loss": "direct",
-                                              "c": s["c"], "n": s["n"]}, s["variant"] or "")
+                                              "c": s["c"], "n": s["n"], **DGP_DEFAULT}, s["variant"] or "")
     return rows
+
+
+def edge_rows(folder: Path, meta: dict) -> tuple[list[dict], list[dict]]:
+    """E3 (plan of 13 October 2026, §4.1).  One row per true edge of every graph of a cell: its
+    weight ``w`` (``M*_ij`` on the generator's scale), whether it lies in a 2-cycle, and whether the
+    best-F1 graph of the path (``best``), the graph selected by the score (``bic``) and the graph
+    after the search (``search``) contain the edge and, separately, its reverse (``*_rev``).  And,
+    per graph, the false positives of the best-F1 estimate and of the searched refit binned by
+    ``|M_hat_ij|`` (on the standardised scale the estimates live on; ``WEIGHT_BINS``)."""
+    edges, fps = [], []
+    files, _ = load_shards(folder)
+    for f, d in files:
+        names = [str(x) for x in d["c_choice_names"]]
+        for i in range(len(d["p"])):
+            p, n_l = int(d["p"][i]), len(d["lambdas"][i])
+            off = ~np.eye(p, dtype=bool)
+            m_true = true_matrix(d, i)
+            truth = (m_true != 0) & off
+            best_val = np.zeros((p, p))
+            best_val[d["m_best_f1_i"][i], d["m_best_f1_j"][i]] = d["m_best_f1_v"][i]
+            best = (best_val != 0) & off
+            sel = srch = None
+            srch_val = np.zeros((p, p))
+            if "bic_index" in d.files:
+                sel = unpack_supports(d["supports_packed"][i], n_l, p)[int(d["bic_index"][i])]
+            if "m_search_support" in d.files:
+                srch = unpack_supports(d["m_search_support"][i], 1, p)[0]
+                srch_val[d["m_search_i"][i], d["m_search_j"][i]] = d["m_search_v"][i]
+            base = {**meta, "p": p, "k": int(d["k"][i]), "c_choice": names[int(d["c_choice"][i])],
+                    "rep": int(d["rep"][i])}
+            for a, b in zip(*np.nonzero(truth)):
+                row = {**base, "i": int(a), "j": int(b), "w": float(m_true[a, b]), "abs_w": abs(float(m_true[a, b])),
+                       "weight_bin": BIN_LABELS[int(np.searchsorted(WEIGHT_BINS, abs(float(m_true[a, b])), side="right")) - 1],
+                       "two_cycle": int(truth[b, a]), "best": int(best[a, b]), "best_rev": int(best[b, a]),
+                       "bic": int(sel[a, b]) if sel is not None else "", "bic_rev": int(sel[b, a]) if sel is not None else "",
+                       "search": int(srch[a, b]) if srch is not None else "",
+                       "search_rev": int(srch[b, a]) if srch is not None else ""}
+                edges.append(row)
+            for name, sup, val in (("best", best, best_val), ("search", srch, srch_val)):
+                if sup is None:
+                    continue
+                fp = sup & ~truth & off
+                counts = np.histogram(np.abs(val[fp]), bins=WEIGHT_BINS)[0]
+                fps.append({**base, "estimate": name, "n_fp": int(fp.sum()), "n_true_edges": int(truth.sum()),
+                            **{f"fp_{label}": int(c) for label, c in zip(BIN_LABELS, counts)}})
+    return edges, fps
+
+
+def edge_tables(root: Path, ps=(10, 20)) -> tuple[list[dict], list[dict]]:
+    """The edge and false-positive rows of every wave 1 cell under ``root`` (``EDGE_CELL``) at the
+    sizes ``ps``."""
+    edges, fps = [], []
+    for folder in sorted(x for x in root.iterdir() if x.is_dir()):
+        m = EDGE_CELL.match(folder.name)
+        if not m or not (folder / "shards").is_dir():
+            continue
+        e, fp = edge_rows(folder, {"cell": folder.name, "loss": "direct", **m.groupdict()})
+        edges += [r for r in e if r["p"] in ps]
+        fps += [r for r in fp if r["p"] in ps]
+    return edges, fps
 
 
 def blank_dead(rows: list[dict]) -> int:
@@ -353,21 +500,24 @@ def paired(x, y) -> dict:
 
 
 def means_table(rows: list[dict], by_true_c: bool = False) -> list[dict]:
-    """Means with standard errors per (loss, estimator, C, n, p) over all graphs of a cell
+    """Means with standard errors per (loss, estimator, C, n, p, generator) over all graphs of a cell
     (the four settings of the true C pooled), or, with ``by_true_c``, per setting of the true
-    C as well (column ``true_c``: 100 graphs each at p = 10, 20)."""
+    C as well (column ``true_c``: 100 graphs each at p = 10, 20).  ``dgp`` names the generator
+    ("" for the thesis generator; the wave 9 knobs otherwise), so that the knob cells form their
+    own groups."""
     groups = defaultdict(list)
     for r in rows:
-        key = (r["loss"], r["estimator"], r["c"], r["n"], r["p"]) + ((r["c_choice"],) if by_true_c else ())
+        key = (r["loss"], r["estimator"], r["c"], r["n"], r["p"], r.get("dgp", "")) + \
+            ((r["c_choice"],) if by_true_c else ())
         groups[key].append(r)
     out = []
     for key, g in sorted(groups.items(), key=lambda kv: (
-            kv[0][0], n_key(kv[0][3]), kv[0][4], kv[0][2], estimator_key(kv[0][1]), kv[0][5:])):
-        loss, est, c, n, p = key[:5]
-        row = {"loss": loss, "estimator": est, "c": c, "n": n, "p": p, "graphs": len(g),
+            kv[0][0], n_key(kv[0][3]), kv[0][4], kv[0][2], kv[0][5], estimator_key(kv[0][1]), kv[0][6:])):
+        loss, est, c, n, p, dgp = key[:6]
+        row = {"loss": loss, "estimator": est, "c": c, "n": n, "p": p, "dgp": dgp, "graphs": len(g),
                "shards": g[0].get("shards"), "n_shards": g[0].get("n_shards")}
         if by_true_c:
-            row["true_c"] = key[5]
+            row["true_c"] = key[6]
         for col in REPORT:
             mean, se, _ = mean_se([r.get(col) for r in g])
             row[col], row[f"{col}_se"] = mean, se
@@ -389,16 +539,17 @@ def paired_table(rows: list[dict]) -> list[dict]:
     A column the reference lacks gives NaN: until 13 October 2026 an estimator's searched graph
     was then compared with the reference's selected graph under the name ``search_*_diff``
     (code review B1; it hit the wave 7 cells at p = 10 against wave 3's lasso)."""
-    by = defaultdict(dict)                       # (loss, c, n, p, estimator) -> graph id -> row
+    by = defaultdict(dict)                       # (loss, c, n, p, estimator, dgp) -> graph id -> row
     for r in rows:
-        by[(r["loss"], r["c"], r["n"], r["p"], r["estimator"])][tuple(r[k] for k in ID)] = r
+        by[(r["loss"], r["c"], r["n"], r["p"], r["estimator"], r.get("dgp", ""))][tuple(r[k] for k in ID)] = r
     out = []
-    for (loss, c, n, p, est), cell in sorted(by.items(), key=lambda kv: (
-            kv[0][0], n_key(kv[0][2]), kv[0][3], kv[0][1], estimator_key(kv[0][4]))):
+    for (loss, c, n, p, est, dgp), cell in sorted(by.items(), key=lambda kv: (
+            kv[0][0], n_key(kv[0][2]), kv[0][3], kv[0][1], kv[0][5], estimator_key(kv[0][4]))):
         ref_est = "lasso-ml" if est.endswith(("-ml", "sml")) else "lasso"   # the "-ml" cells and the
         #                                                 100-start likelihood-refit searches (search-*-100sml)
-        for ref_name, ref_key in (("same_c", (loss, c, n, p, ref_est)),
-                                  ("dettling", (loss, "C2I", n, p, ref_est))):
+        # the reference is drawn with the same generator (the knob cells of wave 9 pair with their own lasso)
+        for ref_name, ref_key in (("same_c", (loss, c, n, p, ref_est, dgp)),
+                                  ("dettling", (loss, "C2I", n, p, ref_est, dgp))):
             ref = by.get(ref_key)
             if ref is None or ref is cell:
                 continue
@@ -406,7 +557,7 @@ def paired_table(rows: list[dict]) -> list[dict]:
                 ids = [g for g in cell if g in ref and setting in ("all", g[2])]
                 if not ids:
                     continue
-                row = {"loss": loss, "estimator": est, "c": c, "n": n, "p": p,
+                row = {"loss": loss, "estimator": est, "c": c, "n": n, "p": p, "dgp": dgp,
                        "reference": ref_name, "true_c": setting}
                 for col in REPORT:
                     ref_col = f"ebic1_{col}" if est.endswith("-e1") and col.startswith("search_") else col
@@ -432,9 +583,10 @@ def write(path: Path, rows: list[dict]) -> None:
 def print_means(table: list[dict]) -> None:
     last = None
     for r in table:
-        head = (r["loss"], r["n"], r["p"])
+        head = (r["loss"], r["n"], r["p"], r.get("dgp", ""))
         if head != last:
-            print(f"\n{r['loss']} loss, n = {r['n']}, p = {r['p']}")
+            dgp = f", generator {r['dgp']}" if r.get("dgp") else ""
+            print(f"\n{r['loss']} loss, n = {r['n']}, p = {r['p']}{dgp}")
             print(f"  {'estimator':<20}{'C':<7}{'graphs':>7}" + "".join(f"{c:>20}" for c in REPORT[:6]))
             last = head
         cells = "".join(f"{r[c]:>12.3f} ±{r[c + '_se']:.3f}" if not math.isnan(r[c]) else f"{'':>20}"
@@ -474,6 +626,9 @@ def main() -> None:
     ap.add_argument("--drop-dead", action="store_true",
                     help="blank the graph metrics of dead selections (every score +inf) instead of "
                          "keeping them as the densest graph; they are counted either way")
+    ap.add_argument("--edges", action="store_true",
+                    help="also write campaign_edges.csv and campaign_false_positives.csv (plan E3): one row "
+                         "per true edge of the wave 1 cells at p = 10, 20")
     args = ap.parse_args()
     rows = load(args.root)
     if not rows:
@@ -500,6 +655,11 @@ def main() -> None:
     if args.check_baseline:
         for line in check_baseline(rows, args.root / "campaign_baseline_check.txt"):
             print(line)
+    if args.edges:
+        edges, fps = edge_tables(args.root)
+        write(args.root / "campaign_edges.csv", edges)
+        write(args.root / "campaign_false_positives.csv", fps)
+        print(f"wrote campaign_edges.csv ({len(edges)} true edges) and campaign_false_positives.csv ({len(fps)} rows)")
 
 
 if __name__ == "__main__":

@@ -61,6 +61,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from gclm.data.simulate import CChoice, draw_instance, estimation_volatility  # noqa: E402
+
+
+def generator_knobs(cfg: dict) -> dict:
+    """The generator's options of 13 October 2026 as the source cell stored them (absent in older
+    shards: the thesis generator), so that a cell drawn with other weights or another graph class
+    is rebuilt from its seed exactly."""
+    return {"weights": cfg.get("weights", "normal"), "w_min": cfg.get("w_min", 0.0),
+            "graph": cfg.get("graph", "random")}
 from run_s1_shard import ebic_tag, pack, provenance, save_npz, select_graph, unpack_supports  # noqa: E402
 
 #: the rebuilt data set must reproduce the source's stored scores to this relative tolerance
@@ -89,7 +97,7 @@ def rescore_file(src: Path, gammas, select: str) -> dict:
         rng = np.random.default_rng([cfg["seed"], p, k, ci, rep])
         m_true, _, _, sigma_hat, scale = draw_instance(
             p, k, n_obs, list(CChoice)[ci], rng, metzler=cfg["metzler"],
-            standardize=cfg["standardize"], return_scale=True)
+            standardize=cfg["standardize"], return_scale=True, **generator_knobs(cfg))
         c_est = estimation_volatility(scale, cfg["c_scale"])
         n_l = len(d["lambdas"][i])
         supports = list(unpack_supports(d["supports_packed"][i], n_l, p))
@@ -125,7 +133,7 @@ def _rebuild(d, i: int, cfg: dict, n_obs):
     rng = np.random.default_rng([cfg["seed"], p, k, ci, rep])
     m_true, _, _, sigma_hat, scale = draw_instance(
         p, k, n_obs, list(CChoice)[ci], rng, metzler=cfg["metzler"],
-        standardize=cfg["standardize"], return_scale=True)
+        standardize=cfg["standardize"], return_scale=True, **generator_knobs(cfg))
     c_est = estimation_volatility(scale, cfg["c_scale"])
     supports = list(unpack_supports(d["supports_packed"][i], len(d["lambdas"][i]), p))
     return p, m_true, sigma_hat, c_est, supports

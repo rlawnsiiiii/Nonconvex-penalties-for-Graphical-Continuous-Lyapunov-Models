@@ -203,12 +203,28 @@ predicted change is at least 100 rounding units; below that the same bound is te
 gradients, $\langle\nabla L(M^+)-\nabla L(Y),M^+-Y\rangle\le\|M^+-Y\|^2/t$ (exact for a quadratic
 $L$; the secant condition), which rounding does not spoil. A start that is already stationary is
 returned unchanged, and convergence is judged on the first-order residual of the accepted iterate,
-not on the step. A copy of the stiff solves converges in 200 to 900 steps. **The log-likelihood
-cells of the campaign stored before 13 October (waves 3, 7 and 8) were computed with the old
-test**; measured on their data sets, the one-step solves moved $M$ by about $10^{-8}$ and changed no
-support, and a full path with the corrected test differs at 2 of 100 $\lambda$ by one entry with
-the same oracle $F_1$ (`next_steps/121026/code_review_121026.md`, A1). Whether to re-run them is
-open.
+not on the step.
+
+*Measured on the stored data set with the largest diagonal ratio of $C$ (250; $p = 10$, rescaled $C$,
+$n = 10^4$, `tol` $= 10^{-8}$).* The lasso path: every solve converges (the old one capped once),
+the residual is at tolerance everywhere (before: up to $9\times10^{-6}$), the supports are identical
+at all 100 $\lambda$, and the path takes a third fewer steps (604k against 939k). The MCP dense →
+sparse path from the exact fit: the supports differ at 8 of 100 $\lambda$ by one to three entries,
+the oracle $F_1$ moves from 0.493 to 0.507, and 33 of the 100 solves still end at the cap of 50,000
+steps (before: 21), with residuals $2\times10^{-8}$ to $7\times10^{-4}$. Two different things hide
+behind those caps. At the dense end the solve is merely slow: the residual falls from $7\times10^{-4}$
+after 500 steps to $2\times10^{-8}$ after 50,000, and a Newton polish from there moves $M$ by
+$2\times10^{-7}$ and changes nothing. At $\lambda \approx 10^{-3}\lambda_{\max}$ the iterate crawls
+along a flat valley of the nonconvex objective (residual oscillating between $10^{-3}$ and
+$5\times10^{-5}$, the plain method no better), and a Newton step from the capped iterate reaches a
+*different* stationary point, 0.8 to 1.1 away in max norm, with 20 to 22 support changes and a lower
+objective. That is the flat-valley behaviour of Section 5, a property of the problem, not of the
+step test; the step test cannot change it, and the Newton solver is not the estimator. Such solves
+are rare on the cluster (0.6 to 2.4 % of the solves of a log-likelihood cell with the rescaled $C$,
+on the data sets with a large diagonal ratio) and are flagged per $\lambda$ by `converged` in the
+shards. **The log-likelihood cells of the campaign stored before 13 October (waves 3, 7 and 8) were
+computed with the old test**; the measured changes are of the size above, well inside the standard
+errors of the cells (`next_steps/121026/code_review_121026.md`, A1). Whether to re-run them is open.
 
 **`"apg"` — accelerated proximal gradient with adaptive restart (the default).** Nesterov
 momentum on top of the proximal step; a momentum step is accepted only if it lowers $F$ below the

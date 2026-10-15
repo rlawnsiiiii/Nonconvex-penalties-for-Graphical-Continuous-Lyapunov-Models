@@ -47,6 +47,29 @@ Without ``--select`` the output is what it was before these options existed, plu
 ``converged``.  Shards are written to a temporary name and renamed into place, so a
 task killed while saving leaves no truncated file (code review C4).
 
+Dense starts (plan of 13 October 2026, E1 and E2; 14 October).  ``--up-start`` chooses where a
+dense -> sparse path starts, on both losses: ``lasso`` (the lasso solution at the smallest
+lambda; the direct loss's default), ``exact`` (``-C Sigma_hat^-1 / 2``, Varando & Hansen; the
+covariance losses' default), ``l1`` / ``l2`` (the minimum-l1 / minimum-Frobenius exact fits,
+gclm.objective.exact_fits) or ``truth-<tau>`` (the standardised truth plus ``tau N(0, 1)`` off the
+diagonal, drawn from the data set's generator after the data; a ceiling, not an estimator).
+``--pilot`` takes the same choices for the adaptive lasso and for the thresholded lasso
+(``--method threshold`` refits every kept support by least squares, ``threshold-norefit`` keeps the
+pilot's values; gclm.solvers.path.thresholded_lasso_path).  Every cell with a dense start stores
+the start's own diagnostics per data set:
+
+  start_l1, start_l2   its off-diagonal l1 and Frobenius norms
+  start_residual       ``||M Sigma_hat + Sigma_hat M' + C||_F`` (0 for an exact fit)
+  start_nnz            its off-diagonal entries with ``|M_ij| > 1e-8`` ("present")
+  start_conf           tp, fp, tn, fn of those entries against the truth (the start's own F1)
+  start_orient         their orientation breakdown (order: ORIENT): among the true edges outside
+                       2-cycles, ``correct`` = the true direction present alone, ``hedged`` = both
+                       directions present, ``reversed`` = only the reverse, ``missed_single`` =
+                       neither -- the "dense-start content" of the theory note of 7 October 2026
+
+The generator's knobs ``--weights uniform --w-min W`` (E3) and ``--graph no2c|dag`` (E4) are
+recorded in the config; the defaults are the thesis generator bit for bit.
+
     python simulations/run_s1_shard.py --shard 0 --n-shards 64 \
         --out-dir runs/s1_dettling_reproduction/s1_shards
     python simulations/run_s1_shard.py --shard 0 --n-shards 64 --loss loglik \
@@ -77,19 +100,31 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from gclm import __name__ as _pkg  # noqa: F401  (ensures src/ is importable)
 from gclm.objective import covariance
 from gclm.config import S1Config, parse_n_obs
-from gclm.data.simulate import C_SCALES, CChoice, draw_instance, estimation_volatility
+from gclm.data.simulate import (C_SCALES, GRAPHS, WEIGHTS, CChoice, draw_instance, estimation_volatility,
+                                standardized_drift)
 from gclm.objective.direct import direct_grad, direct_loss, lambda_max
+from gclm.objective.exact_fits import (PRESENT, exact_fit_residual, min_l1_exact_fit, min_l2_exact_fit,
+                                       noisy_truth_start)
 from gclm.objective.penalties import penalty_scale, penalty_weights, stationarity
-from gclm.solvers.path import (UP_STARTS, adaptive_covloss_path, adaptive_lasso_path, covloss_path,
-                               lambda_grid, lasso_path,
-                               lla_path)
+from gclm.solvers.path import (adaptive_covloss_path, adaptive_lasso_path, covloss_path, lambda_grid, lasso_path,
+                               lla_path, thresholded_lasso_path)
 from gclm.objective.direct import objective
 from gclm.metrics import confusion, orientation_breakdown
 from gclm.objective.penalties import resolve_gamma
 from gclm.solvers.search import Scorer, bic_along_path, greedy_search
 
-METHODS = ("path", "lla", "adaptive")
+METHODS = ("path", "lla", "adaptive", "threshold", "threshold-norefit")
+#: the methods that start from a dense pilot (--pilot) rather than from the empty graph
+PILOT_METHODS = ("adaptive", "threshold", "threshold-norefit")
 SELECT = ("none", "bic", "search")
+#: where a dense -> sparse path, or the pilot of the adaptive / thresholded lasso, comes from (plan
+#: of 13 October 2026, E1): the lasso's dense end, Varando & Hansen's exact fit, the minimum-l1 /
+#: minimum-l2 exact fits, or ``truth-<tau>``: the standardised truth plus tau N(0, 1) off the diagonal
+STARTS = ("lasso", "exact", "l1", "l2")
+TRUTH_START = "truth-"
+#: an entry of a dense start counts as present above this size (the exact fits have no exact zeros);
+#: the thresholded lasso's rule for its pilot, so that start_nnz is its first support
+START_PRESENT = PRESENT
 #: how a support is refitted for the score: least squares on the direct loss (closed form, the
 #: campaign's default) or the maximised Gaussian likelihood (iterative; 200 to 1000 times slower)
 REFITS = ("direct", "loglik")
@@ -106,6 +141,46 @@ def ebic_tag(gamma: float) -> str:
     if not 0 < gamma < 10 or round(gamma, 1) != gamma:
         raise ValueError(f"--ebic-gamma takes values in (0, 10) with at most one decimal, got {gamma}")
     return f"ebic{gamma:g}".replace(".", "")
+
+
+def start_name(text: str) -> str:
+    """A start's name, validated (the ``type`` of --up-start and --pilot): one of ``STARTS`` or
+    ``truth-<tau>`` with ``tau >= 0``."""
+    if text in STARTS:
+        return text
+    if text.startswith(TRUTH_START):
+        try:
+            if float(text[len(TRUTH_START):]) >= 0:
+                return text
+        except ValueError:
+            pass
+    raise argparse.ArgumentTypeError(f"expected one of {STARTS} or truth-<tau> with tau >= 0, got {text!r}")
+
+
+def make_start(name: str, sigma_hat, c_est, m_true, scale, rng) -> np.ndarray | None:
+    """The dense start ``name`` for one data set, or None for ``lasso`` (the path functions compute
+    the lasso's dense end themselves, exactly as before this option existed).  The noisy truth is
+    drawn from the data set's generator after the data, so it is reproducible per data set."""
+    if name == "lasso":
+        return None
+    if name == "exact":
+        return covariance.dense_fit(sigma_hat, c_est)
+    if name == "l1":
+        return min_l1_exact_fit(sigma_hat, c_est)
+    if name == "l2":
+        return min_l2_exact_fit(sigma_hat, c_est)
+    return noisy_truth_start(standardized_drift(m_true, scale), float(name[len(TRUTH_START):]), rng)
+
+
+def start_diagnostics(start: np.ndarray, sigma_hat, c_est, m_true) -> dict:
+    """The ``start_*`` fields: norms, Lyapunov residual, size of the support at ``START_PRESENT``, and
+    that support's confusion counts and orientation breakdown against the truth."""
+    off = ~np.eye(start.shape[0], dtype=bool)
+    present = (np.abs(start) > START_PRESENT) & off
+    conf, orient = _counts(present, m_true)
+    return {"start_l1": float(np.abs(start[off]).sum()), "start_l2": float(np.linalg.norm(start[off])),
+            "start_residual": exact_fit_residual(start, sigma_hat, c_est), "start_nnz": int(present.sum()),
+            "start_conf": conf, "start_orient": orient}
 
 
 def git_revision() -> dict:
@@ -197,12 +272,23 @@ def check_method(cfg: S1Config) -> None:
     """The combinations of ``method`` with the other settings that are implemented."""
     if cfg.method not in METHODS:
         raise ValueError(f"unknown method {cfg.method!r}; expected one of {METHODS}")
-    if cfg.up_start not in UP_STARTS:
-        raise ValueError(f"unknown up_start {cfg.up_start!r}; expected one of {UP_STARTS}")
-    if cfg.up_start != "exact" and (cfg.loss == "direct" or cfg.direction != "up" or cfg.method != "path"):
-        raise ValueError("up_start chooses where a covariance-loss dense -> sparse path starts: "
-                         "it needs --direction up and --loss loglik or frobenius (the direct "
-                         "loss's dense -> sparse path always starts from the lasso)")
+    for field, value in (("up_start", cfg.up_start), ("pilot", cfg.pilot)):
+        if value is not None:
+            try:
+                start_name(value)
+            except argparse.ArgumentTypeError as err:
+                raise ValueError(f"{field}: {err}") from None
+    if cfg.up_start is not None and (cfg.direction != "up" or cfg.method != "path"
+                                     or (cfg.loss == "direct" and cfg.penalty == "lasso")):
+        raise ValueError("up_start chooses where a dense -> sparse path starts: it needs --direction up "
+                         "with --method path (and MCP or SCAD on the direct loss, whose lasso path has "
+                         "no order)")
+    if cfg.pilot != "lasso" and cfg.method not in PILOT_METHODS:
+        raise ValueError(f"pilot applies to --method {', '.join(PILOT_METHODS)}")
+    if cfg.weights not in WEIGHTS or cfg.graph not in GRAPHS:
+        raise ValueError(f"weights must be one of {WEIGHTS} and graph one of {GRAPHS}")
+    if cfg.weights == "normal" and cfg.w_min != 0.0:
+        raise ValueError("w_min applies to --weights uniform (the normal weights have no lower bound)")
     if cfg.method == "path":
         return
     if cfg.method == "adaptive" and cfg.loss != "direct":
@@ -218,6 +304,8 @@ def check_method(cfg: S1Config) -> None:
         raise ValueError("method 'lla' uses the textbook convention")
     if cfg.method == "adaptive" and cfg.penalty != "lasso":
         raise ValueError("method 'adaptive' is the adaptive lasso: leave --penalty at lasso")
+    if cfg.method.startswith("threshold") and cfg.penalty != "lasso":
+        raise ValueError(f"method {cfg.method!r} is the thresholded lasso: leave --penalty at lasso")
 
 
 def _counts(support: np.ndarray, m_true: np.ndarray):
@@ -318,10 +406,20 @@ def run_one(p, k, c_choice, rep, cfg, select: str = "none", refit: str = "direct
     m_true, c_true, _, sigma_hat, scale = draw_instance(
         p, k, cfg.n_obs, c_choice, rng,
         metzler=cfg.metzler, standardize=cfg.standardize, return_scale=True,
+        weights=cfg.weights, w_min=cfg.w_min, graph=cfg.graph,
     )
     c_est = estimation_volatility(scale, cfg.c_scale)
     weights = penalty_weights(p, penalize_diagonal=cfg.penalize_diagonal)
     n_l = cfg.n_lambda
+    # the dense start of a dense -> sparse path, or the pilot of the adaptive / thresholded lasso
+    # (plan of 13 October 2026, E1 / E2): None = the path function computes the lasso's dense end
+    # itself, as it always did; otherwise the matrix of make_start.  Its diagnostics go into the row.
+    dense_start = cfg.method in PILOT_METHODS or (
+        cfg.method == "path" and cfg.direction == "up" and not (cfg.loss == "direct" and cfg.penalty == "lasso"))
+    start_matrix = None
+    if dense_start:
+        start_matrix = make_start(cfg.pilot if cfg.method in PILOT_METHODS else cfg.start_name,
+                                  sigma_hat, c_est, m_true, scale, rng)
     # solver diagnostics per lambda: the first-order violation, the solver's steps and whether
     # it met its tolerance.  The covariance-loss paths report them; for the direct loss the
     # steps and the flag come from FISTA (code review A4) and the violation is computed here;
@@ -333,12 +431,22 @@ def run_one(p, k, c_choice, rep, cfg, select: str = "none", refit: str = "direct
     if cfg.loss == "direct" and cfg.method == "adaptive":
         # the adaptive lasso has its own weights and therefore its own grid
         path = adaptive_lasso_path(sigma_hat, c_est, n_lambda=n_l, ratio=cfg.lambda_ratio,
-                                   tol=cfg.tol)
+                                   tol=cfg.tol, pilot=start_matrix)
         lams, lmax = path.lambdas, float(path.lambdas[-1])
         obj = np.array([direct_loss(m_hat, sigma_hat, c_est)
                         + lam * float(np.sum(path.weights[m_hat != 0] * np.abs(m_hat[m_hat != 0])))
                         for lam, m_hat in zip(lams, path.estimates)])
         kkt = _direct_kkt(path, sigma_hat, c_est, lams, path.weights, "lasso", None, None)
+        iters, converged = path.iterations.astype(np.int32), path.converged
+    elif cfg.loss == "direct" and cfg.method.startswith("threshold"):
+        # the thresholded lasso: its "lambdas" are thresholds on |pilot_ij|, increasing, from 0 (the
+        # pilot's support) to inf (the empty graph); no penalty, so the objective is the loss itself
+        # and the first-order violation is not defined (NaN); the refits are closed forms
+        path = thresholded_lasso_path(sigma_hat, c_est, pilot=start_matrix, n_thresholds=n_l,
+                                      refit="none" if cfg.method == "threshold-norefit" else "direct",
+                                      n_lambda=n_l, ratio=cfg.lambda_ratio, tol=cfg.tol)
+        lams, lmax = path.lambdas, float(path.thresholds[-2])     # the largest |pilot_ij|: above it, empty
+        obj = np.array([direct_loss(m_hat, sigma_hat, c_est) for m_hat in path.estimates])
         iters, converged = path.iterations.astype(np.int32), path.converged
     elif cfg.loss == "direct":
         lmax = lambda_max(sigma_hat, c_est, penalize_diagonal=cfg.penalize_diagonal)
@@ -351,7 +459,7 @@ def run_one(p, k, c_choice, rep, cfg, select: str = "none", refit: str = "direct
                 sigma_hat, c_est, lambdas=lams,
                 penalize_diagonal=cfg.penalize_diagonal, solver=cfg.solver,
                 penalty=cfg.penalty, gamma=cfg.gamma, convention=cfg.convention, tol=cfg.tol,
-                direction=cfg.direction,
+                direction=cfg.direction, start=start_matrix,
             )
         obj = np.array([objective(m_hat, sigma_hat, c_est, lam, weights,
                                   cfg.penalty, cfg.gamma, cfg.convention)
@@ -365,17 +473,22 @@ def run_one(p, k, c_choice, rep, cfg, select: str = "none", refit: str = "direct
         if cfg.method == "adaptive":
             # its own weights and therefore its own grid, as on the direct loss
             path = adaptive_covloss_path(sigma_hat, c_est, cfg.loss, n_lambda=n_l,
-                                         ratio=cfg.lambda_ratio, tol=cfg.tol)
+                                         ratio=cfg.lambda_ratio, tol=cfg.tol, pilot=start_matrix)
             lams, lmax = path.lambdas, float(path.lambdas[-1])
         else:
             lmax = covariance.lambda_max(sigma_hat, c_est, cfg.loss)
             lams = lambda_grid(lmax, n_lambda=n_l, ratio=cfg.lambda_ratio)
             path = covloss_path(
                 sigma_hat, c_est, cfg.loss, lambdas=lams, penalty=cfg.penalty,
-                gamma=cfg.gamma, direction=cfg.direction, tol=cfg.tol, start=cfg.up_start,
+                gamma=cfg.gamma, direction=cfg.direction, tol=cfg.tol,
+                start=cfg.start_name if start_matrix is None else start_matrix,
             )
         obj, kkt = path.objective, path.kkt
         iters, newton, converged = path.iterations, path.newton_steps, path.converged
+    start_row = {}
+    if dense_start:
+        used = path.pilot if cfg.method in PILOT_METHODS else path.start
+        start_row = start_diagnostics(used, sigma_hat, c_est, m_true)
 
     off = np.empty((n_l, 4), dtype=np.int32)      # tp, fp, tn, fn  (off-diagonal)
     inc = np.empty((n_l, 4), dtype=np.int32)      # ... including the diagonal
@@ -409,6 +522,7 @@ def run_one(p, k, c_choice, rep, cfg, select: str = "none", refit: str = "direct
         "best_f1_index": i_f1, "best_acc_index": i_acc,
         "m_best_f1_i": f1i, "m_best_f1_j": f1j, "m_best_f1_v": f1v,
         "m_best_acc_i": aci, "m_best_acc_j": acj, "m_best_acc_v": acv,
+        **start_row,
     }
     if select != "none":
         supports = [(m_hat != 0) & ~eye for m_hat in path.estimates]
@@ -448,10 +562,23 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--loss", default=None, choices=["direct", "loglik", "frobenius"],
                     help="direct: Dettling's loss (default); loglik / frobenius: "
                          "Varando's losses on Sigma(M) (docs/LIKELIHOOD.md)")
-    ap.add_argument("--up-start", default=None, choices=list(UP_STARTS),
-                    help="covariance losses with --direction up: start the dense -> sparse path "
-                         "from the exact fit (default, Varando & Hansen) or from the lasso solution "
-                         "of the same loss at the smallest lambda")
+    ap.add_argument("--up-start", default=None, type=start_name, metavar="START",
+                    help="with --direction up (MCP/SCAD): where the dense -> sparse path starts: lasso "
+                         "(the lasso solution at the smallest lambda; the direct loss's default), exact "
+                         "(-C Sigma^-1/2, Varando & Hansen; the covariance losses' default), l1 or l2 "
+                         "(the minimum-l1 / minimum-Frobenius exact fits), truth-<tau> (the standardised "
+                         "truth plus tau N(0,1) off the diagonal; a ceiling)")
+    ap.add_argument("--pilot", default=None, type=start_name, metavar="START",
+                    help="with --method adaptive, threshold or threshold-norefit: the pilot, same "
+                         "choices as --up-start (default lasso: the dense end of the lasso path)")
+    ap.add_argument("--weights", default=None, choices=list(WEIGHTS),
+                    help="law of the true weights: normal (N(0,1), default) or uniform "
+                         "(|w| ~ U[w_min, 1] with a random sign)")
+    ap.add_argument("--w-min", type=float, default=None, metavar="W",
+                    help="with --weights uniform: the lower bound of |w| (default 0)")
+    ap.add_argument("--graph", default=None, choices=list(GRAPHS),
+                    help="graph class of the truth: random (default), no2c (one direction of every "
+                         "2-cycle dropped) or dag (a random DAG at the same expected number of edges)")
     ap.add_argument("--direction", default=None, choices=["down", "up"],
                     help="path order (default: down): for the covariance losses, and for "
                          "MCP/SCAD on the direct loss (up = dense to sparse)")
@@ -460,8 +587,10 @@ def build_parser() -> argparse.ArgumentParser:
                          "variance (2 diag(1/s_i^2), the rescaled C)")
     ap.add_argument("--method", default=None, choices=list(METHODS),
                     help="direct loss: path (warm-started continuation, default), lla "
-                         "(MCP/SCAD by local linear approximation from the lasso) or "
-                         "adaptive (adaptive lasso)")
+                         "(MCP/SCAD by local linear approximation from the lasso), "
+                         "adaptive (adaptive lasso), threshold (the lasso's dense end thresholded "
+                         "by size and refitted by least squares) or threshold-norefit (the same "
+                         "supports with the pilot's values)")
     ap.add_argument("--select", default="none", choices=list(SELECT),
                     help="also record the graph of the path selected by the score (bic) and "
                          "the graph the greedy search reaches from it (search), plus the "
@@ -504,11 +633,19 @@ def config_from_args(args: argparse.Namespace) -> S1Config:
         direction=args.direction or base.direction,
         c_scale=args.c_scale or base.c_scale,
         method=args.method or base.method,
-        up_start=args.up_start or base.up_start,
+        up_start=args.up_start if args.up_start is not None else base.up_start,
+        pilot=args.pilot or base.pilot,
+        weights=args.weights or base.weights,
+        w_min=args.w_min if args.w_min is not None else base.w_min,
+        graph=args.graph or base.graph,
     )
     # settings that would be recorded in config_json without having any effect (code review C5)
     if args.direction and cfg.method != "path":
         raise ValueError(f"--direction applies to --method path only; --method {cfg.method} ignores it")
+    if args.pilot and cfg.method not in PILOT_METHODS:
+        raise ValueError(f"--pilot applies to --method {', '.join(PILOT_METHODS)}; --method {cfg.method} ignores it")
+    if args.w_min is not None and cfg.weights != "uniform":
+        raise ValueError("--w-min applies to --weights uniform only")
     if args.convention and cfg.loss != "direct":
         raise ValueError("--convention applies to the direct loss only (the covariance losses have no design)")
     if args.solver and cfg.loss != "direct":
@@ -546,7 +683,8 @@ def main() -> None:
 
     print(f"shard {args.shard}/{args.n_shards}: {len(tasks)} datasets "
           f"[n={cfg.n_obs}, loss={cfg.loss}, penalty={cfg.penalty}, method={cfg.method}, "
-          f"direction={cfg.direction}, c_scale={cfg.c_scale}, select={args.select}, "
+          f"direction={cfg.direction}, start={cfg.start_name}, pilot={cfg.pilot}, c_scale={cfg.c_scale}, "
+          f"weights={cfg.weights}, w_min={cfg.w_min}, graph={cfg.graph}, select={args.select}, "
           f"refit={refit}, ebic_gamma={args.ebic_gamma}] -> {out}",
           flush=True)
 
@@ -567,8 +705,9 @@ def main() -> None:
         **{f: getattr(cfg, f) for f in (
             "n_rep", "n_obs", "n_lambda", "lambda_ratio", "penalize_diagonal",
             "metrics_include_diagonal", "standardize", "metzler", "seed",
-            "solver", "loss", "direction", "up_start", "penalty", "convention", "tol", "c_scale",
-            "method")},
+            "solver", "loss", "direction", "penalty", "convention", "tol", "c_scale",
+            "method", "pilot", "weights", "w_min", "graph")},
+        "up_start": cfg.start_name,                  # the loss's default filled in
         "select": args.select, "refit": refit, "add_screen": args.add_screen,
         "ebic_gammas": list(args.ebic_gamma), "ebic_form": EBIC_FORM,
         "p_values": list(cfg.p_values),

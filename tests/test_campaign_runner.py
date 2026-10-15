@@ -102,7 +102,7 @@ def test_select_search_improves_the_bic_and_stores_the_searched_graph(tmp_path):
     res, shard = run(tmp_path, "--penalty", "MCP", "--direction", "up", "--c-scale", "variance",
                      "--select", "search", n_shards=8)
     assert res.returncode == 0, res.stderr
-    assert set(shard.files) == LEGACY | BIC | SEARCH
+    assert set(shard.files) == LEGACY | BIC | SEARCH | START     # a dense start: its diagnostics too
     config = json.loads(str(shard["config_json"]))
     assert (config["penalty"], config["direction"], config["select"]) == ("MCP", "up", "search")
     for i in range(len(shard["p"])):
@@ -179,7 +179,7 @@ def test_the_likelihood_refit_behind_the_bic_is_an_option(tmp_path):
     res, shard = run(tmp_path, "--method", "adaptive", "--c-scale", "variance", "--n-obs", "10000",
                      "--select", "search", "--refit", "loglik", n_shards=8)
     assert res.returncode == 0, res.stderr
-    assert set(shard.files) == LEGACY | BIC | SEARCH
+    assert set(shard.files) == LEGACY | BIC | SEARCH | START
     config = json.loads(str(shard["config_json"]))
     assert (config["refit"], config["add_screen"], config["select"]) == ("loglik", None, "search")
     for i in range(len(shard["p"])):
@@ -246,7 +246,7 @@ def test_selection_is_recorded_for_the_log_likelihood_loss_too(tmp_path):
     res, shard = run(tmp_path, "--loss", "loglik", "--penalty", "MCP", "--direction", "up",
                      "--c-scale", "variance", "--select", "bic")
     assert res.returncode == 0, res.stderr
-    assert set(shard.files) == LEGACY | BIC
+    assert set(shard.files) == LEGACY | BIC | START
     config = json.loads(str(shard["config_json"]))
     assert (config["loss"], config["direction"], config["c_scale"]) == ("loglik", "up", "variance")
     assert np.isfinite(shard["bic_scores"][0][int(shard["bic_index"][0])])
@@ -261,15 +261,16 @@ def test_log_likelihood_adaptive_lasso_and_lasso_start_run_through_the_runner(tm
     assert res.returncode == 0, res.stderr
     cfg = json.loads(str(ada["config_json"]))
     assert (cfg["loss"], cfg["method"], cfg["refit"], cfg["up_start"]) == ("loglik", "adaptive", "loglik", "exact")
-    assert set(ada.files) == LEGACY | BIC | SEARCH
+    assert set(ada.files) == LEGACY | BIC | SEARCH | START
     assert ada["search_score"][0] <= ada["bic_scores"][0][int(ada["bic_index"][0])] + 1e-9
     res, up = run(tmp_path, "--loss", "loglik", "--penalty", "MCP", "--direction", "up", "--up-start", "lasso",
                   "--select", "bic", "--refit", "loglik", "--n-obs", "10000", name="up")
     assert res.returncode == 0, res.stderr
     assert json.loads(str(up["config_json"]))["up_start"] == "lasso"
-    # the start is a covariance-loss option: refused for the direct loss and without --direction up
-    for extra in (("--up-start", "lasso", "--penalty", "MCP", "--direction", "up"),
-                  ("--loss", "loglik", "--up-start", "lasso", "--penalty", "MCP")):
+    # the start needs a dense -> sparse path: refused without --direction up, and for the lasso (no order)
+    for extra in (("--loss", "loglik", "--up-start", "lasso", "--penalty", "MCP"),
+                  ("--up-start", "l1", "--penalty", "MCP"),
+                  ("--up-start", "l1", "--direction", "up")):
         res, _ = run(tmp_path, *extra, name="bad")
         assert res.returncode != 0 and "up_start" in res.stderr
 
@@ -320,6 +321,139 @@ def test_more_shards_than_tasks_gives_a_readable_empty_shard(tmp_path):
 def test_settings_without_effect_or_out_of_range_are_refused(tmp_path, extra, message):
     """Code review C5: a setting that would be recorded in config_json without having any effect,
     or a value that silently fell back to the default, is refused before anything runs."""
+    res, shard = run(tmp_path, *extra)
+    assert res.returncode != 0 and shard is None
+    assert message in res.stderr, res.stderr
+
+
+#: the per-data-set diagnostics of a dense start (plan of 13 October 2026, §2.2)
+START = {"start_l1", "start_l2", "start_residual", "start_nnz", "start_conf", "start_orient"}
+
+
+def dataset_std(shard, i, n_obs, c_scale):
+    """The standardised truth, Sigma_hat and the estimation C of data set ``i``."""
+    from gclm.data.simulate import standardized_drift
+    cfg = S1Config()
+    p, k, c, rep = (int(shard[key][i]) for key in ("p", "k", "c_choice", "rep"))
+    rng = np.random.default_rng([cfg.seed, p, k, c, rep])
+    m_true, _, _, sigma_hat, scale = draw_instance(p, k, n_obs, list(CChoice)[c], rng,
+                                                   standardize=True, return_scale=True)
+    return standardized_drift(m_true, scale), sigma_hat, estimation_volatility(scale, c_scale)
+
+
+@pytest.mark.parametrize("start", ["lasso", "exact", "l1", "l2", "truth-0.1"])
+def test_any_dense_start_runs_the_mcp_path_and_records_itself(tmp_path, start):
+    """E1: ``--up-start`` on the direct loss.  The shard stores the start's diagnostics; the explicit
+    ``lasso`` is the old default and stores the same path as a run without the option."""
+    res, shard = run(tmp_path, "--penalty", "MCP", "--direction", "up", "--up-start", start,
+                     "--select", "bic", "--c-scale", "variance", "--n-obs", "inf", n_shards=8)
+    assert res.returncode == 0, res.stderr
+    assert set(shard.files) == LEGACY | BIC | START
+    cfg = json.loads(str(shard["config_json"]))
+    assert cfg["up_start"] == start and cfg["pilot"] == "lasso"
+    assert (cfg["weights"], cfg["w_min"], cfg["graph"]) == ("normal", 0.0, "random")
+    for i in range(len(shard["p"])):
+        m_tilde, sigma_hat, c_est = dataset_std(shard, i, np.inf, "variance")
+        conf, orient = shard["start_conf"][i], shard["start_orient"][i]
+        assert conf.sum() == P * (P - 1) and conf.shape == (4,) and orient.shape == (len(ORIENT),)
+        assert shard["start_nnz"][i] == conf[0] + conf[1]                    # tp + fp = present entries
+        assert shard["start_l1"][i] >= shard["start_l2"][i] > 0
+        if start in ("exact", "l1", "l2"):
+            assert shard["start_residual"][i] < 1e-8                           # exact fits
+        if start == "truth-0.1":
+            assert shard["start_residual"][i] > 1e-3 and shard["start_nnz"][i] == P * (P - 1)
+        if start == "l1":                                                      # the LP's value is the l1 norm
+            from gclm.objective.exact_fits import min_l1_exact_fit
+            _, info = min_l1_exact_fit(sigma_hat, c_est, return_info=True)
+            assert shard["start_l1"][i] == pytest.approx(info.value, rel=1e-9)
+    if start == "lasso":
+        res, plain = run(tmp_path, "--penalty", "MCP", "--direction", "up", "--select", "bic",
+                         "--c-scale", "variance", "--n-obs", "inf", n_shards=8, name="plain")
+        assert res.returncode == 0, res.stderr
+        for key in ("conf_offdiag", "bic_index", "nnz"):
+            assert np.array_equal(plain[key], shard[key]), key
+        assert np.array_equal(plain["start_l1"], shard["start_l1"])
+
+
+def test_truth_start_at_tau_zero_is_the_standardised_truth(tmp_path):
+    res, shard = run(tmp_path, "--penalty", "MCP", "--direction", "up", "--up-start", "truth-0",
+                     "--c-scale", "variance", "--n-obs", "inf", n_shards=8)
+    assert res.returncode == 0, res.stderr
+    for i in range(len(shard["p"])):
+        m_tilde, _, _ = dataset_std(shard, i, np.inf, "variance")
+        conf = shard["start_conf"][i]
+        assert conf[1] == 0 and conf[3] == 0 and conf[0] == int(shard["n_true_edges"][i])   # no fp, no fn
+        assert shard["start_residual"][i] < 1e-8                                            # exact at n = inf
+        assert shard["start_l1"][i] == pytest.approx(np.abs(m_tilde[~np.eye(P, dtype=bool)]).sum())
+
+
+@pytest.mark.parametrize("method, pilot", [("adaptive", "l2"), ("threshold", "lasso"), ("threshold", "l1"),
+                                           ("threshold-norefit", "lasso")])
+def test_pilot_methods_run_and_record_the_pilot(tmp_path, method, pilot):
+    """E2: the thresholded lasso as a path through the runner, and ``--pilot`` for the adaptive and
+    thresholded lassos; the pilot's diagnostics are stored like a start's."""
+    res, shard = run(tmp_path, "--method", method, "--pilot", pilot, "--select", "search",
+                     "--c-scale", "variance", "--n-obs", "10000", n_shards=8)
+    assert res.returncode == 0, res.stderr
+    assert set(shard.files) == LEGACY | BIC | SEARCH | START
+    cfg = json.loads(str(shard["config_json"]))
+    assert cfg["method"] == method and cfg["pilot"] == pilot and cfg["up_start"] == "lasso"
+    for i in range(len(shard["p"])):
+        lams, nnz = shard["lambdas"][i], shard["nnz"][i]
+        assert len(lams) == 100 and np.all(np.diff(lams) >= 0)
+        if method.startswith("threshold"):
+            assert lams[0] == 0.0 and lams[-1] == np.inf and shard["lambda_max"][i] == lams[-2]
+            assert np.all(np.diff(nnz) <= 0) and nnz[-1] == 0 and nnz[0] == shard["start_nnz"][i]
+            assert np.isnan(shard["kkt"][i]).all() and np.all(shard["iterations"][i] == 0)
+            assert np.all(shard["converged"][i])
+            sup = unpack_supports(shard["supports_packed"][i], 100, P)
+            assert all(np.all(b <= a) for a, b in zip(sup, sup[1:]))        # nested supports
+        assert shard["search_score"][i] <= shard["bic_scores"][i][int(shard["bic_index"][i])] + 1e-9
+    if pilot == "lasso" and method == "threshold":
+        # the same pilot as the adaptive lasso: identical start diagnostics
+        res, ada = run(tmp_path, "--method", "adaptive", "--select", "bic", "--c-scale", "variance",
+                       "--n-obs", "10000", n_shards=8, name="ada")
+        assert res.returncode == 0, res.stderr
+        for key in ("start_l1", "start_nnz", "start_conf"):
+            assert np.array_equal(ada[key], shard[key]), key
+
+
+def test_generator_knobs_run_and_are_recorded(tmp_path):
+    """E3 / E4: ``--weights uniform --w-min`` and ``--graph`` change the truth and are recorded; the
+    default run is bit-identical to one without the options."""
+    from gclm.graphs import is_dag
+    res, uni = run(tmp_path, "--weights", "uniform", "--w-min", "0.25", "--n-obs", "1000", n_shards=4, name="uni")
+    assert res.returncode == 0, res.stderr
+    cfg = json.loads(str(uni["config_json"]))
+    assert (cfg["weights"], cfg["w_min"], cfg["graph"]) == ("uniform", 0.25, "random")
+    for i in range(len(uni["p"])):
+        w = np.abs(uni["m_true_v"][i][uni["m_true_i"][i] != uni["m_true_j"][i]])
+        assert w.size == 0 or (w.min() >= 0.25 and w.max() <= 1.0)
+    res, dag = run(tmp_path, "--graph", "dag", "--n-obs", "1000", n_shards=4, name="dag")
+    assert res.returncode == 0, res.stderr
+    assert json.loads(str(dag["config_json"]))["graph"] == "dag"
+    assert all(is_dag(true_matrix(dag, i) != 0) for i in range(len(dag["p"])))
+    res, plain = run(tmp_path, "--n-obs", "1000", n_shards=4, name="plain")
+    res2, explicit = run(tmp_path, "--weights", "normal", "--graph", "random", "--n-obs", "1000", n_shards=4,
+                         name="explicit")
+    assert res.returncode == 0 and res2.returncode == 0
+    for key in ("m_true_v", "conf_offdiag"):
+        assert all(np.array_equal(a, b) for a, b in zip(plain[key], explicit[key])), key
+    assert not np.array_equal(plain["n_true_edges"], dag["n_true_edges"]) or \
+        not all(np.array_equal(a, b) for a, b in zip(plain["m_true_v"], dag["m_true_v"]))
+
+
+@pytest.mark.parametrize("extra, message", [
+    (("--pilot", "l1"), "--pilot"),
+    (("--method", "lla", "--penalty", "MCP", "--pilot", "l1"), "--pilot"),
+    (("--w-min", "0.2"), "--w-min"),
+    (("--method", "threshold", "--penalty", "MCP"), "thresholded lasso"),
+    (("--method", "threshold", "--loss", "loglik"), "direct loss"),
+    (("--up-start", "truth-x", "--penalty", "MCP", "--direction", "up"), "truth-<tau>"),
+    (("--up-start", "truth--1", "--penalty", "MCP", "--direction", "up"), "truth-<tau>"),
+    (("--pilot", "ridge", "--method", "adaptive"), "truth-<tau>"),
+])
+def test_start_and_generator_settings_without_effect_are_refused(tmp_path, extra, message):
     res, shard = run(tmp_path, *extra)
     assert res.returncode != 0 and shard is None
     assert message in res.stderr, res.stderr

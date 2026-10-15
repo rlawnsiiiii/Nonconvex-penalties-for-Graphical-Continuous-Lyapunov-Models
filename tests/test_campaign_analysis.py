@@ -203,3 +203,57 @@ def test_searched_extended_bic_graphs_are_loaded_next_to_the_offline_selection(t
         assert {"ebic1_f1", "ebic1_edges", "ebic1_search_f1", "ebic1_search_edges",
                 "ebic1_search_moves", "search_f1"} <= set(row)
         assert 0 <= row["ebic1_search_f1"] <= 1 and "ebic05_search_f1" not in row
+
+
+def test_graph_class_columns_and_edge_tables(tiny_campaign, tmp_path):
+    """Plan of 13 October 2026, E3 / E4: every row carries the class of its true graph, computed
+    from the stored M* and the regenerated C*; the edge table has one row per true edge with the
+    recovery flags of the three graphs, and the false-positive table one row per graph and estimate."""
+    import graph_class
+    from gclm.graphs import CLASSES
+    rows = campaign.load(tiny_campaign)
+    for r in rows:
+        assert r["graph_class"] in CLASSES and r["n_two_cycles"] >= 0 and 0.0 <= r["frac_edges_2c"] <= 1.0
+        assert r["identified_min_eig"] >= 0.0
+        assert (r["n_two_cycles"] > 0) == (r["graph_class"] == "two_cycles")
+    # the same graph has the same class in every cell
+    by_graph = {}
+    for r in rows:
+        by_graph.setdefault(key(r), set()).add((r["graph_class"], r["n_two_cycles"], r["identified_min_eig"]))
+    assert all(len(v) == 1 for v in by_graph.values()) and len(by_graph) == 16
+    # the edge tables: one row per true edge; the recovery flags reproduce the stored true positives
+    edges, fps = campaign.edge_tables(tiny_campaign, ps=(5,))
+    cells = {r["cell"] for r in edges}
+    assert cells == {"direct_lasso_C2I_n1000", "direct_lasso_Cresc_n1000", "direct_MCP-up_Cresc_n1000"}
+    mcp = [r for r in rows if r["cell"] == "direct_MCP-up_Cresc_n1000"]
+    for r in mcp:
+        mine = [e for e in edges if e["cell"] == r["cell"] and key(e) == key(r)]
+        assert len(mine) == r["n_true_edges"]
+        assert sum(e["search"] for e in mine) == r["search_recall"] * r["n_true_edges"] if r["n_true_edges"] else True
+        assert sum(e["bic"] for e in mine) == pytest.approx(r["bic_recall"] * r["n_true_edges"])
+        assert all(e["weight_bin"] in campaign.BIN_LABELS and e["two_cycle"] in (0, 1) for e in mine)
+        fp = [x for x in fps if x["cell"] == r["cell"] and key(x) == key(r) and x["estimate"] == "search"]
+        assert len(fp) == 1 and fp[0]["n_fp"] == r["search_edges"] - round(r["search_recall"] * r["n_true_edges"])
+        assert sum(fp[0][f"fp_{b}"] for b in campaign.BIN_LABELS) == fp[0]["n_fp"]
+    assert all(e["bic"] == "" or isinstance(e["bic"], int) for e in edges)
+    assert all(e["search"] == "" for e in edges if e["cell"] == "direct_lasso_C2I_n1000")      # --select bic: no search
+    # graph_class.py: within-k tables with paired gains over the lasso, on these p = 5 cells
+    campaign.write(tmp_path / "campaign_per_dataset.csv", rows)
+    gc_rows = graph_class.load_rows(tmp_path / "campaign_per_dataset.csv", {5})
+    out = graph_class.table(gc_rows)
+    assert out and all(r["graph_class"] in CLASSES and r["n_graphs"] > 0 for r in out)
+    lasso = [r for r in out if r["estimator"] == "lasso" and r["metric"] == "max_f1"]
+    assert lasso and all(abs(r["gain"]) < 1e-12 for r in lasso)                # the lasso against itself
+    mcp_rows = [r for r in out if r["estimator"] == "MCP-up" and r["metric"] == "max_f1"]
+    assert sum(r["n_graphs"] for r in mcp_rows) == 16                          # every graph in exactly one (k, class)
+    res = subprocess.run([sys.executable, str(ROOT / "simulations" / "diagnostics" / "graph_class.py"),
+                          "--root", str(tiny_campaign), "--p", "5"], capture_output=True, text=True, cwd=ROOT)
+    assert res.returncode == 0, res.stderr
+    assert "paired gain in max_f1" in res.stdout and (tiny_campaign / "campaign_graph_class.csv").exists()
+    # betamin.py on the edge table
+    import betamin
+    campaign.write(tmp_path / "campaign_edges.csv", edges)
+    bm = betamin.table(edges)
+    assert bm and all(0.0 <= r["best"] <= 1.0 for r in bm if not math.isnan(r["best"]))
+    total = sum(r["n_edges"] for r in bm if r["estimator"] == "MCP-up" and r["two_cycle"] == "all")
+    assert total == sum(r["n_true_edges"] for r in mcp)
