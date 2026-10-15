@@ -1,0 +1,47 @@
+# Plan for cluster/feed_queue.sh, 14 October 2026.  First the remaining lines of plan_101026.txt (wave 8
+# and the fills of waves 5 to 8), verbatim -- lines whose cells are submitted or complete are skipped by
+# the feeder's dry run -- then wave 9, the mechanism experiments of
+# next_steps/131026/plan_mechanism_131026.md, group by group (--group).  ONE feeder runs everything: stop
+# any other feeder first.
+#
+# Costs are estimates from the laptop rehearsal of 14 October (next_steps/131026/next_steps_131026.md
+# §1.3: one shard per cell type at p = 10, LRZ seconds taken as 2 x laptop, scaled with wave 1's measured
+# CPU-hours per cell).  Wave 1's n = 1000 cells cost about ten times its n = 1e4 cells, so the groups are
+# ordered cheap first: E2 and everything at n = 1e4 and n = inf (about 1,000 CPU-h), then the n = 1000
+# groups (about 5,900 CPU-h; starts 2,600, class 1,900, betamin 1,400), whose shard counts and time
+# limits are set here (--shards, --time apply to cells not yet submitted) so that no task exceeds about
+# 12 h.  Decide on the n = 1000 groups when the n = 1e4 results are in (memo §4: class as planned, betamin
+# the group to cut first -- three levels: --only _w0$ _w025 _w05).
+# --- carried from plan_101026.txt (10 October): wave 8 and the fills; done lines are skipped ---
+--wave 6 --n 1e4
+--wave 6 --n inf
+--wave 6 --n 1000
+--wave 5 --only search300s
+--wave 5 --n 1e4 --only searche1_p20
+--wave 7 --n 1e4                               # (a) 244 tasks, about 700 CPU-h
+--wave 8 --n 1e4 --only search100sml           # (c) 256 tasks (4 per graph), about 2,150 CPU-h
+--wave 8 --n 1000 --only search100sml          # (c) 256 tasks (4 per graph), about 2,150 CPU-h
+--wave 7 --n 1000                              # (a) 244 tasks, about 700 CPU-h
+# (b) scores wave 7's paths again, so this line waits until no wave 7 job is queued or running
+--wave 7 --fill --time 24:00:00
+--wave 8 --n 1e4                               # (b) 300 tasks (the direct-loss cells are wave 5a's), about 580 CPU-h
+--wave 8 --n 1000                              # (b) 348 tasks, about 770 CPU-h
+--wave 8 --fill --time 24:00:00
+# repairs of waves 5 and 6 (from plan_091026.txt)
+--wave 5 --fill --time 24:00:00
+--wave 6 --fill --time 24:00:00
+# --- wave 9 (plan_mechanism_131026.md), cheap groups first ---
+--wave 9 --group threshold                                   # E2: 12 cells, 48 tasks, about 75 CPU-h
+--wave 9 --group starts --n 1e4                              # E1: 20 cells, 200 tasks, about 260 CPU-h
+--wave 9 --group starts --n inf                              # E1: 20 cells, 200 tasks, about 270 CPU-h
+--wave 9 --group class --n 1e4                               # E4: 16 cells, 128 tasks, about 230 CPU-h
+--wave 9 --group betamin --n 1e4                             # E3: 32 cells, 256 tasks, about 180 CPU-h
+--wave 9 --fill --time 24:00:00
+# the n = 1000 groups: expensive (the MCP paths at n = 1000 are slow); see the header before starting them
+--wave 9 --group starts --n 1000 --shards 32 --time 24:00:00   # E1: 20 cells, 640 tasks, about 2,600 CPU-h (MCP-up from the truth: 12 h tasks)
+--wave 9 --group class --n 1000 --shards 32 --time 24:00:00    # E4: 16 cells, 512 tasks, about 1,900 CPU-h (MCP sparse -> dense on DAGs: 8 h tasks)
+--wave 9 --group betamin --n 1000 --shards 16 --time 24:00:00  # E3: 32 cells, 512 tasks, about 1,400 CPU-h
+--wave 9 --fill --time 24:00:00
+# optional, after E1 is read (plan §2.6): the same starts on the log-likelihood loss at p = 10 (about 300 CPU-h)
+# --wave 9 --group starts-loglik --n 1e4
+# --wave 9 --group starts-loglik --n 1000
