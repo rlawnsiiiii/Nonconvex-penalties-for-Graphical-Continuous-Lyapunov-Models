@@ -58,6 +58,8 @@ PENALIZED ESTIMATION](https://arxiv.org/pdf/1210.5992)
     - <span style="color: green">Similar simulations done in [Structure Learning for Cyclic Linear Causal Models](https://arxiv.org/abs/2006.05978), does the "expected dimension" still hold in our case of GCLM?</span>
 
 ## Meeting 2 (151026)
+### Slides
+- https://github.com/rlawnsiiiii/Nonconvex-penalties-for-Graphical-Continuous-Lyapunov-Models/tree/main/slides/091026
 ### Questions
 - does this rescaling of C make sense?
 - current status: pruning (MCP/SCAD or adaptive lasso) from a dense start (minimum l1 fit) makes sense
@@ -66,10 +68,18 @@ PENALIZED ESTIMATION](https://arxiv.org/pdf/1210.5992)
     - Hope: $M_{Lasso, 0}$ "bypasses" the problem with null space so that A($\hat\Sigma$) gets independent columns?
     - nonconvex penalties more "forced" to choose a direction than lasso
     - adaptive lasso achieves similar effects as nonconvex penalties
-- Which direction should the thesis go?
-    - Investigate this more? 
-        - How is the effect for other "dense starts" (e.g. minimum l2 fit, exact fit...)
-        - How is the effect for other "prunings" (e.g. threshold lasso...)
-        - How is the effect for differently strong edges (e.g. playing with beta-min condition)
-        - How is the effect in different graph classes - DAG, 2-cycles ...
-- 
+
+### Next Steps
+- Investigate this more with more simulations? 
+    - How is the effect for other "dense starts" (e.g. minimum l2 fit, exact fit...)
+    - How is the effect for other "prunings" (e.g. threshold lasso...)
+    - How is the effect for differently strong edges (e.g. playing with beta-min condition)
+    - How is the effect in different graph classes - DAG, 2-cycles ...
+    - Try out other existing greedy search methods - FLOP, adaptive climb (Phillip Dodel)
+    - Estimate how nonconvex our objective is - how large the deviations between the landing points for nonconvex penalties?
+    - Try to draw some conclusions
+- Theory part:
+    - Dettling: Lasso with irr. condition -> find the equivalent condition for nonconvex penalties, find M that fulfills this condition (start with diagonal M)
+        - Look for the theoretical results for linear regression kind of models (consistency...)
+        - Final goal: to arrive at some theoretical results, hope: comparison to lasso, better support recovery (regarding growth of n or p ...) for nonconvex penalties in certain settings (graph classes .....)
+        - PDW kind of proof - what is the equivalent kind for nonconvex penalties?
