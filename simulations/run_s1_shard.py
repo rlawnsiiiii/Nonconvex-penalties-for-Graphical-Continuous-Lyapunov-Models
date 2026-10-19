@@ -67,7 +67,7 @@ the start's own diagnostics per data set:
                        directions present, ``reversed`` = only the reverse, ``missed_single`` =
                        neither -- the "dense-start content" of the theory note of 7 October 2026
 
-The generator's knobs ``--weights uniform --w-min W`` (E3) and ``--graph no2c|dag`` (E4) are
+The generator's knobs ``--weights uniform --w-min W`` (E3), ``--graph dag`` (E4) and ``--graph pairs --two-cycle-share S`` (E5) are
 recorded in the config; the defaults are the thesis generator bit for bit.
 
     python simulations/run_s1_shard.py --shard 0 --n-shards 64 \
@@ -289,6 +289,8 @@ def check_method(cfg: S1Config) -> None:
         raise ValueError(f"weights must be one of {WEIGHTS} and graph one of {GRAPHS}")
     if cfg.weights == "normal" and cfg.w_min != 0.0:
         raise ValueError("w_min applies to --weights uniform (the normal weights have no lower bound)")
+    if cfg.graph != "pairs" and cfg.two_cycle_share != 0.0:
+        raise ValueError("two_cycle_share applies to --graph pairs")
     if cfg.method == "path":
         return
     if cfg.method == "adaptive" and cfg.loss != "direct":
@@ -406,7 +408,7 @@ def run_one(p, k, c_choice, rep, cfg, select: str = "none", refit: str = "direct
     m_true, c_true, _, sigma_hat, scale = draw_instance(
         p, k, cfg.n_obs, c_choice, rng,
         metzler=cfg.metzler, standardize=cfg.standardize, return_scale=True,
-        weights=cfg.weights, w_min=cfg.w_min, graph=cfg.graph,
+        weights=cfg.weights, w_min=cfg.w_min, graph=cfg.graph, two_cycle_share=cfg.two_cycle_share,
     )
     c_est = estimation_volatility(scale, cfg.c_scale)
     weights = penalty_weights(p, penalize_diagonal=cfg.penalize_diagonal)
@@ -576,9 +578,15 @@ def build_parser() -> argparse.ArgumentParser:
                          "(|w| ~ U[w_min, 1] with a random sign)")
     ap.add_argument("--w-min", type=float, default=None, metavar="W",
                     help="with --weights uniform: the lower bound of |w| (default 0)")
+    ap.add_argument("--c-choices", default=None, nargs="+", choices=[c.value for c in CChoice], metavar="C",
+                    help="restrict the true C to one or more of Dettling's four choices (default all four); "
+                         "a graph keeps its seed, so a C_ID graph is the same graph as in a full run")
+    ap.add_argument("--two-cycle-share", type=float, default=None, metavar="S",
+                    help="with --graph pairs: the share of connected pairs that are 2-cycles, in [0, 1]; the "
+                         "expected number of edges stays p (p - 1) d (E5, 19 October 2026)")
     ap.add_argument("--graph", default=None, choices=list(GRAPHS),
-                    help="graph class of the truth: random (default), no2c (one direction of every "
-                         "2-cycle dropped) or dag (a random DAG at the same expected number of edges)")
+                    help="graph class of the truth: random (default), dag (a random DAG at the same expected number of edges) or "
+                         "pairs (--two-cycle-share: the share of connected pairs that are 2-cycles)")
     ap.add_argument("--direction", default=None, choices=["down", "up"],
                     help="path order (default: down): for the covariance losses, and for "
                          "MCP/SCAD on the direct loss (up = dense to sparse)")
@@ -638,6 +646,8 @@ def config_from_args(args: argparse.Namespace) -> S1Config:
         weights=args.weights or base.weights,
         w_min=args.w_min if args.w_min is not None else base.w_min,
         graph=args.graph or base.graph,
+        two_cycle_share=args.two_cycle_share if args.two_cycle_share is not None else base.two_cycle_share,
+        c_choices=tuple(CChoice(c) for c in args.c_choices) if args.c_choices else base.c_choices,
     )
     # settings that would be recorded in config_json without having any effect (code review C5)
     if args.direction and cfg.method != "path":
@@ -706,7 +716,7 @@ def main() -> None:
             "n_rep", "n_obs", "n_lambda", "lambda_ratio", "penalize_diagonal",
             "metrics_include_diagonal", "standardize", "metzler", "seed",
             "solver", "loss", "direction", "penalty", "convention", "tol", "c_scale",
-            "method", "pilot", "weights", "w_min", "graph")},
+            "method", "pilot", "weights", "w_min", "graph", "two_cycle_share")},
         "up_start": cfg.start_name,                  # the loss's default filled in
         "select": args.select, "refit": refit, "add_screen": args.add_screen,
         "ebic_gammas": list(args.ebic_gamma), "ebic_form": EBIC_FORM,

@@ -418,6 +418,49 @@ def test_pilot_methods_run_and_record_the_pilot(tmp_path, method, pilot):
             assert np.array_equal(ada[key], shard[key]), key
 
 
+def test_true_c_can_be_restricted_and_the_graphs_keep_their_seeds(tmp_path):
+    """``--c-choices C_ID`` runs the C_ID graphs only (recorded in config_json); they are the same
+    graphs, bit for bit, as the C_ID graphs of a run with all four choices, and the default is
+    still all four."""
+    res, only = run(tmp_path, "--c-choices", "C_ID", "--n-obs", "1000", n_shards=1, name="cid")
+    assert res.returncode == 0, res.stderr
+    assert json.loads(str(only["config_json"]))["c_choices"] == ["C_ID"]
+    names = [str(x) for x in only["c_choice_names"]]
+    assert all(names[int(c)] == "C_ID" for c in only["c_choice"]) and len(only["p"]) == 4      # k = 1..4, one replicate
+    res, full = run(tmp_path, "--n-obs", "1000", n_shards=1, name="full")
+    assert res.returncode == 0 and json.loads(str(full["config_json"]))["c_choices"] == [c.value for c in CChoice]
+    assert len(full["p"]) == 16
+    for i in range(len(only["p"])):
+        j = next(j for j in range(len(full["p"])) if names[int(full["c_choice"][j])] == "C_ID"
+                 and int(full["k"][j]) == int(only["k"][i]) and int(full["rep"][j]) == int(only["rep"][i]))
+        assert np.array_equal(true_matrix(only, i), true_matrix(full, j))
+        assert np.array_equal(only["conf_offdiag"][i], full["conf_offdiag"][j])
+    res, two = run(tmp_path, "--c-choices", "C_ID", "C_Random_Full", "--n-obs", "1000", n_shards=1, name="two")
+    assert res.returncode == 0 and len(two["p"]) == 8
+    res, _ = run(tmp_path, "--c-choices", "C_Diag", n_shards=1, name="bad")
+    assert res.returncode != 0
+
+
+def test_two_cycle_share_runs_and_is_refused_without_the_pairs_class(tmp_path):
+    """E5 (19 October 2026): ``--graph pairs --two-cycle-share S`` is recorded in config_json and draws
+    graphs whose connected pairs are 2-cycles with share S (every one at S = 1); the share is refused
+    with another class, and the loader regenerates the class from the recorded knob."""
+    from gclm.graphs import two_cycles
+    res, sym = run(tmp_path, "--graph", "pairs", "--two-cycle-share", "1", "--n-obs", "1000", n_shards=4, name="sym")
+    assert res.returncode == 0, res.stderr
+    cfg = json.loads(str(sym["config_json"]))
+    assert (cfg["graph"], cfg["two_cycle_share"]) == ("pairs", 1.0)
+    for i in range(len(sym["p"])):
+        m = true_matrix(sym, i)
+        assert np.array_equal(m != 0, (m != 0).T)                                 # every connected pair both ways
+    res, none = run(tmp_path, "--graph", "pairs", "--two-cycle-share", "0", "--n-obs", "1000", n_shards=4, name="none")
+    assert res.returncode == 0 and all(two_cycles(true_matrix(none, i) != 0) == 0 for i in range(len(none["p"])))
+    res, _ = run(tmp_path, "--two-cycle-share", "0.5", "--n-obs", "1000", n_shards=4, name="bad")
+    assert res.returncode != 0 and "two_cycle_share applies to --graph pairs" in res.stderr
+    res, _ = run(tmp_path, "--graph", "dag", "--two-cycle-share", "0.5", "--n-obs", "1000", n_shards=4, name="bad2")
+    assert res.returncode != 0
+
+
 def test_generator_knobs_run_and_are_recorded(tmp_path):
     """E3 / E4: ``--weights uniform --w-min`` and ``--graph`` change the truth and are recorded; the
     default run is bit-identical to one without the options."""

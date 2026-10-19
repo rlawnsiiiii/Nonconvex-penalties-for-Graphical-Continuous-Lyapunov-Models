@@ -142,7 +142,7 @@ def test_generator_knobs_leave_the_default_stream_untouched():
 
 def test_uniform_weights_respect_the_lower_bound():
     from gclm.data.simulate import WEIGHTS, GRAPHS
-    assert WEIGHTS == ("normal", "uniform") and GRAPHS == ("random", "no2c", "dag")
+    assert WEIGHTS == ("normal", "uniform") and GRAPHS == ("random", "dag", "pairs")
     rng = np.random.default_rng(5)
     for w_min in (0.0, 0.1, 0.25, 0.5):
         m = sample_drift(10, 0.3, rng, weights="uniform", w_min=w_min)
@@ -160,31 +160,68 @@ def test_uniform_weights_respect_the_lower_bound():
             sample_drift(5, 0.3, rng, **bad)
 
 
-def test_graph_classes_no2c_and_dag():
-    """``no2c``: no pair has both directions; ``dag``: acyclic, and the expected number of edges
-    matches the random class within 10 % (d' = 2 d on the allowed half of the pairs)."""
+def test_dag_class():
+    """``dag``: acyclic, no 2-cycles, stable, and the expected number of edges matches the random
+    class within 10 % (d' = 2 d on the allowed half of the pairs); the knobs pass through draw_instance."""
     from gclm.graphs import is_dag, two_cycles
     rng = np.random.default_rng(11)
     p, d = 10, 0.4
     plain = [sample_drift(p, d, rng) for _ in range(200)]
-    no2c = [sample_drift(p, d, rng, graph="no2c") for _ in range(200)]
     dags = [sample_drift(p, d, rng, graph="dag") for _ in range(200)]
     assert sum(two_cycles(m != 0) for m in plain) > 100         # the random class has them at this density
-    assert all(two_cycles(m != 0) == 0 for m in no2c)
     assert all(is_dag(m != 0) and two_cycles(m != 0) == 0 for m in dags)
-    assert all(is_stable(m) for m in no2c + dags)
+    assert all(is_stable(m) for m in dags)
     off = ~np.eye(p, dtype=bool)
     edges = lambda ms: np.mean([np.sum(m[off] != 0) for m in ms])  # noqa: E731
     assert abs(edges(dags) - edges(plain)) < 0.1 * edges(plain)
-    # dropping one direction of every 2-cycle removes exactly that many edges from the same draw
-    for seed in range(5):
-        a = sample_drift(p, d, np.random.default_rng(seed))
-        b = sample_drift(p, d, np.random.default_rng(seed), graph="no2c")
-        assert np.all((b != 0) <= (a != 0))
-        assert np.sum(a[off] != 0) - np.sum(b[off] != 0) == two_cycles(a != 0)
-        assert np.array_equal(b[off][b[off] != 0], a[off][b[off] != 0])    # the surviving weights are the same
     # the knobs pass through draw_instance
     m, c, sigma, _ = draw_instance(p, 3, 500, CChoice.ID, np.random.default_rng(1), graph="dag",
                                    weights="uniform", w_min=0.5)
     w = np.abs(m[off][m[off] != 0])
     assert is_dag(m != 0) and w.min() >= 0.5 and is_stable(m)
+
+
+def test_pairs_class_fixes_the_edge_count_and_sets_the_two_cycle_share():
+    """E5 (19 October 2026): ``graph="pairs"`` draws the graph pair by pair -- a connected pair with
+    probability 2 d / (1 + s), a 2-cycle with probability s -- so that the expected number of directed
+    edges is the random class's p (p - 1) d at every s and s is the share of connected pairs that are
+    2-cycles; s = 0 has none, s = 1 is symmetric; the draws stay stable; the knob is refused with
+    another class, above 1, and where 2 d > 1 + s."""
+    from gclm.data.simulate import GRAPHS
+    from gclm.graphs import two_cycles
+    assert GRAPHS == ("random", "dag", "pairs")
+    p, d, off = 10, 0.3, ~np.eye(10, dtype=bool)
+    for s in (0.0, 0.25, 0.5, 1.0):
+        ms = [sample_drift(p, d, np.random.default_rng(i), graph="pairs", two_cycle_share=s) for i in range(300)]
+        edges = np.mean([np.sum(m[off] != 0) for m in ms])
+        cycles = np.mean([two_cycles(m != 0) for m in ms])
+        assert abs(edges - p * (p - 1) * d) < 0.08 * p * (p - 1) * d, (s, edges)      # the edge count does not move
+        pairs = edges - cycles                                                        # connected pairs = edges - 2-cycles
+        assert abs(cycles / pairs - s) < 0.06, (s, cycles / pairs)                   # the share is the knob
+        assert all(is_stable(m) for m in ms)
+        if s == 0.0:
+            assert cycles == 0
+        if s == 1.0:
+            assert all(np.array_equal(m != 0, (m != 0).T) for m in ms)               # every connected pair both ways
+    # the random class's pair law is the point s = d / (2 - d) of the family: same 2-cycle and edge counts
+    s_random = d / (2 - d)
+    fam = [sample_drift(p, d, np.random.default_rng(i), graph="pairs", two_cycle_share=s_random) for i in range(400)]
+    plain = [sample_drift(p, d, np.random.default_rng(i)) for i in range(400)]
+    assert abs(np.mean([two_cycles(m != 0) for m in fam]) - np.mean([two_cycles(m != 0) for m in plain])) < 0.5
+    # the default call is untouched; the knob draws after the two default draws
+    a, b = np.random.default_rng(3), np.random.default_rng(3)
+    sample_drift(p, d, a)
+    b.normal(size=(p, p)); b.binomial(1, d, size=(p, p))
+    assert a.random() == b.random()
+    rng = np.random.default_rng(0)
+    for bad in ({"graph": "random", "two_cycle_share": 0.5}, {"graph": "dag", "two_cycle_share": 0.1},
+                {"graph": "pairs", "two_cycle_share": 1.5}, {"graph": "pairs", "two_cycle_share": -0.1}):
+        with pytest.raises(ValueError):
+            sample_drift(p, d, rng, **bad)
+    dense = [sample_drift(p, 0.6, np.random.default_rng(i), graph="pairs", two_cycle_share=0.0) for i in range(20)]
+    assert all(np.sum(m[off] != 0) == p * (p - 1) // 2 and two_cycles(m != 0) == 0 and is_stable(m) for m in dense)
+    m = sample_drift(p, 0.6, rng, graph="pairs", two_cycle_share=0.5)                # 2 d = 1.2 <= 1.5: the count is kept
+    assert is_stable(m)
+    # draw_instance passes the knob through
+    m, c, sigma, _ = draw_instance(p, 3, 500, CChoice.ID, np.random.default_rng(1), graph="pairs", two_cycle_share=1.0)
+    assert np.array_equal(m != 0, (m != 0).T) and is_stable(m)

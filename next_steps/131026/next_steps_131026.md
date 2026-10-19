@@ -176,7 +176,18 @@ either C), as verdict 12 says.
    edges among fewer pairs. The generated classes of the plan (§5.2, `no2c` and `dag`) are needed
    for a clean statement; the stored data say the effect is there and worth the cells.
 
+> **19 October 2026.** The `no2c` class was removed from the generator, the loader, the cluster groups and the
+> tests: E5's `pairs` class at $s = 0$ is the no-2-cycle class at the random class's edge count. The `no2c`
+> mentions in this memo and in the plan are the record of 13–14 October.
+
 ## 3. E3 on the stored campaign: recall by weight, and where the gain comes from
+
+> **Dropped on 19 October 2026.** Joon decided that binning one weight law (the stored N(0, 1)
+> weights, by $|w|$) is not the beta-min question: an edge's bin says nothing about the rest of its graph,
+> which still has weak edges, and the gain is a graph-level quantity. E3 is now the lower-bound generator
+> alone (§4.2 of the plan; `docs/GRAPH_CLASSES_AND_BETAMIN.md` §5–6). The edge table, `WEIGHT_BINS` and
+> the recall-by-bin table and figure were removed from `campaign.py`, `betamin.py` and `plot_betamin.py`;
+> the numbers below are kept as the record of the 14 October look and cannot be regenerated.
 
 Recall of the true edges in the best-F1 graph of the path (the oracle λ), by |w| (the generator's
 N(0, 1) weight), p = 20, n = 10⁴, all 400 graphs (`campaign_betamin.csv`):

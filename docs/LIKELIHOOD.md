@@ -1,149 +1,112 @@
 # Likelihood and Frobenius losses on the implied covariance
 
-*Varando & Hansen (2020), "Graphical continuous Lyapunov models", Section 3 — implemented in
-`src/gclm/objective/covariance.py` (losses) and `src/gclm/solvers/covariance.py` (solvers),
-validated in `tests/test_covloss.py` (63 tests), reference backend
-`R/backend_gclm.R` (the authors' CRAN package `gclm`).*
+Study S2 fits the lasso, MCP and SCAD under the two losses of Varando & Hansen, both evaluated at the implied covariance $\Sigma(M)$ rather than at the Lyapunov residual.
 
-**In one paragraph.** Study S2 attaches the lasso, MCP and SCAD to the two losses Varando &
-Hansen fit instead of Dettling's direct loss: the Gaussian negative log-likelihood and the squared
-Frobenius distance, both evaluated at the covariance *implied* by $M$, $\Sigma(M)$, rather than at
-the Lyapunov residual. Both are nonconvex in $M$, and both are nearly flat along $p(p-1)/2$
-directions that leave $\Sigma(M)$ unchanged. Two consequences drove the implementation: (i) the
-proximal-gradient method of the paper converges so slowly that the published results depend on
-its iteration cap, and (ii) the problems have several stationary points per $\lambda$, so the
-*estimator* is only defined together with its path-following algorithm. The estimator's solver is
-an accelerated proximal-gradient method (Section 4.3), run as a continuation from $\lambda_{\max}$
-with warm starts (Section 5). An active-set Newton method with the exact Hessian was built along
-the way and is kept in the code **for the experiment of Section 5 only**: it converges faster,
-but to the wrong stationary points.
+```
+Varando & Hansen (2020), Section 3        R/backend_gclm.R -> gclm::gclm()   reference backend, CRAN package gclm 0.0.1
+                                           ^ tests/test_covloss.py (63 tests)
+src/gclm/objective/penalties.py    P_lambda: lasso | MCP | SCAD (textbook convention), stationarity
+               |
+src/gclm/objective/covariance.py   L(Sigma(M, C)) for loss = "loglik" | "frobenius", gradient in M, lambda_max
+               |
+src/gclm/solvers/covariance.py     solve(sigma_hat, C, lam, loss, ..., method = "apg" | "prox" | "newton")
+               |
+src/gclm/solvers/path.py           covloss_path(direction = "down" | "up", start = ...), adaptive_covloss_path
+               |                    tests/test_covloss_dense_start.py
+simulations/run_s1.py, simulations/run_s1_shard.py, cluster/s1_array.sbatch      (Section 8)
+```
+
+| summary | |
+|---|---|
+| losses | Gaussian negative log-likelihood and squared Frobenius distance at $\Sigma(M)$, Varando & Hansen (2020) Section 3; nonconvex in $M$, nearly flat along the $p(p-1)/2$ directions that leave $\Sigma(M)$ unchanged |
+| consequence i | the proximal-gradient method of the paper converges so slowly that the published results depend on its iteration cap (Section 4.1) |
+| consequence ii | several stationary points per $\lambda$, so the estimator is only defined together with its path-following algorithm (Section 5) |
+| the estimator's solver | accelerated proximal gradient (Section 4.3), run as a continuation from $\lambda_{\max}$ with warm starts (Section 5) |
+| active-set Newton with the exact Hessian | kept in the code for the experiment of Section 5 only: converges faster, but to the wrong stationary points |
 
 ---
 
 ## 1. The estimator
 
-Varando & Hansen, eq. (7), with $C$ held fixed ($\kappa = \infty$ in their notation) and our $M$
-for their $B$:
+Varando & Hansen, eq. 7, with $C$ held fixed, $\kappa=\infty$ in their notation, and our $M$ for their $B$.
 
-$$\hat M(\lambda)\in\arg\min_{M\ \text{stable}}\ L\big(\Sigma(M, C)\big)+\sum_{i\neq j}P_\lambda(M_{ij}),
-\qquad M\Sigma+\Sigma M^\top+C=0,$$
+$$\hat M(\lambda)\in\arg\min_{M\ \text{stable}}\ L\big(\Sigma(M, C)\big)+\sum_{i\neq j}P_\lambda(M_{ij}),\qquad M\Sigma+\Sigma M^\top+C=0$$
 
 | `loss` | $L(\Sigma)$ | $\nabla_\Sigma L$ |
 |---|---|---|
 | `"loglik"` | $\log\det\Sigma+\operatorname{tr}(\Sigma^{-1}\hat\Sigma)$ | $P-P\hat\Sigma P$, $P=\Sigma^{-1}$ |
-| `"frobenius"` | $\tfrac12\|\Sigma-\hat\Sigma\|_F^2$ | $\Sigma-\hat\Sigma$ |
+| `"frobenius"` | $\tfrac12\lVert\Sigma-\hat\Sigma\rVert_F^2$ | $\Sigma-\hat\Sigma$ |
 
-The names and scales are those of the R package `gclm` (`loss = "loglik"` / `"frobenius"`), so
-$\lambda$ passes to it unchanged. The log-likelihood omits $n/2$ and constants. The paper writes
-the Frobenius loss without the $\tfrac12$; the package has it, and so do we.
+| convention | detail |
+|---|---|
+| names and scales | those of the R package `gclm`, `loss = "loglik"` / `"frobenius"`, so $\lambda$ passes to it unchanged; the log-likelihood omits $n/2$ and constants; the paper writes the Frobenius loss without the $\tfrac12$, the package has it, and so do we |
+| direct loss, `loss="direct"`, study S1 | $\tfrac12\lVert M\hat\Sigma+\hat\Sigma M^\top+C\rVert_F^2$ (`src/gclm/objective/direct.py`): the Frobenius norm of the Lyapunov residual at the sample covariance, a convex quadratic in $M$; Varando's "direct lasso path", his Section 3.2 |
+| implied losses | compositions with the rational map $M\mapsto\Sigma(M,C)$, nonconvex; they need $M$ stable, since $\Sigma(M,C)$ is defined and positive definite only there |
+| penalty | off-diagonal entries only, as in both papers; lasso, MCP or SCAD of `src/gclm/objective/penalties.py` under the textbook convention; no design matrix, so the ncvreg convention of docs/NONCONVEX.md §2 has no meaning |
+| scale of $C$, lasso | a rescaling of $\lambda$, formula below, tested; the support path is the same and the choice is immaterial |
+| scale of $C$, MCP and SCAD | not immaterial: $\gamma$ is measured on the scale of $M$, and doubling $C$ doubles the coefficients |
+| scale of $C$, direct loss | even $\gamma$ untouched, because the quadratic loss scales with $c^2$ |
+| choice | Dettling's $C=2I$ for every loss, so that S1 and S2 compare penalties on identical data and an identical model; Varando used $C=I$ on correlation matrices |
+| standardisation | as in S1 the input is the empirical correlation matrix (Varando: "Data was standardized"); with $\hat\Sigma_{ii}=1$ the diagonal fit of Section 3 is $M_D=-I$ for $C=2I$ |
 
-**Direct vs. implied.** Dettling's loss $\tfrac12\|M\hat\Sigma+\hat\Sigma M^\top+C\|_F^2$
-(`src/gclm/objective/direct.py`, study S1) is also a Frobenius norm — of the Lyapunov *residual* at the sample
-covariance. It is a convex quadratic in $M$. The two losses above are compositions with the
-rational map $M\mapsto\Sigma(M, C)$ and are nonconvex; they also need $M$ stable, since
-$\Sigma(M,C)$ is only defined (and positive definite) there. Varando calls Dettling's estimator the
-"direct lasso path" (his Section 3.2); we use `loss="direct"` for it throughout the drivers.
+$$\Sigma(cM,\,cC)=\Sigma(M,\,C)\qquad\text{(fitting with } C=2I \text{ equals fitting with } C=I \text{ in } M'=M/2 \text{, penalty evaluated at } 2M')$$
 
-**Penalty.** Off-diagonal entries only, as in both papers; $P_\lambda$ is the lasso, MCP or SCAD
-of `src/gclm/objective/penalties.py` under the textbook convention. There is no design matrix here, so the
-ncvreg convention of docs/NONCONVEX.md §2 has no meaning.
-
-**The scale of $C$.** Since $\Sigma(cM, cC)=\Sigma(M, C)$, fitting with $C=2I$ is the same
-problem as fitting with $C=I$ in the variable $M'=M/2$, with the penalty evaluated at $2M'$. For
-the lasso that is a rescaling of $\lambda$ — $\hat M(\lambda;\,2I)=2\hat M(2\lambda;\,I)$, tested
-— so the support path is the same and the choice is immaterial. For MCP and SCAD it is not:
-$\gamma$ is measured on the scale of $M$, and doubling $C$ doubles the coefficients. We keep
-Dettling's $C=2I$ for every loss, so that S1 and S2 compare penalties on identical data and an
-identical model; Varando used $C=I$ on correlation matrices. (For the direct loss the same
-scaling leaves even $\gamma$ untouched, because the quadratic loss scales with $c^2$.)
-
-**Standardisation.** As in S1, the input is the empirical correlation matrix (Varando: "Data was
-standardized"). With $\hat\Sigma_{ii}=1$ the diagonal fit of Section 3 is $M_D=-I$ for $C=2I$.
+$$\hat M(\lambda;\,2I)=2\,\hat M(2\lambda;\,I)\qquad\text{(lasso, tested)}$$
 
 ## 2. Gradient
 
-Prop. 3.1 of the paper, derived by differentiating the Lyapunov equation. Writing
-$G=\nabla_\Sigma L$ at $\Sigma=\Sigma(M,C)$ and $Z$ for the solution of the *adjoint* equation
-$M^\top Z+ZM=G$,
+Prop. 3.1 of the paper, derived by differentiating the Lyapunov equation, with $Z$ the solution of the adjoint equation.
 
-$$\nabla_M\,L(\Sigma(M,C))=-2\,Z\,\Sigma .$$
+$$G=\nabla_\Sigma L\ \text{ at }\ \Sigma=\Sigma(M,C)$$
 
-Two notes on the paper's statement. It prints the product as $2\Sigma\,\Sigma(B^\top,\nabla L)$,
-i.e. with the factors in the other order; the package's Fortran (`GRAD`: `DSYMM("R", ...)`,
-`DD = D * S`) computes $2\,X\Sigma$ with $X=-Z$, which is what the finite-difference check
-confirms (`test_m_gradient_matches_finite_differences`, relative error $2\cdot10^{-9}$). And the
-package's gradient in $C$ carries an extra factor 2 relative to the derivative (`DC(J) =
-2*TMP(J,J)`); it only affects step lengths in the $C$-update, which we do not use.
+$$M^\top Z+ZM=G\qquad\text{(adjoint equation)}$$
 
-One real Schur factorisation $M=QTQ^\top$ per iterate serves three purposes — the stability check
-(the diagonal of the standardised quasi-triangular $T$ holds the real parts of the eigenvalues),
-$\Sigma(M,C)$, and the adjoint solve — each Lyapunov solve being one LAPACK `dtrsyl` call. That is
-the same trick as in `gclm`'s `DGELYP`, and it is what makes an iteration $O(p^3)$
-(`SchurLyapunov`).
+$$\nabla_M\,L(\Sigma(M,C))=-2\,Z\,\Sigma$$
+
+| note | detail |
+|---|---|
+| order of the factors | the paper prints $2\Sigma\,\Sigma(B^\top,\nabla L)$, factors the other way round; the package's Fortran (`GRAD`: `DSYMM("R", ...)`, `DD = D * S`) computes $2\,X\Sigma$ with $X=-Z$, which the finite-difference check confirms (`test_m_gradient_matches_finite_differences`, relative error $2\cdot10^{-9}$) |
+| gradient in $C$ | the package carries an extra factor 2 relative to the derivative (`DC(J) = 2*TMP(J,J)`); it only affects step lengths in the $C$-update, which we do not use |
+| one real Schur factorisation $M=QTQ^\top$ per iterate (`SchurLyapunov`) | serves the stability check (the diagonal of the standardised quasi-triangular $T$ holds the real parts of the eigenvalues), $\Sigma(M,C)$ and the adjoint solve; each Lyapunov solve is one LAPACK `dtrsyl` call, the trick of `gclm`'s `DGELYP`; it makes an iteration $O(p^3)$ |
 
 ## 3. The two ends of the path
 
-- **Diagonal fit** (sparse end). For diagonal $M$ and $C$, $\Sigma_{ii}=-C_{ii}/(2M_{ii})$ and
-  both losses separate over $i$, minimised at $\Sigma_{ii}=\hat\Sigma_{ii}$:
-  $M_{D,ii}=-C_{ii}/(2\hat\Sigma_{ii})$. The diagonal part of the gradient vanishes there.
-- **$\lambda_{\max}$** $=\max_{i\neq j}\lvert\nabla_M L(M_D)_{ij}\rvert$: the smallest $\lambda$
-  at which $M_D$ is stationary. The paper gives no $\lambda_{\max}$ for these losses (it fixes
-  $\lambda_{\max}=6$ on standardised data; only for the direct lasso does it use "the smallest
-  $\lambda$ such that $B$ is diagonal"); this is that definition carried over. The derivation: the
-  diagonal part of the gradient vanishes at $M_D$, and the subdifferential of $\lambda|\cdot|$ at
-  zero is $[-\lambda,\lambda]$, so $M_D$ satisfies the first-order condition iff
-  $|\nabla_M L(M_D)_{ij}|\le\lambda$ off the diagonal. The same for all three penalties. For
-  correlation input it has a closed form: $\Sigma(M_D)=I$, both $\Sigma$-gradients reduce to
-  $I-\hat\Sigma$, the adjoint solution with $M_D=-I$ is $Z=-(I-\hat\Sigma)/2$, and
-  $\nabla_M=-2Z\Sigma=I-\hat\Sigma$, hence
+$$\text{diagonal } M, C:\qquad \Sigma_{ii}=-C_{ii}/(2M_{ii}),\qquad\text{both losses separate over } i \text{ and are minimised at } \Sigma_{ii}=\hat\Sigma_{ii}$$
 
-  $$\lambda_{\max}=\max_{i\neq j}\lvert\hat\Sigma_{ij}\rvert\qquad(\hat\Sigma\text{ a correlation matrix, }C=2I),$$
+$$M_{D,ii}=-C_{ii}/(2\hat\Sigma_{ii})\qquad\text{(diagonal fit, sparse end; the diagonal part of the gradient vanishes there)}$$
 
-  the largest absolute correlation — the same $\lambda_{\max}$ Varando uses for the graphical lasso
-  (`test_lambda_max_is_the_largest_correlation`). We use Dettling's grid
-  $\lambda_{\max}\cdot10^{\text{linspace}(-4,0,100)}$ below it. With a nonconvex objective this is
-  the smallest $\lambda$ for which the *diagonal* solution is stationary; non-diagonal stationary
-  points may exist above it (Section 5).
-- **Dense fit** (dense end). $M_0=-\tfrac12 C\hat\Sigma^{-1}$ gives
-  $M_0\hat\Sigma+\hat\Sigma M_0^\top=-C$ exactly, so $\Sigma(M_0)=\hat\Sigma$ and both losses are
-  at their global minimum ($\log\det\hat\Sigma+p$, resp. $0$). This is Varando's starting point
-  $B_0=-\tfrac12\hat R^{-1}$. It is not unique: $M_0+W\hat\Sigma^{-1}$ for any skew-symmetric $W$
-  gives the same $\Sigma$ — the fibre of the map $M\mapsto\Sigma(M)$ has dimension $p(p-1)/2$,
-  exactly as the null space of Dettling's design $A(\hat\Sigma)$ (S1_reproduction.md §2.3).
-- **The lasso's dense end** is another point of that fibre: as $\lambda\to 0$ the lasso picks the
-  exact fit with the smallest $\ell_1$ norm, which has $p(p-1)/2$ off-diagonal entries at zero
-  (`tests/test_covloss_dense_start.py`). The same point is the dense end of the *direct* loss's
-  lasso path, since both losses have the same exact fits.
+$$\lambda_{\max}=\max_{i\neq j}\lvert\nabla_M L(M_D)_{ij}\rvert\qquad\text{(the smallest } \lambda \text{ at which } M_D \text{ is stationary; the same for all three penalties)}$$
 
-### 3.1 Two more dense starts (wave 7 of the campaign, October 2026)
+$$\lambda_{\max}=\max_{i\neq j}\lvert\hat\Sigma_{ij}\rvert\qquad(\hat\Sigma\text{ a correlation matrix, }C=2I)$$
 
-- **Dense → sparse from the lasso** (`covloss_path(direction="up", start="lasso")`, runner
-  `--direction up --up-start lasso`): MCP / SCAD walked up the grid from the lasso's dense end
-  instead of from $M_0$. This is how the direct loss's dense → sparse paths start
-  (docs/DENSE_START.md). For the lasso itself the start makes no difference (both starts reach the
-  same point at $\lambda_{\min}$); for MCP it does, because MCP is nearly flat at $\lambda_{\min}$ and
-  keeps whichever exact fit it starts from: dense from $M_0$, half-sparse from the lasso.
-- **Adaptive lasso** (`adaptive_covloss_path`, runner `--loss loglik --method adaptive`): weights
-  $w_{ij}=\max_{kl}|\tilde M_{kl}|/|\tilde M_{ij}|$ from the lasso's dense end $\tilde M$ of the same
-  loss, entries with $\tilde M_{ij}=0$ excluded (a weight of $10^{12}$: an infinite weight would make
-  the objective NaN), its own grid below $\lambda_{\max}^w=\max_{ij}|\nabla L(M_D)_{ij}|/w_{ij}$,
-  sparse → dense from $M_D$; as `adaptive_lasso_path` on the direct loss.
+$$\text{grid: }\ \lambda_{\max}\cdot10^{\text{linspace}(-4,0,100)}\qquad\text{(Dettling's grid, below } \lambda_{\max})$$
 
-Neither path is reset to $M_D$ at $\lambda_{\max}$, unlike the direct loss's dense → sparse path:
-MCP leaves entries beyond $\gamma\lambda$ unshrunk, so the largest entries survive even there, as
-on the existing exact-fit start.
+$$M_0=-\tfrac12 C\hat\Sigma^{-1},\qquad M_0\hat\Sigma+\hat\Sigma M_0^\top=-C,\qquad \Sigma(M_0)=\hat\Sigma\qquad\text{(dense fit, dense end)}$$
+
+$$\min L=\log\det\hat\Sigma+p\ \text{ (log-likelihood)},\qquad \min L=0\ \text{ (Frobenius)}\qquad\text{(both attained at } M_0)$$
+
+$$\Sigma(M_0+W\hat\Sigma^{-1})=\hat\Sigma\ \text{ for every skew-symmetric } W,\qquad \dim\{\text{fibre of } M\mapsto\Sigma(M)\}=p(p-1)/2$$
+
+| end | fact |
+|---|---|
+| $\lambda_{\max}$, derivation | the diagonal part of the gradient vanishes at $M_D$, and the subdifferential of $\lambda\lvert\cdot\rvert$ at zero is $[-\lambda,\lambda]$, so $M_D$ satisfies the first-order condition iff $\lvert\nabla_M L(M_D)_{ij}\rvert\le\lambda$ off the diagonal |
+| $\lambda_{\max}$, closed form for correlation input | $\Sigma(M_D)=I$, both $\Sigma$-gradients reduce to $I-\hat\Sigma$, the adjoint solution with $M_D=-I$ is $Z=-(I-\hat\Sigma)/2$, and $\nabla_M=-2Z\Sigma=I-\hat\Sigma$: the largest absolute correlation, the same $\lambda_{\max}$ Varando uses for the graphical lasso (`test_lambda_max_is_the_largest_correlation`) |
+| $\lambda_{\max}$, the paper | gives none for these losses: it fixes $\lambda_{\max}=6$ on standardised data and uses "the smallest $\lambda$ such that $B$ is diagonal" only for the direct lasso; ours is that definition carried over |
+| $\lambda_{\max}$, caveat | with a nonconvex objective it is the smallest $\lambda$ for which the diagonal solution is stationary; non-diagonal stationary points may exist above it (Section 5) |
+| dense fit $M_0$ | Varando's starting point $B_0=-\tfrac12\hat R^{-1}$; not unique; the fibre has dimension $p(p-1)/2$, exactly as the null space of Dettling's design $A(\hat\Sigma)$ (S1_reproduction.md §2.3) |
+| the lasso's dense end | another point of that fibre: as $\lambda\to0$ the lasso picks the exact fit with the smallest $\ell_1$ norm, which has $p(p-1)/2$ off-diagonal entries at zero (`tests/test_covloss_dense_start.py`); the same point is the dense end of the direct loss's lasso path, since both losses have the same exact fits |
+
+### 3.1 Two more dense starts
+
+| start (wave 7 of the campaign, October 2026) | call | definition | effect |
+|---|---|---|---|
+| dense → sparse from the lasso | `covloss_path(direction="up", start="lasso")`; runner `--direction up --up-start lasso` | MCP / SCAD walk up the grid from the lasso's dense end instead of from $M_0$, as the direct loss's dense → sparse paths do (docs/DENSE_START.md) | lasso: no difference, both starts reach the same point at $\lambda_{\min}$; MCP: nearly flat at $\lambda_{\min}$, keeps whichever exact fit it starts from, dense from $M_0$, half-sparse from the lasso |
+| adaptive lasso | `adaptive_covloss_path`; runner `--loss loglik --method adaptive` | weights $w_{ij}=\max_{kl}\lvert\tilde M_{kl}\rvert/\lvert\tilde M_{ij}\rvert$ from the lasso's dense end $\tilde M$ of the same loss; entries with $\tilde M_{ij}=0$ excluded by a weight of $10^{12}$, since an infinite weight would make the objective NaN; its own grid below $\lambda_{\max}^w=\max_{ij}\lvert\nabla L(M_D)_{ij}\rvert/w_{ij}$; sparse → dense from $M_D$ | as `adaptive_lasso_path` on the direct loss |
+| neither path | | reset to $M_D$ at $\lambda_{\max}$: no, unlike the direct loss's dense → sparse path | MCP leaves entries beyond $\gamma\lambda$ unshrunk, so the largest entries survive even there, as on the existing exact-fit start |
 
 ## 4. Why a first-order method is not enough, and the solver
 
 ### 4.1 The flat valley
-
-Along the fibre directions $W\Sigma^{-1}$ the loss does not change at all at the unpenalised
-optimum, and changes only slightly nearby. The penalty is the only thing that selects a point along
-them, and for small $\lambda$ it is weak. A proximal-gradient method therefore crawls: the gradient
-mapping is tiny, every step is accepted, and the iterate moves a long way at a slow rate.
-
-Measured at $p=10$ (loglik, lasso, one dataset, path of 100 $\lambda$'s with warm starts,
-accelerated proximal gradient with backtracking; `tol` is the gradient-mapping threshold):
 
 | `tol` | path time | iterations | `max_f1` | `auc` | `aupr` |
 |---|---|---|---|---|---|
@@ -153,95 +116,82 @@ accelerated proximal gradient with backtracking; `tol` is the gradient-mapping t
 | $10^{-6}$ | 20.5 s | 92k | 0.400 | 0.699 | 0.314 |
 | $10^{-7}$ | 38 s | 189k | 0.400 | 0.700 | 0.314 |
 
-The support metrics keep changing until about $10^{-6}$, and under-converged solutions look
-*better* (they stay closer to the sparse warm start). Varando & Hansen's Algorithm 1 stops after
-$M=100$ iterations or a relative objective decrease below $10^{-4}$ — the first row of this table,
-roughly. The Frobenius loss is worse: 55 s to $10^{-6}$ for the same dataset, and its `auc` moves
-from 0.81 to 0.71 between the loose and the converged solution. At $p=50$ the cost per iteration
-is ~100× higher. A converged first-order path for the full S1 grid is out of reach, and a loosely
-converged one measures the optimiser as much as the estimator.
+| observation | detail |
+|---|---|
+| setting of the table | $p=10$, loglik, lasso, one dataset, path of 100 $\lambda$'s with warm starts, accelerated proximal gradient with backtracking; `tol` is the gradient-mapping threshold |
+| mechanism | along the fibre directions $W\Sigma^{-1}$ the loss does not change at all at the unpenalised optimum and changes only slightly nearby; the penalty is the only thing that selects a point along them, and for small $\lambda$ it is weak; the gradient mapping is tiny, every step is accepted, and the iterate moves a long way at a slow rate |
+| support metrics | keep changing until about $10^{-6}$; under-converged solutions look better, they stay closer to the sparse warm start |
+| Varando & Hansen, Algorithm 1 | stops after $M=100$ iterations or a relative objective decrease below $10^{-4}$: the first row of the table, roughly |
+| Frobenius loss, same dataset | worse: 55 s to $10^{-6}$, and its `auc` moves from 0.81 to 0.71 between the loose and the converged solution |
+| $p=50$ | cost per iteration ~100× higher |
+| conclusion | a converged first-order path for the full S1 grid is out of reach, and a loosely converged one measures the optimiser as much as the estimator |
 
 ### 4.2 The Hessian
 
-On an index set $A$ of entries of $M$ (the active set), with $J_a=\partial\Sigma/\partial M_a$
-the solution of $MJ+JM^\top=-(E_a\Sigma+\Sigma E_a^\top)$ and $Z$ the adjoint solution of the
-gradient,
+On the active set $A$ of entries of $M$, with $J_a=\partial\Sigma/\partial M_a$ and $Z$ the adjoint solution of the gradient.
 
-$$H_{ab}=\nabla^2_\Sigma L\,[J_a,J_b]\;-\;2\,(ZJ_b)_a\;-\;2\,(ZJ_a)_b .$$
+$$MJ_a+J_aM^\top=-(E_a\Sigma+\Sigma E_a^\top)$$
 
-The first term is the Gauss–Newton (for the log-likelihood: Fisher-scoring) part — $\langle J_a,
-J_b\rangle$ for the Frobenius loss, $-\operatorname{tr}(PJ_aPJ_b)+\operatorname{tr}(PJ_aPJ_bP\hat\Sigma)
-+\operatorname{tr}(PJ_bPJ_aP\hat\Sigma)$ for the log-likelihood; the second is the curvature of
-$M\mapsto\Sigma(M)$ itself. Everything is computed in the Schur basis, where the right-hand side
-of each $J_a$-equation is the rank-2 matrix $uv^\top+vu^\top$ with $u=Q_{i,\cdot}$,
-$v=(\Sigma Q)_{j,\cdot}$: $|A|$ `dtrsyl` calls, $O(|A|p^3)$, then matrix products,
-$O(|A|^2p^2)$. Checked against finite differences of the gradient to $2\cdot10^{-9}$
-(`test_hessian_matches_finite_differences`). The Hessian is indefinite away from a minimiser —
-the losses are nonconvex — and singular along the fibre at the dense end.
+$$H_{ab}=\nabla^2_\Sigma L\,[J_a,J_b]\;-\;2\,(ZJ_b)_a\;-\;2\,(ZJ_a)_b$$
 
-### 4.3 The solvers (`solve(method=...)`)
+$$\nabla^2_\Sigma L\,[J_a,J_b]=\langle J_a,J_b\rangle\qquad\text{(Frobenius)}$$
 
-All three are descent methods on $F=L+P$ — the objective never rises, every iterate is stable —
-and all three use the same backtracking acceptance test as Algorithm 1: a trial step $t$ is halved
-until $M^+$ is stable and $L(M^+)\le L(Y)+\langle\nabla L(Y),M^+-Y\rangle+\|M^+-Y\|^2/(2t)$. The
-trial step comes from Barzilai–Borwein (SpaRSA, Wright, Nowak & Figueiredo 2009) rather than
-being reset to $t=1$ every iteration, which is what makes the Frobenius loss, whose curvature is
-far from 1, workable. For MCP/SCAD the step is capped below $\gamma$ (resp. $\gamma-1$), where
-the proximal problem is strictly convex and the closed-form prox of docs/NONCONVEX.md §3 exact.
+$$\nabla^2_\Sigma L\,[J_a,J_b]=-\operatorname{tr}(PJ_aPJ_b)+\operatorname{tr}(PJ_aPJ_bP\hat\Sigma)+\operatorname{tr}(PJ_bPJ_aP\hat\Sigma)\qquad\text{(log-likelihood)}$$
 
-*How the test is decided (13 October 2026, code review A1).* Near a stationary point the bound's
-predicted change of $L$, $\langle\nabla L(Y),M^+-Y\rangle+\|M^+-Y\|^2/(2t)\approx -t\|G\|^2/2$, is far
-below the rounding level of a loss value ($10^{-13}\max(1,|L|)$), so the difference $L(M^+)-L(Y)$ is
-noise and a test on it passes at every $t$. Until that date the test allowed an absolute slack of
-that size, and so, once the predicted change had fallen below it, the step was no longer
-controlled: a warm start that already solved the problem was moved by one uncontrolled step at
-$t=1$ and reported converged (up to 3,000 times less stationary than before), and on badly scaled
-problems (a $C$ with a diagonal ratio of 100 or more, as the rescaled $C$ produces) the
-Barzilai–Borwein steps were too long in the stiff directions and 255 to 970 of the 40,000 solves of
-a log-likelihood cell ran to the cap of 50,000 steps. Now the loss values decide only while the
-predicted change is at least 100 rounding units; below that the same bound is tested on the
-gradients, $\langle\nabla L(M^+)-\nabla L(Y),M^+-Y\rangle\le\|M^+-Y\|^2/t$ (exact for a quadratic
-$L$; the secant condition), which rounding does not spoil. A start that is already stationary is
-returned unchanged, and convergence is judged on the first-order residual of the accepted iterate,
-not on the step.
+| term or property | detail |
+|---|---|
+| first term | the Gauss–Newton part; for the log-likelihood, Fisher scoring |
+| second and third terms | the curvature of $M\mapsto\Sigma(M)$ itself |
+| computation | everything in the Schur basis, where the right-hand side of each $J_a$-equation is the rank-2 matrix $uv^\top+vu^\top$ with $u=Q_{i,\cdot}$, $v=(\Sigma Q)_{j,\cdot}$; $\lvert A\rvert$ `dtrsyl` calls, $O(\lvert A\rvert p^3)$, then matrix products, $O(\lvert A\rvert^2p^2)$ |
+| check | against finite differences of the gradient to $2\cdot10^{-9}$ (`test_hessian_matches_finite_differences`) |
+| definiteness | indefinite away from a minimiser, the losses are nonconvex; singular along the fibre at the dense end |
 
-*Measured on the stored data set with the largest diagonal ratio of $C$ (250; $p = 10$, rescaled $C$,
-$n = 10^4$, `tol` $= 10^{-8}$).* The lasso path: every solve converges (the old one capped once),
-the residual is at tolerance everywhere (before: up to $9\times10^{-6}$), the supports are identical
-at all 100 $\lambda$, and the path takes a third fewer steps (604k against 939k). The MCP dense →
-sparse path from the exact fit: the supports differ at 8 of 100 $\lambda$ by one to three entries,
-the oracle $F_1$ moves from 0.493 to 0.507, and 33 of the 100 solves still end at the cap of 50,000
-steps (before: 21), with residuals $2\times10^{-8}$ to $7\times10^{-4}$. Two different things hide
-behind those caps. At the dense end the solve is merely slow: the residual falls from $7\times10^{-4}$
-after 500 steps to $2\times10^{-8}$ after 50,000, and a Newton polish from there moves $M$ by
-$2\times10^{-7}$ and changes nothing. At $\lambda \approx 10^{-3}\lambda_{\max}$ the iterate crawls
-along a flat valley of the nonconvex objective (residual oscillating between $10^{-3}$ and
-$5\times10^{-5}$, the plain method no better), and a Newton step from the capped iterate reaches a
-*different* stationary point, 0.8 to 1.1 away in max norm, with 20 to 22 support changes and a lower
-objective. That is the flat-valley behaviour of Section 5, a property of the problem, not of the
-step test; the step test cannot change it, and the Newton solver is not the estimator. Such solves
-are rare on the cluster (0.6 to 2.4 % of the solves of a log-likelihood cell with the rescaled $C$,
-on the data sets with a large diagonal ratio) and are flagged per $\lambda$ by `converged` in the
-shards. **The log-likelihood cells of the campaign stored before 13 October (waves 3, 7 and 8) were
-computed with the old test**; the measured changes are of the size above, well inside the standard
-errors of the cells (`next_steps/121026/code_review_121026.md`, A1). Whether to re-run them is open.
+### 4.3 The solvers: `solve(method=...)`
 
-**`"apg"` — accelerated proximal gradient with adaptive restart (the default).** Nesterov
-momentum on top of the proximal step; a momentum step is accepted only if it lowers $F$ below the
-current iterate (Beck & Teboulle's MFISTA rule), otherwise a plain step is taken and the momentum
-reset (O'Donoghue & Candès 2015). It stops when the first-order residual of the iterate
-(`penalties.stationarity`: $|\nabla L_{ij}|\le\lambda$ on the zeros, $\nabla L_{ij}+P'(M_{ij})=0$
-elsewhere, up to `tol`) is below `tol` $=10^{-6}$, the level at which the support metrics of
-Section 4.1 have stabilised (the campaign runs it at $10^{-8}$; before 13 October the rule was the
-gradient mapping $\max|M^+-Y|/t\le$ `tol`, which a too-long step can satisfy spuriously). It
-converges to the same stationary points as the plain method (Section 5) in a fraction of the
-iterations.
+All three are descent methods on $F=L+P$: the objective never rises and every iterate is stable; a trial step $t$ is halved until $M^+$ is stable and the acceptance test of Algorithm 1 holds.
 
-**`"prox"` — the plain method**, Algorithm 1 with BB trial steps. Kept as the reference the
-others are compared with; slow.
+$$L(M^+)\le L(Y)+\langle\nabla L(Y),\,M^+-Y\rangle+\|M^+-Y\|^2/(2t)\qquad\text{(acceptance test on loss values)}$$
 
-**`"newton"` — active-set Newton, experimental; not used by any simulation.** In the manner of
-FPC_AS (Wen, Yin, Goldfarb & Zhang 2010):
+$$\langle\nabla L(M^+)-\nabla L(Y),\,M^+-Y\rangle\le\|M^+-Y\|^2/t\qquad\text{(the same bound on gradients: the secant condition, exact for a quadratic } L)$$
+
+$$\langle\nabla L(Y),M^+-Y\rangle+\|M^+-Y\|^2/(2t)\approx-t\|G\|^2/2\ \text{ near a stationary point},\qquad\text{rounding level of a loss value: } 10^{-13}\max(1,|L|)$$
+
+| element, all methods | choice |
+|---|---|
+| trial step | Barzilai–Borwein (SpaRSA, Wright, Nowak & Figueiredo 2009) rather than a reset to $t=1$ every iteration; this is what makes the Frobenius loss, whose curvature is far from 1, workable |
+| step cap, MCP / SCAD | below $\gamma$, resp. $\gamma-1$, where the proximal problem is strictly convex and the closed-form prox of docs/NONCONVEX.md §3 exact |
+
+| step test | until 13 October 2026 | since 13 October 2026, code review A1 |
+|---|---|---|
+| rule | the loss-value test with an absolute slack of one rounding level; near a stationary point the predicted change is far below that level, so $L(M^+)-L(Y)$ is noise, the test passes at every $t$, and the step is no longer controlled | the loss values decide only while the predicted change is at least 100 rounding units; below that the same bound is tested on the gradients, which rounding does not spoil |
+| warm start that already solves the problem | moved by one uncontrolled step at $t=1$ and reported converged, up to 3,000 times less stationary than before | returned unchanged |
+| badly scaled $C$, diagonal ratio 100 or more, as the rescaled $C$ produces | Barzilai–Borwein steps too long in the stiff directions; 255 to 970 of the 40,000 solves of a log-likelihood cell ran to the cap of 50,000 steps | |
+| convergence judged on | the gradient mapping $\max\lvert M^+-Y\rvert/t\le$ `tol`, which a too-long step can satisfy spuriously | the first-order residual of the accepted iterate, not the step |
+
+| measured on the stored data set with the largest diagonal ratio of $C$: 250, $p=10$, rescaled $C$, $n=10^4$, `tol` $=10^{-8}$ | old test | new test |
+|---|---|---|
+| lasso path, solves at the cap | one | none, every solve converges |
+| lasso path, residual | up to $9\times10^{-6}$ | at tolerance everywhere |
+| lasso path, supports | identical at all 100 $\lambda$ | identical |
+| lasso path, steps | 939k | 604k, a third fewer |
+| MCP dense → sparse path from the exact fit, supports | | differ at 8 of 100 $\lambda$ by one to three entries |
+| MCP, oracle $F_1$ | 0.493 | 0.507 |
+| MCP, solves of the 100 ending at the cap of 50,000 steps | 21 | 33, residuals $2\times10^{-8}$ to $7\times10^{-4}$ |
+
+| the capped MCP solves | behaviour | a Newton step from the capped iterate |
+|---|---|---|
+| dense end | merely slow: the residual falls from $7\times10^{-4}$ after 500 steps to $2\times10^{-8}$ after 50,000 | moves $M$ by $2\times10^{-7}$ and changes nothing |
+| $\lambda\approx10^{-3}\lambda_{\max}$ | crawls along a flat valley of the nonconvex objective, residual oscillating between $10^{-3}$ and $5\times10^{-5}$, the plain method no better | reaches a different stationary point, 0.8 to 1.1 away in max norm, with 20 to 22 support changes and a lower objective: the flat-valley behaviour of Section 5, a property of the problem, not of the step test, which cannot change it; the Newton solver is not the estimator |
+| frequency on the cluster | 0.6 to 2.4 % of the solves of a log-likelihood cell with the rescaled $C$, on the data sets with a large diagonal ratio; flagged per $\lambda$ by `converged` in the shards | |
+| log-likelihood cells of the campaign stored before 13 October, waves 3, 7 and 8 | computed with the old test; the measured changes are of the size above, well inside the standard errors of the cells (`next_steps/121026/code_review_121026.md`, A1) | whether to re-run them is open |
+
+| `method` | algorithm | stopping rule | status |
+|---|---|---|---|
+| `"apg"`, the default | accelerated proximal gradient with adaptive restart: Nesterov momentum on top of the proximal step; a momentum step is accepted only if it lowers $F$ below the current iterate (Beck & Teboulle's MFISTA rule), otherwise a plain step is taken and the momentum reset (O'Donoghue & Candès 2015) | first-order residual `penalties.stationarity` below `tol` $=10^{-6}$, the level at which the support metrics of Section 4.1 have stabilised; the campaign runs it at $10^{-8}$ | the estimator's solver; converges to the same stationary points as the plain method (Section 5) in a fraction of the iterations |
+| `"prox"` | the plain method, Algorithm 1 with BB trial steps | same | the reference the others are compared with; slow |
+| `"newton"` | active-set Newton in the manner of FPC_AS (Wen, Yin, Goldfarb & Zhang 2010), pseudocode below | `penalties.stationarity` $\le10^{-8}$ in a few hundred steps per path, 3–150× faster than the first-order methods | experimental, not used by any simulation; written because the first-order methods crawl (Section 4.1); it revealed the problem of Section 5, convergence to different, worse-recovering stationary points; kept so that Section 5 can be reproduced; the thesis should describe the `"apg"` path as the method |
+
+$$\text{penalties.stationarity}\le\text{tol}:\qquad \lvert\nabla L_{ij}\rvert\le\lambda\ \text{ on the zeros},\qquad \nabla L_{ij}+P'(M_{ij})=0\ \text{ elsewhere}$$
 
 ```
 repeat until stationarity(M) <= tol:
@@ -255,21 +205,13 @@ repeat until stationarity(M) <= tol:
                 ... until g_A is below 0.1 tol, the support changes, or no step is accepted
 ```
 
-It reaches `penalties.stationarity` $\le10^{-8}$ ($|\nabla L_{ij}|\le\lambda$ on the zeros,
-$\nabla L_{ij}+P'(M_{ij})=0$ elsewhere) in a few hundred steps per path, 3–150× faster than the
-first-order methods. It was written because the first-order methods crawl (Section 4.1), and it
-is what revealed the problem of Section 5: it converges to different, worse-recovering stationary
-points. It stays in the code so that Section 5 can be reproduced; the estimator never uses it,
-and the thesis should describe the `"apg"` path as the method.
-
-Also tried and rejected, at $p=10$: L-BFGS-B on the split $M=M^+-M^-$ (fast, but stalls with
-stationarity $\sim10^{-2}$); OWL-QN (Andrew & Gao 2007; millions of function evaluations,
-repeated line-search failures); a nonmonotone BB variant (no faster than the monotone one).
+| tried at $p=10$ and rejected | reason |
+|---|---|
+| L-BFGS-B on the split $M=M^+-M^-$ | fast, but stalls with stationarity $\sim10^{-2}$ |
+| OWL-QN (Andrew & Gao 2007) | millions of function evaluations, repeated line-search failures |
+| a nonmonotone BB variant | no faster than the monotone one |
 
 ### 4.4 What the cost is spent on
-
-$p=10$, one dataset, `apg`, by blocks of ten $\lambda$'s from the dense end (index 0,
-$\lambda=10^{-4}\lambda_{\max}$) to the sparse end; `nnz` is the off-diagonal support size:
 
 | $\lambda/\lambda_{\max}$ | nnz (loglik, lasso) | iterations | nnz (Frobenius, lasso) | iterations |
 |---|---|---|---|---|
@@ -280,90 +222,72 @@ $\lambda=10^{-4}\lambda_{\max}$) to the sparse end; `nnz` is the off-diagonal su
 | $3\cdot10^{-2}$ – $6\cdot10^{-2}$ | 13–23 | 7k | 15–23 | 10k |
 | $0.4$ – $1$ | 0–5 | 0.3k | 0–12 | 0.8k |
 
-The path saturates at $p(p+1)/2-p=45$ off-diagonal nonzeros, exactly as the direct lasso does
-(S1_reproduction.md §2.3) and for the same reason — the fibre has dimension $p(p-1)/2$. The
-expensive part is the middle of the path, where the support is still being decided inside the
-flat valley; MCP spends 5–10× fewer iterations there than the lasso, because its saturating
-penalty stops pulling on the large entries. Dettling's grid is kept unchanged for comparability
-with S1.
+| fact | detail |
+|---|---|
+| setting of the table | $p=10$, one dataset, `apg`, blocks of ten $\lambda$'s from the dense end (index 0, $\lambda=10^{-4}\lambda_{\max}$) to the sparse end; `nnz` is the off-diagonal support size |
+| saturation | $p(p+1)/2-p=45$ off-diagonal nonzeros, exactly as the direct lasso (S1_reproduction.md §2.3) and for the same reason, the fibre has dimension $p(p-1)/2$ |
+| expensive part | the middle of the path, where the support is still being decided inside the flat valley; MCP spends 5–10× fewer iterations there than the lasso, because its saturating penalty stops pulling on the large entries |
+| grid | Dettling's, kept unchanged for comparability with S1 |
 
 ## 5. Nonconvexity: which stationary point?
 
-The losses have several stationary points per $\lambda$, and a descent method converges to the one
-whose basin it starts in. Measured on $p=10$ datasets, all with the same warm-started path from
-$\lambda_{\max}$ downwards:
+The losses have several stationary points per $\lambda$, and a descent method converges to the one whose basin it starts in.
 
-1. **Independent implementations differ.** From the *same* start, our plain proximal method
-   and `gclm`'s Algorithm 1 can converge to different stationary points, one with a lower
-   objective than the other (loglik, $\lambda=0.1\lambda_{\max}$: objectives differ by
-   $1.5\cdot10^{-4}$, $\|B-B'\|_\infty=1.5$).
-2. **Newton finds different, lower, worse points.** The table below compares the Newton path,
-   with its Newton phase allowed only once the proximal phase's gradient mapping is below
-   `newton_after`, against the plain proximal path converged to $10^{-7}$ (the reference).
-   `dF` is the objective difference Newton − reference over the 100 $\lambda$'s, `supp` the
-   number of (λ, entry) pairs whose zero/nonzero status differs.
+| finding, on $p=10$ datasets, all with the same warm-started path from $\lambda_{\max}$ downwards | evidence |
+|---|---|
+| 1. independent implementations differ | from the same start, our plain proximal method and `gclm`'s Algorithm 1 can converge to different stationary points, one with a lower objective than the other (loglik, $\lambda=0.1\lambda_{\max}$: objectives differ by $1.5\cdot10^{-4}$, $\lVert B-B'\rVert_\infty=1.5$) |
+| 2. Newton finds different, lower, worse points | table below: the Newton path, its Newton phase allowed only once the proximal phase's gradient mapping is below `newton_after`, against the plain proximal path converged to $10^{-7}$, the reference; `dF` is the objective difference Newton − reference over the 100 $\lambda$'s, `supp` the number of (λ, entry) pairs whose zero/nonzero status differs |
+| 2, lasso | the Newton path is close to the reference: a handful of $\lambda$'s at the dense end, where the fibre directions lie inside the active set and Newton slides along them to a point with a smaller $\ell_1$ norm |
+| 2, MCP | a different path at every $\lambda$, however late Newton is allowed in: with a concave penalty the proximal phase settles into shallow stationary points, Newton sees their near-zero or negative curvature and leaves them for lower ones, and the lower ones recover the support worse, `auc` 0.47 instead of 0.68, below chance; a lower objective is not a better estimate, since along the fibre every $M$ has the same loss and the sparsest point on it need not be near the truth |
+| 3. the first-order methods agree with each other | `apg` reproduces the plain method's metrics (MCP #0: 0.455 / 0.683 / 0.326; MCP #1: 0.489 / 0.618 / 0.443) with 5–50× fewer iterations; for the lasso on #0 it lands on 0.400 / 0.699 / 0.314, the same values as the independent accelerated implementation of the tolerance study, with the plain BB method at 0.444 on `max_f1`: a residual solver dependence at a few $\lambda$'s, small compared with the Newton effect but not zero |
 
-   | loss, penalty, dataset | `newton_after` | time | `max_f1` / `auc` / `aupr` | `dF` min … max | `supp` (λ's) |
-   |---|---|---|---|---|---|
-   | loglik, lasso, #0 | reference | 377 s | 0.444 / 0.699 / 0.309 | — | — |
-   | | $\infty$ | 25 s | 0.444 / 0.701 / 0.276 | $-1.1\cdot10^{-2}$ … $0$ | 12 (9) |
-   | | $10^{-4}$ | 34 s | 0.444 / 0.701 / 0.276 | $-1.1\cdot10^{-2}$ … $0$ | 12 (9) |
-   | | $10^{-5}$ | 50 s | 0.444 / 0.700 / 0.276 | $-1.1\cdot10^{-2}$ … $0$ | 8 (8) |
-   | loglik, MCP, #0 | reference | 392 s | 0.455 / 0.681 / 0.325 | — | — |
-   | | $\infty$ | 0.6 s | 0.286 / 0.471 / 0.253 | $-5.0\cdot10^{-2}$ … $+3.8\cdot10^{-3}$ | 2087 (99) |
-   | | $10^{-4}$ | 8.7 s | 0.286 / 0.467 / 0.253 | $-5.0\cdot10^{-2}$ … $+3.8\cdot10^{-3}$ | 2212 (99) |
-   | | $10^{-5}$ | 55 s | 0.286 / 0.459 / 0.251 | $-5.0\cdot10^{-2}$ … $+3.8\cdot10^{-3}$ | 2226 (99) |
-   | loglik, MCP, #1 | reference | 2.2 s | 0.489 / 0.618 / 0.443 | — | — |
-   | | $\infty$ | 0.5 s | 0.421 / 0.524 / 0.304 | $-7.9\cdot10^{-2}$ … $+1.3\cdot10^{-2}$ | 3920 (99) |
-   | | $10^{-5}$ | 1.8 s | 0.421 / 0.524 / 0.304 | $-7.9\cdot10^{-2}$ … $+1.3\cdot10^{-2}$ | 3920 (99) |
+| loss, penalty, dataset | `newton_after` | time | `max_f1` / `auc` / `aupr` | `dF` min … max | `supp` (λ's) |
+|---|---|---|---|---|---|
+| loglik, lasso, #0 | reference | 377 s | 0.444 / 0.699 / 0.309 | | |
+| | $\infty$ | 25 s | 0.444 / 0.701 / 0.276 | $-1.1\cdot10^{-2}$ … $0$ | 12 (9) |
+| | $10^{-4}$ | 34 s | 0.444 / 0.701 / 0.276 | $-1.1\cdot10^{-2}$ … $0$ | 12 (9) |
+| | $10^{-5}$ | 50 s | 0.444 / 0.700 / 0.276 | $-1.1\cdot10^{-2}$ … $0$ | 8 (8) |
+| loglik, MCP, #0 | reference | 392 s | 0.455 / 0.681 / 0.325 | | |
+| | $\infty$ | 0.6 s | 0.286 / 0.471 / 0.253 | $-5.0\cdot10^{-2}$ … $+3.8\cdot10^{-3}$ | 2087 (99) |
+| | $10^{-4}$ | 8.7 s | 0.286 / 0.467 / 0.253 | $-5.0\cdot10^{-2}$ … $+3.8\cdot10^{-3}$ | 2212 (99) |
+| | $10^{-5}$ | 55 s | 0.286 / 0.459 / 0.251 | $-5.0\cdot10^{-2}$ … $+3.8\cdot10^{-3}$ | 2226 (99) |
+| loglik, MCP, #1 | reference | 2.2 s | 0.489 / 0.618 / 0.443 | | |
+| | $\infty$ | 0.5 s | 0.421 / 0.524 / 0.304 | $-7.9\cdot10^{-2}$ … $+1.3\cdot10^{-2}$ | 3920 (99) |
+| | $10^{-5}$ | 1.8 s | 0.421 / 0.524 / 0.304 | $-7.9\cdot10^{-2}$ … $+1.3\cdot10^{-2}$ | 3920 (99) |
 
-   For the lasso the Newton path is close to the reference: a handful of $\lambda$'s at the dense
-   end, where the fibre directions lie inside the active set and Newton slides along them to a
-   point with a smaller $\ell_1$ norm. For MCP it is a different path at every $\lambda$, however
-   late Newton is allowed in: with a concave penalty the proximal phase settles into shallow
-   stationary points, Newton (seeing their near-zero or negative curvature) leaves them for
-   lower ones, and the lower ones recover the support worse — `auc` 0.47 instead of 0.68, below
-   chance. A lower objective is not a better estimate: along the fibre every $M$ has the same
-   loss, and the sparsest point on it need not be near the truth.
-3. **The first-order methods agree with each other.** `apg` reproduces the plain method's
-   metrics (MCP #0: 0.455 / 0.683 / 0.326; MCP #1: 0.489 / 0.618 / 0.443) with 5–50× fewer
-   iterations; for the lasso on #0 it lands on 0.400 / 0.699 / 0.314, the same values as the
-   independent accelerated implementation of the tolerance study, with the plain BB method at
-   0.444 on `max_f1` — a residual solver dependence at a few $\lambda$'s that is small compared
-   with the Newton effect but not zero.
+So the estimator is only defined together with the path-following rule.
 
-So the estimator is only defined together with the path-following rule, and the rule used
-throughout is: **continuation from $\lambda_{\max}$ downwards** (`direction="down"`) from the
-diagonal fit, each $\lambda$ warm-started from the previous solution, each solved by the
-accelerated proximal method to gradient-mapping tolerance $10^{-6}$ — the same algorithm for all
-three penalties, so that the comparison between them is a comparison of estimators, not of
-optimisers. Varando & Hansen walk the other way (`direction="up"`, from the dense fit) and report
-it empirically better for their loosely converged algorithm; it is available but not used.
+| the rule used throughout | |
+|---|---|
+| order | continuation from $\lambda_{\max}$ downwards (`direction="down"`) from the diagonal fit |
+| warm start | each $\lambda$ from the previous solution |
+| solver | the accelerated proximal method to tolerance $10^{-6}$, stopping rule of Section 4.3; the same algorithm for all three penalties, so that the comparison between them is a comparison of estimators, not of optimisers |
+| the other order | Varando & Hansen walk up (`direction="up"`, from the dense fit) and report it empirically better for their loosely converged algorithm; available but not used |
 
 ## 6. Validation against the `gclm` package
 
-`R/backend_gclm.R` calls `gclm::gclm()` with `lambdac = -1` (its Fortran then never updates $C$),
-every $\lambda$ from the same start, `eps = 0` (run until no decrease is representable). Tests:
+| `R/backend_gclm.R` | |
+|---|---|
+| call | `gclm::gclm()` with `lambdac = -1`, so its Fortran never updates $C$; every $\lambda$ from the same start; `eps = 0`, run until no decrease is representable |
 
 | test | what it establishes |
 |---|---|
-| `test_gclm_objective_scale_matches` | `gclm`'s reported loss plus $\lambda\|B_{\text{off}}\|_1$ equals our objective at its $B$, to $10^{-9}$ — same losses, same scale |
+| `test_gclm_objective_scale_matches` | `gclm`'s reported loss plus $\lambda\lVert B_{\text{off}}\rVert_1$ equals our objective at its $B$, to $10^{-9}$: same losses, same scale |
 | `test_gclm_converged_points_are_fixed_points_of_our_solver` | where `gclm` reaches a stationary point (by our KKT measure), our Newton solver started there does not move |
 | `test_same_basin_agreement_with_gclm` | at $\lambda=0.02\lambda_{\max}$ from the diagonal fit, both reach the same point: objective to $10^{-6}$, $B$ to $10^{-2}$ (the valley is flat, so $B$ is less precise than $F$) |
 
-What does **not** agree, and why: `gclm` stops whenever an iteration produces no decrease
-(`(F+G+H-FNW-GNW-HNW) <= EPS` with `EPS = 0`), which happens as soon as a line search returns the
-current point — at $\lambda=\tfrac12\lambda_{\max}$ it stops after 33 iterations with the objective
-0.19 above the stationary point. That is a property of its stopping rule, not of the objective; the
-tests therefore check fixed points and same-basin agreement rather than equality of outputs.
+| what does not agree | why |
+|---|---|
+| at $\lambda=\tfrac12\lambda_{\max}$ `gclm` stops after 33 iterations with the objective 0.19 above the stationary point | `gclm` stops whenever an iteration produces no decrease (`(F+G+H-FNW-GNW-HNW) <= EPS` with `EPS = 0`), which happens as soon as a line search returns the current point; a property of its stopping rule, not of the objective; the tests therefore check fixed points and same-basin agreement rather than equality of outputs |
 
 ## 7. Cost
 
-Per 100-$\lambda$ path, warm-started, `apg` at `tol = 1e-6`, Apple M2, one core, $p=10$:
-loglik 10–50 s (lasso), 1–10 s (MCP/SCAD); Frobenius 2–3× that. Each iteration is $O(p^3)$ and
-the iteration count grows with $p$ as well, so $p=20$ costs roughly 10× and $p=50$ far more —
-the full S1 grid is not within reach for these losses. The measured table and the cluster budget
-are in simulations/S2_penalties_losses.md §4.
+| per 100-$\lambda$ path, warm-started, `apg` at `tol = 1e-6`, Apple M2, one core, $p=10$ | |
+|---|---|
+| loglik | 10–50 s (lasso), 1–10 s (MCP/SCAD) |
+| Frobenius | 2–3× that |
+| scaling | each iteration is $O(p^3)$ and the iteration count grows with $p$ as well, so $p=20$ costs roughly 10× and $p=50$ far more; the full S1 grid is not within reach for these losses |
+| measured table and cluster budget | simulations/S2_penalties_losses.md §4 |
 
 ## 8. Running it
 
@@ -375,10 +299,11 @@ python simulations/run_s1_shard.py --loss loglik --penalty SCAD --shard 0 --n-sh
 sbatch cluster/s1_array.sbatch runs/s2_loglik_scad --loss loglik --penalty SCAD
 ```
 
-`--solver` is refused for these losses (it would have no effect); `--direction up|down` selects
-the path order. The shard output carries, per $\lambda$, the first-order violation (`kkt`), the
-number of proximal and Newton steps, whether the solver met its tolerance (`converged`, stored
-since 13 October 2026) and the objective, so convergence can be audited after the fact.
+| option or field | meaning |
+|---|---|
+| `--solver` | refused for these losses, it would have no effect |
+| `--direction` | `up` or `down`, the path order |
+| shard output, per $\lambda$ | `kkt`, the first-order violation; the number of proximal and Newton steps; `converged`, whether the solver met its tolerance, stored since 13 October 2026; the objective; so convergence can be audited after the fact |
 
 ```python
 from gclm.objective.covariance import lambda_max
@@ -390,17 +315,11 @@ m_hat, info = solve(sigma_hat, 2 * np.eye(p), lam, "frobenius", return_info=True
 
 ## References
 
-- Varando, G. & Hansen, N. R. (2020). *Graphical continuous Lyapunov models.* UAI 2020, PMLR 124.
-  — eq. (7), Prop. 3.1, Algorithm 1. R package `gclm` 0.0.1 (CRAN).
-- Dettling, P., Drton, M. & Kolar, M. (2024). *On the Lasso for graphical continuous Lyapunov
-  models.* CLeaR 2024, PMLR 236. — the direct loss and the simulation design.
-- Wen, Z., Yin, W., Goldfarb, D. & Zhang, Y. (2010). *A fast algorithm for sparse reconstruction
-  based on shrinkage, subspace optimization, and continuation.* SIAM J. Sci. Comput. 32(4),
-  1832–1857. — FPC_AS: the identify/converge structure.
-- Wright, S. J., Nowak, R. D. & Figueiredo, M. A. T. (2009). *Sparse reconstruction by separable
-  approximation.* IEEE Trans. Signal Process. 57(7), 2479–2493. — SpaRSA: Barzilai–Borwein steps
-  with a backtracking acceptance test for $f+\lambda\|\cdot\|_1$.
-- Andrew, G. & Gao, J. (2007). *Scalable training of $L_1$-regularized log-linear models.* ICML.
-  — the orthant projection used in the Newton line search.
-- Bartels, R. H. & Stewart, G. W. (1972). *Solution of the matrix equation AX + XB = C.* Comm.
-  ACM 15(9), 820–826. — the Schur-based Lyapunov solver (LAPACK `dtrsyl`).
+| reference | used for |
+|---|---|
+| Varando, G. & Hansen, N. R. (2020). *Graphical continuous Lyapunov models.* UAI 2020, PMLR 124. R package `gclm` 0.0.1 (CRAN) | eq. (7), Prop. 3.1, Algorithm 1 |
+| Dettling, P., Drton, M. & Kolar, M. (2024). *On the Lasso for graphical continuous Lyapunov models.* CLeaR 2024, PMLR 236 | the direct loss and the simulation design |
+| Wen, Z., Yin, W., Goldfarb, D. & Zhang, Y. (2010). *A fast algorithm for sparse reconstruction based on shrinkage, subspace optimization, and continuation.* SIAM J. Sci. Comput. 32(4), 1832–1857 | FPC_AS: the identify/converge structure |
+| Wright, S. J., Nowak, R. D. & Figueiredo, M. A. T. (2009). *Sparse reconstruction by separable approximation.* IEEE Trans. Signal Process. 57(7), 2479–2493 | SpaRSA: Barzilai–Borwein steps with a backtracking acceptance test for $f+\lambda\lVert\cdot\rVert_1$ |
+| Andrew, G. & Gao, J. (2007). *Scalable training of $L_1$-regularized log-linear models.* ICML | the orthant projection used in the Newton line search |
+| Bartels, R. H. & Stewart, G. W. (1972). *Solution of the matrix equation AX + XB = C.* Comm. ACM 15(9), 820–826 | the Schur-based Lyapunov solver (LAPACK `dtrsyl`) |

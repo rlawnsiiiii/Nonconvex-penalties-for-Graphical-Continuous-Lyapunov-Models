@@ -34,13 +34,18 @@
 --wave 9 --group threshold                                   # E2: 12 cells, 48 tasks, about 75 CPU-h
 --wave 9 --group starts --n 1e4                              # E1: 20 cells, 200 tasks, about 260 CPU-h
 --wave 9 --group starts --n inf                              # E1: 20 cells, 200 tasks, about 270 CPU-h
---wave 9 --group class --n 1e4                               # E4: 16 cells, 128 tasks, about 230 CPU-h
---wave 9 --group betamin --n 1e4                             # E3: 32 cells, 256 tasks, about 180 CPU-h
+--wave 9 --group class --n 1e4                               # E4: 6 cells (dag), 48 tasks, about 105 CPU-h (19 Oct: lasso / MCP-up / adaptive, every reduction, all four true C)
+--wave 9 --group class --n inf                               # E4 at the population covariance: 6 cells, 48 tasks, about 115 CPU-h (19 Oct)
+--wave 9 --group betamin --n 1e4                             # E3: 24 cells, 192 tasks, about 110 CPU-h (19 Oct: lasso / MCP-up / adaptive, true C = 2I only, every reduction; LRZ timings of wave 1)
+--wave 9 --group betamin --n inf                             # E3 at the population covariance: 24 cells, 192 tasks, about 120 CPU-h (19 Oct)
+--wave 9 --group twocycle --n 1e4                            # E5 (19 Oct): the 2-cycle share, 30 cells, 240 tasks, about 130 CPU-h (true C = 2I, every reduction)
+--wave 9 --group twocycle --n inf                            # E5 at the population covariance: 30 cells, 240 tasks, about 150 CPU-h
 --wave 9 --fill --time 24:00:00
 # the n = 1000 groups: expensive (the MCP paths at n = 1000 are slow); see the header before starting them
 --wave 9 --group starts --n 1000 --shards 32 --time 24:00:00   # E1: 20 cells, 640 tasks, about 2,600 CPU-h (MCP-up from the truth: 12 h tasks)
---wave 9 --group class --n 1000 --shards 32 --time 24:00:00    # E4: 16 cells, 512 tasks, about 1,900 CPU-h (MCP sparse -> dense on DAGs: 8 h tasks)
---wave 9 --group betamin --n 1000 --shards 16 --time 24:00:00  # E3: 32 cells, 512 tasks, about 1,400 CPU-h
+--wave 9 --group class --n 1000 --shards 16 --time 24:00:00    # E4: 6 cells, 96 tasks, about 105 CPU-h (19 Oct; the 1,900 of the old line was MCP sparse -> dense on DAGs)
+--wave 9 --group betamin --n 1000 --shards 16 --time 24:00:00  # E3: 24 cells, 384 tasks, about 110 CPU-h with the 19 Oct arguments
+--wave 9 --group twocycle --n 1000 --shards 16 --time 24:00:00 # E5: 30 cells, 480 tasks, about 130 CPU-h
 --wave 9 --fill --time 24:00:00
 # optional, after E1 is read (plan §2.6): the same starts on the log-likelihood loss at p = 10 (about 300 CPU-h)
 # --wave 9 --group starts-loglik --n 1e4

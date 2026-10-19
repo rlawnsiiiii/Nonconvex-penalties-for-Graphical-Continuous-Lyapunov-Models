@@ -25,10 +25,10 @@ class CChoice(str, Enum):
 #: the law of the nonzero weights (plan of 13 October 2026, §1.4): Dettling's N(0, 1), or
 #: |w| ~ U[w_min, 1] with a random sign (the beta-min knob of experiment E3)
 WEIGHTS = ("normal", "uniform")
-#: the graph class (plan §1.4): every ordered pair independently (Dettling), the same without
-#: 2-cycles (one direction of each dropped at random), or a random DAG at the same expected
-#: number of edges (experiment E4)
-GRAPHS = ("random", "no2c", "dag")
+#: the graph class (plan §1.4): every ordered pair independently (Dettling), a random DAG at the
+#: same expected number of edges (experiment E4), or, since 19 October 2026 (E5), ``pairs``: a share
+#: ``two_cycle_share`` of the connected pairs are 2-cycles, again at the same expected number of edges
+GRAPHS = ("random", "dag", "pairs")
 
 
 def sample_drift(
@@ -40,6 +40,7 @@ def sample_drift(
     weights: str = "normal",
     w_min: float = 0.0,
     graph: str = "random",
+    two_cycle_share: float = 0.0,
 ) -> np.ndarray:
     """Draw a stable drift matrix.
 
@@ -64,12 +65,20 @@ def sample_drift(
         ``weights="uniform"``: ``|M_ij| ~ U[w_min, 1]`` with an independent random sign
         (no sign under ``metzler``), a lower bound on every true weight (E3).  The supports
         (the Bernoulli draws) and the diagonal rule are unchanged, with the ``|eps_ii|`` of the
-        normal draw.  ``graph="no2c"``: the Bernoulli(d) draw, then one direction of every
-        2-cycle is dropped at random.  ``graph="dag"``: a random permutation ``pi`` orders the
+        normal draw.  ``graph="dag"``: a random permutation ``pi`` orders the
         nodes and the edge ``j -> i`` (entry ``(i, j)``) is kept with probability
         ``d' = min(2 d, 1)`` if ``pi(j) < pi(i)`` and never otherwise, so the expected number of
         edges is the random class's ``p (p - 1) d`` for ``d <= 1/2`` (``k <= p / 2``) and
-        ``p (p - 1) / 2`` above.  Every DAG is also free of 2-cycles.
+        ``p (p - 1) / 2`` above.  Every DAG is also free of 2-cycles.  ``graph="pairs"`` (E5, 19
+        October 2026): the graph is drawn pair by pair -- an unordered pair is connected with
+        probability ``q = 2 d / (1 + s)``, a connected pair is a 2-cycle with probability
+        ``s = two_cycle_share`` and otherwise a single edge whose direction is a fair coin -- so that
+        ``s`` is the share of connected pairs that are 2-cycles and the expected number of directed
+        edges is the random class's ``p (p - 1) d`` whatever ``s``; ``s = d / (2 - d)`` gives the random
+        class's pair law exactly, ``s = 0`` no 2-cycles, ``s = 1`` every connected pair a 2-cycle.
+        The count is kept for ``d <= (1 + s) / 2`` (``k <= p (1 + s) / 2``, every campaign cell); above
+        that ``q`` is capped at 1 like the DAG class's probability, every pair is connected and the
+        expected count is ``p (p - 1) (1 + s) / 2``.  ``two_cycle_share`` is refused with any other class.
     """
     if not 0.0 <= d <= 1.0:
         raise ValueError(f"the edge probability d = k / p must lie in [0, 1], got {d} (k > p?)")
@@ -79,17 +88,27 @@ def sample_drift(
         raise ValueError(f"graph must be one of {GRAPHS}, got {graph!r}")
     if not 0.0 <= w_min < 1.0:
         raise ValueError(f"w_min must lie in [0, 1), got {w_min}")
+    if not 0.0 <= two_cycle_share <= 1.0:
+        raise ValueError(f"two_cycle_share must lie in [0, 1], got {two_cycle_share}")
+    if two_cycle_share != 0.0 and graph != "pairs":
+        raise ValueError("two_cycle_share applies to graph='pairs' only")
     eps = rng.normal(size=(p, p))
     omega = rng.binomial(1, d, size=(p, p))
-    if graph == "no2c":
-        i, j = np.nonzero(np.triu((omega == 1) & (omega.T == 1), 1))
-        drop_upper = rng.random(size=len(i)) < 0.5
-        omega[i[drop_upper], j[drop_upper]] = 0
-        omega[j[~drop_upper], i[~drop_upper]] = 0
-    elif graph == "dag":
+    if graph == "dag":
         position = rng.permutation(p)                               # position[node] = pi(node)
         allowed = position[None, :] < position[:, None]             # entry (i, j): pi(j) < pi(i)
         omega = rng.binomial(1, min(2.0 * d, 1.0), size=(p, p)) * allowed
+    elif graph == "pairs":
+        q = min(2.0 * d / (1.0 + two_cycle_share), 1.0)             # P(pair connected): E[edges] = p (p - 1) d
+        upper = np.triu(np.ones((p, p), dtype=bool), 1)             # each unordered pair once, in its upper entry
+        connected = (rng.random(size=(p, p)) < q) & upper
+        two = connected & (rng.random(size=(p, p)) < two_cycle_share)      # a 2-cycle with probability s ...
+        single_up = (connected & ~two) & (rng.random(size=(p, p)) < 0.5)   # ... else one direction, a fair coin
+        single_down = (connected & ~two) & ~single_up
+        omega = np.zeros((p, p), dtype=int)
+        omega[two | two.T] = 1
+        omega[single_up] = 1                                        # entry (i, j), i < j: the edge j -> i
+        omega[single_down.T] = 1                                    # entry (j, i): the edge i -> j
     if weights == "uniform":
         magnitude = rng.uniform(w_min, 1.0, size=(p, p))
         sign = np.where(rng.random(size=(p, p)) < 0.5, -1.0, 1.0)
@@ -150,6 +169,7 @@ def draw_instance(
     weights: str = "normal",
     w_min: float = 0.0,
     graph: str = "random",
+    two_cycle_share: float = 0.0,
 ):
     """One replicate: ``(M_true, C_true, Sigma_true, Sigma_hat)``.
 
@@ -168,7 +188,8 @@ def draw_instance(
     ``weights``, ``w_min`` and ``graph`` are the generator's knobs of 13 October 2026
     (:func:`sample_drift`); the defaults are the thesis generator.
     """
-    m_true = sample_drift(p, k / p, rng, metzler=metzler, weights=weights, w_min=w_min, graph=graph)
+    m_true = sample_drift(p, k / p, rng, metzler=metzler, weights=weights, w_min=w_min, graph=graph,
+                          two_cycle_share=two_cycle_share)
     c_true = sample_volatility(p, c_choice, rng)
     sigma_true = solve_lyapunov(m_true, c_true)
     if n is None or n == np.inf:

@@ -1,168 +1,137 @@
 # Greedy search over GCLM supports (`gclm.solvers.search`)
 
-The score-based search of study S3b (`simulations/S3b_reversal_search.md`). It follows the greedy
-search of Améndola, Dettling, Drton, Onori & Wu (2020), *Structure learning for cyclic linear causal
-models*, §5, adapted to graphical continuous Lyapunov models. Tests: `tests/test_search.py`.
+Score-based greedy search over the supports of $M$: the greedy search of Améndola, Dettling, Drton, Onori & Wu 2020, §5, adapted to graphical continuous Lyapunov models; used in study S3b and in the campaign of October 2026.
+
+| | |
+|---|---|
+| study | S3b, `simulations/S3b_reversal_search.md` |
+| tests | `tests/test_search.py` |
+| reference | Améndola, Dettling, Drton, Onori & Wu (2020), *Structure learning for cyclic linear causal models*, §5; §6 below |
 
 ## 1. The search space
 
-A state is a **support** $S$: the set of off-diagonal entries of $M$ allowed to be nonzero. The
-diagonal is always free. The edge $i \to j$ is the entry $M_{ji}$.
-- **2-cycles are allowed by default.** A GCLM can have them, and Dettling, Drton & Kolar's model
-  and simulation do: the edge $i \to j$ is in the graph iff $M_{ji} \ne 0$, every off-diagonal
-  entry is drawn independently as $\omega_{ij}\varepsilon_{ij}$ with $\omega_{ij} \sim
-  \mathrm{Bernoulli}(d)$, $d = k/p$ (their Section 5, reproduced by `gclm.data.simulate`), so a
-  pair carries a 2-cycle with probability $d^2$ and a fraction $d$ of the true edges sits in one:
-  10 to 40 % at $p = 10$, 5 to 20 % at $p = 20$.
-- **The paper's restriction to simple graphs** (at most one edge per pair) is the
-  `allow_two_cycles=False` switch.
-- **Unlike the paper there are no bidirected edges.** The volatility $C = 2I$ is known.
+| term | definition |
+|---|---|
+| state | a support $S$: the set of off-diagonal entries of $M$ allowed to be nonzero; the diagonal is always free |
+| edge $i \to j$ | the entry $M_{ji}$; the edge is in the graph iff $M_{ji} \ne 0$ |
+| 2-cycles | allowed by default: a GCLM can have them, and Dettling, Drton & Kolar's model and simulation do, their Section 5, reproduced by `gclm.data.simulate` |
+| `allow_two_cycles=False` | the paper's restriction to simple graphs, at most one edge per pair |
+| bidirected edges | none, unlike the paper: the volatility $C = 2I$ is known |
+
+$$\text{every off-diagonal entry } M_{ij} = \omega_{ij}\varepsilon_{ij} \text{ independently},\qquad \omega_{ij} \sim \mathrm{Bernoulli}(d),\qquad d = k/p$$
+$$P(\text{a pair carries a 2-cycle}) = d^2,\qquad \text{fraction of the true edges in a 2-cycle} = d$$
+
+| $p$ | fraction of the true edges in a 2-cycle |
+|---|---|
+| 10 | 10 to 40 % |
+| 20 | 5 to 20 % |
 
 ## 2. Scoring a support
 
-**Terms.** Supports are compared by their **score**, the sum of a **loss** and a **penalty**:
+Supports are compared by their score, a loss plus a penalty; the lowest score wins. BIC and eBIC name only the penalty.
 
-$$\mathrm{score}(S) = L(S) + \mathrm{pen}(S), \qquad
-L(S) = n\big[\log\det\Sigma_S + \operatorname{tr}(\Sigma_S^{-1}\hat\Sigma)\big],$$
+$$\mathrm{score}(S) = L(S) + \mathrm{pen}(S)$$
+$$L(S) = n\big[\log\det\Sigma_S + \operatorname{tr}(\Sigma_S^{-1}\hat\Sigma)\big],\qquad \Sigma_S = \Sigma(\hat M_S):\quad \hat M_S\Sigma_S + \Sigma_S\hat M_S^\top + C = 0$$
 
-with $\Sigma_S = \Sigma(\hat M_S)$ the stationary covariance of the refit $\hat M_S$ of step 1 below.
-The loss term $L$ is $n$ times the log-likelihood loss of `docs/LIKELIHOOD.md` at $\hat M_S$, i.e.
-$-2$ times the Gaussian log-likelihood up to a constant (Dettling, Drton & Kolar, eq. 6.1). **BIC
-and eBIC name only the penalty**; the lowest score wins.
+| term | meaning |
+|---|---|
+| $L(S)$ | $n$ times the log-likelihood loss of `docs/LIKELIHOOD.md` at the refit $\hat M_S$, i.e. $-2$ times the Gaussian log-likelihood up to a constant, Dettling, Drton & Kolar eq. (6.1) |
+| $\hat M_S$ | the refit of $M$ without penalty on $S \cup \mathrm{diag}$, step 1 below |
+| eBIC term | the part by which an eBIC penalty exceeds the BIC penalty; Dettling's "EBIC$_\gamma$", the whole sum of his eq. (6.2), is here the score with the eBIC penalty |
 
 | penalty | $\mathrm{pen}(S)$ | where |
 |---|---|---|
-| BIC | $(p + \lvert S\rvert)\log n$ | the default ($\gamma = 0$) |
-| eBIC, Dettling's form | $(p + \lvert S\rvert)\log n + 4\gamma\lvert S\rvert\log p$ (his eq. 6.2) | the campaign from wave 5c on (`--ebic-gamma`) |
+| BIC | $(p + \lvert S\rvert)\log n$ | the default, $\gamma = 0$ |
+| eBIC, Dettling's form | $(p + \lvert S\rvert)\log n + 4\gamma\lvert S\rvert\log p$, his eq. (6.2) | the campaign from wave 5c on, `--ebic-gamma` |
 | eBIC, Chen & Chen's form | $(p + \lvert S\rvert)\log n + 2\gamma\log\binom{p(p-1)}{\lvert S\rvert}$ | S3b, $\gamma = 1$ |
 
-The part by which an eBIC penalty exceeds the BIC penalty is the **eBIC term**. Dettling calls the
-whole sum of his eq. (6.2) "EBIC$_\gamma$"; here that sum is the score with the eBIC penalty.
+Relation to the paper's scores 16 and 17, with $k = \lvert S\rvert$ edges:
 
-**Names in the code.** They are older than these terms and are kept, because the stored results
-and the command-line flags use them: `bic()` computes the score with the loss term $L$,
-`bic_direct()` the direct-loss score of §2a, `bic_along_path()` the scores of the supports of a
-path; `--select bic` selects by the score; `--ebic-gamma` sets the $\gamma$ of the eBIC penalty;
-the fields `bic_*` describe the graph selected with the BIC penalty, `ebic05_*` and `ebic1_*` the
-one selected with the eBIC penalty ($\gamma = 0.5$, 1).
+$$-2n \cdot \tfrac1n\big[\ell - \tfrac12(p+k)\log n\big] = -2\ell + (p+k)\log n = \mathrm{score}_{\mathrm{BIC}}(S) + np\log 2\pi$$
+$$\log\binom{N}{k} = k\log(N/k) + k - O(\log k),\quad N = p(p-1) \approx p^2,\qquad 2k\log p = k\log p^2,\qquad \text{Dettling's form larger by about } k(\log k - 1)$$
 
-1. **Refit** $M$ without penalty on $S \cup \mathrm{diag}$:
+| | |
+|---|---|
+| the $-2\ell$ scale | the paper maximises $\tfrac1n[\ell - \tfrac12(p+k)\log n]$, penalty $\tfrac12(p+k)\log n$ with model dimension $p + k$; times $-2n$ it is the score with the BIC penalty plus the constant $np\log 2\pi$. The ordering of graphs, the greedy moves and the local optima are the same; Schwarz's BIC penalty, Chen & Chen's term and Dettling's eq. (6.2) are written on the $-2\ell$ scale, so they are added literally |
+| Chen & Chen's term, $\gamma = 1$ | the analogue of the paper's increased penalty (17), whose $\log(p^{2k}3^k)$ counts simple mixed graphs; here the count is of directed graphs with $k$ edges among $p(p-1)$ possible ones |
+| the two eBIC forms | close for sparse graphs, by the expansion above |
 
-   | loss | refit | class |
-   |---|---|---|
-   | direct, $\tfrac12\lVert A(\hat\Sigma)\operatorname{vec}(M) + \operatorname{vec}(C)\rVert^2$ | least squares on the columns of $A$ in $S \cup \mathrm{diag}$, via the normal equations on the precomputed Gram matrix ($\texttt{lstsq}$ as fallback) | `DirectRefit` |
-   | log-likelihood or Frobenius, as in docs/LIKELIHOOD.md | the package's APG solver (`solvers.covariance.solve`) with weight 1 and $\lambda = 10^8$ outside the support (those entries stay exactly zero) and weight 0 on it; warm-started from the current estimate when that is stable, otherwise from the diagonal fit; inside the selection and the search tolerance $10^{-8}$ with at most 3,000 steps (`SEARCH_TOL`, `SEARCH_MAX_ITER`: the scores and selected graphs equal those at $10^{-9}$ / 50,000, S3b §9.0; the class default is $10^{-9}$ / 50,000). A refit that stops at the cap is counted (`CovRefit.unconverged`; code review A2, see §3) | `CovRefit` |
+Step 1, refit $M$ without penalty on $S \cup \mathrm{diag}$:
 
-2. **Score** the implied covariance $\Sigma(\hat M_S)$, the stationary covariance from
-   $M\Sigma + \Sigma M^\top + C = 0$:
+| loss | refit | class |
+|---|---|---|
+| direct, $\tfrac12\lVert A(\hat\Sigma)\operatorname{vec}(M) + \operatorname{vec}(C)\rVert^2$ | least squares on the columns of $A$ in $S \cup \mathrm{diag}$, via the normal equations on the precomputed Gram matrix, `lstsq` as fallback | `DirectRefit` |
+| log-likelihood or Frobenius, as in `docs/LIKELIHOOD.md` | the package's APG solver, `solvers.covariance.solve`, with weight 1 and $\lambda = 10^8$ outside the support, so those entries stay exactly zero, and weight 0 on it; warm-started from the current estimate when that is stable, otherwise from the diagonal fit; inside the selection and the search tolerance $10^{-8}$ with at most 3,000 steps, `SEARCH_TOL`, `SEARCH_MAX_ITER`, whose scores and selected graphs equal those at $10^{-9}$ / 50,000, S3b §9.0; the class default is $10^{-9}$ / 50,000. A refit that stops at the cap is counted, `CovRefit.unconverged`, code review A2, §3 | `CovRefit` |
 
-   $$\mathrm{score}(S) = n\big[\log\det\Sigma(\hat M_S) + \operatorname{tr}(\Sigma(\hat M_S)^{-1}\hat\Sigma)\big] + \mathrm{pen}(S).$$
+Step 2, score the implied covariance, the stationary covariance from $M\Sigma + \Sigma M^\top + C = 0$:
 
-   With the BIC penalty this is $-2n$ times the paper's score (16) up to a constant: their penalty
-   is $\tfrac12(p+k)\log n$, with model dimension $p + k$.
-   - **The eBIC term** in Chen & Chen's (2008) form, $2\gamma\log\binom{p(p-1)}{|S|}$, is with
-     $\gamma = 1$ the analogue of the paper's increased penalty (17), whose $\log(p^{2k}3^k)$ counts
-     simple mixed graphs. Here the count is of directed graphs with $k$ edges among $p(p-1)$
-     possible ones. `bic(..., ebic_form)` has both forms of the term: `"binom"`, Chen & Chen's, used
-     in S3b with $\gamma = 1$; and `"dettling"`, his eq. (6.2), $4\gamma|S|\log p$, the form the
-     campaign uses: offline on the supports of a path (`campaign.py`, $\gamma = 0.5, 1$, columns
-     `ebic05_*`, `ebic1_*`) and, from wave 5c on, inside the selection and the search
-     (`--ebic-gamma`, columns `ebic1_search_*`). Waves 1, 2, 5a and 5b run with $\gamma = 0$, the
-     BIC penalty. For sparse
-     graphs the two forms are close: $\log\binom{N}{k} = k\log(N/k) + k - O(\log k)$ with
-     $N = p(p-1) \approx p^2$, against $2k\log p = k\log p^2$, so Dettling's is the larger by about
-     $k(\log k - 1)$.
-   - **Why the $-2\ell$ scale.** The paper maximises $\tfrac1n[\ell - \tfrac12(p+k)\log n]$; times
-     $-2n$ that is $-2\ell + (p+k)\log n$, our score with the BIC penalty plus the constant
-     $np\log 2\pi$. The ordering
-     of graphs, the greedy moves and the local optima are the same; the $-2\ell$ scale is the one
-     Schwarz's BIC penalty, Chen & Chen's term and Dettling's eq. (6.2) are written in, so these
-     penalties are added literally.
-   - **Stability is part of the model.** A refit with an eigenvalue whose real part is $\ge 0$ has
-     no stationary covariance, so it scores $+\infty$. The direct-loss refit can produce such an
-     $M$; the covariance-loss solver accepts only stable iterates.
-   - **$n = \infty$** ($\hat\Sigma = \Sigma$ exactly) uses a nominal $n = 10^6$ in the loss term
-     and in the penalty. The score then prefers exact fits first and fewer edges second: the
-     $\ell_0$ target.
-   - **A singular refit.** The Gram matrix $A_S^\top A_S$ is singular when a nonzero $M$ supported
-     in $S$ solves $M\hat\Sigma + \hat\Sigma M^\top = 0$. At $n = \infty$ this happens for real: two
-     nodes $i, j$ that are isolated in the true graph have $\hat\Sigma_{ij} = 0$ exactly, and then
-     the columns of $A$ for $M_{ij}$ and $M_{ji}$ are identical, so any support holding both
-     directions of such a pair (the random starts of the pure search do) is rank deficient. The
-     refit then falls back to least squares on the columns (minimum-norm solution), with SciPy's
-     QR-based driver as a second fallback, because LAPACK's SVD-based one failed to converge on
-     one such matrix on the cluster (campaign, 5 October); if nothing works the support scores
-     $+\infty$ and the search skips it. At finite $n$ the columns are only nearly dependent.
+$$\mathrm{score}(S) = n\big[\log\det\Sigma(\hat M_S) + \operatorname{tr}(\Sigma(\hat M_S)^{-1}\hat\Sigma)\big] + \mathrm{pen}(S)$$
+
+| case | rule |
+|---|---|
+| unstable refit, an eigenvalue of $\hat M_S$ with real part $\ge 0$ | stability is part of the model: no stationary covariance, score $+\infty$. The direct-loss refit can produce such an $M$; the covariance-loss solver accepts only stable iterates |
+| $n = \infty$, $\hat\Sigma = \Sigma$ exactly | nominal $n = 10^6$ in the loss term and in the penalty; the score then prefers exact fits first and fewer edges second, the $\ell_0$ target |
+| singular Gram matrix $A_S^\top A_S$ | happens when a nonzero $M$ supported in $S$ solves $M\hat\Sigma + \hat\Sigma M^\top = 0$. At $n = \infty$ for real: two nodes $i, j$ isolated in the true graph have $\hat\Sigma_{ij} = 0$ exactly, the columns of $A$ for $M_{ij}$ and $M_{ji}$ are identical, so any support holding both directions of such a pair, as the random starts of the pure search do, is rank deficient. Fallbacks: least squares on the columns, the minimum-norm solution; then SciPy's QR-based driver, because LAPACK's SVD-based one failed to converge on one such matrix on the cluster, campaign, 5 October; if nothing works the support scores $+\infty$ and the search skips it. At finite $n$ the columns are only nearly dependent |
+
+**Names in the code.** They are older than these terms and are kept, because the stored results and the command-line flags use them.
+
+| name | meaning |
+|---|---|
+| `bic()` | the score with the loss term $L$ |
+| `bic_direct()` | the direct-loss score below |
+| `bic_along_path()` | the scores of the supports of a path |
+| `bic(..., ebic_form="binom")` | Chen & Chen's eBIC term; S3b, $\gamma = 1$ |
+| `bic(..., ebic_form="dettling")` | Dettling's eBIC term, eq. (6.2), $4\gamma\lvert S\rvert\log p$; the form the campaign uses |
+| `--select bic` | selects by the score |
+| `--ebic-gamma` | the $\gamma$ of the eBIC penalty, inside the selection and the search from wave 5c on; waves 1, 2, 5a and 5b run with $\gamma = 0$, the BIC penalty |
+| `bic_*` | fields of the graph selected with the BIC penalty |
+| `ebic05_*`, `ebic1_*` | fields of the graph selected with the eBIC penalty, $\gamma = 0.5$, 1, computed offline on the supports of a path, `campaign.py` |
+| `ebic1_search_*` | selected and searched with the eBIC penalty inside the run, wave 5c on |
+
+Three scores, by how $M_S$ is fitted and by what it is scored:
+
+| score | fit of $M_S$ on $S \cup \mathrm{diag}$ | loss term | code | where |
+|---|---|---|---|---|
+| likelihood, least-squares fit | least squares on the direct loss, `DirectRefit`; closed form, microseconds | $L$: the Gaussian likelihood at the least-squares fit, not the maximised likelihood | `bic()`, `--refit direct` | the campaign's default; in between the two scores named in the meeting notes, `plan.md`, Simulations: fitted by the quadratic loss, scored by the likelihood loss term |
+| likelihood, likelihood fit | maximised Gaussian likelihood, `CovRefit`; iterative, 0.05 to 1 s | $L$ | `bic()`, `--refit loglik` | "likelihood + BIC-type penalty" of `plan.md`, as in Améndola et al. and Dettling et al.; S3b for the covariance losses; waves 5a and 8 |
+| direct loss | least squares on the direct loss, `DirectRefit` | $N\log(\mathrm{RSS}_S/N)$ | `bic_direct()`, `Scorer(..., score="direct")`, 9 October | "quadratic loss + BIC-type penalty" of `plan.md`; not used in the campaign |
+
+The direct-loss score:
+
+$$\mathrm{score}_{\mathrm{dir}}(S) = N\log(\mathrm{RSS}_S/N) + (p + \lvert S\rvert)\log n$$
+$$N = \tfrac{p(p+1)}{2},\qquad \mathrm{RSS}_S = \sum_{i\le j} R_{ij}^2,\qquad R = M_S\hat\Sigma + \hat\Sigma M_S^\top + C,\qquad \mathrm{RSS}_S \text{ floored at } 10^{-14}\lVert C\rVert_F^2,\ \texttt{RSS\_FLOOR}$$
+
+| property | |
+|---|---|
+| meaning | the score of a Gaussian regression with unknown error variance on the $N$ distinct equations of the Lyapunov system, with the BIC penalty; $R$ is symmetric and its upper triangle holds the $N$ equations once each |
+| not a likelihood of the data | the $N$ residuals are neither independent nor of equal variance, and their number does not grow with $n$ |
+| pull toward dense graphs | a support with $p + \lvert S\rvert \ge N$ free entries generically fits the $N$ equations exactly, RSS zero up to rounding, floored at $10^{-14}\lVert C\rVert_F^2$, `RSS_FLOOR`, so its loss term lies far below that of every graph that does not fit exactly, at every finite $n$; at $n = \infty$ the true support already fits exactly and the penalty decides among exact fits |
+| until 13 October 2026 | the full Frobenius norm $\lVert R\rVert_F^2$ was used, which counts every off-diagonal equation twice, code review D; the check table of §2a was computed with that version |
 
 ## 2a. From a path to one graph: oracle $\lambda$, score, search
 
-A regularisation path gives 100 graphs per dataset, one per $\lambda$. Three ways to turn it into
-one graph are used in the thesis, and the campaign of October 2026 records all three for every
-estimator (`run_s1_shard.py --select search`; campaign note §3.3):
+A regularisation path gives 100 graphs per dataset, one per $\lambda$; the campaign records all three ways to one graph for every estimator, `run_s1_shard.py --select search`, campaign note §3.3.
 
 | | how the graph is chosen | uses the truth | column |
 |---|---|---|---|
-| **oracle $\lambda$** | every graph on the path is compared with the true graph; the best $F_1$ is reported | yes | `max_f1` (Dettling's Figure 5; likewise `max_acc`, and `auc` / `aupr`, which summarise the whole path) |
-| **selected by the score** | every support on the path is refitted as in §2 (least squares on the direct loss) and scored, with the BIC penalty unless stated; the lowest score wins (`bic_along_path`) | no | `bic_f1` |
-| **after the search** | the selected graph is the start of the greedy search of §3 | no | `search_f1` |
+| oracle $\lambda$ | every graph on the path is compared with the true graph; the best $F_1$ is reported | yes | `max_f1`, Dettling's Figure 5; likewise `max_acc`, and `auc` / `aupr`, which summarise the whole path |
+| selected by the score | every support on the path is refitted as in §2, least squares on the direct loss, and scored, with the BIC penalty unless stated; the lowest score wins, `bic_along_path` | no | `bic_f1` |
+| after the search | the selected graph is the start of the greedy search of §3 | no | `search_f1` |
+| reading | the oracle value says whether a good graph is on the path; the other two say whether one gets it without the truth | | |
+| they can disagree | at $p = 10$, $n = 10^3$ the dense → sparse MCP path gains +0.016 in `max_f1` over the lasso and nothing in `bic_f1` | | |
 
-The oracle value says whether a good graph is *on* the path; the other two say whether one *gets*
-it without the truth. They can disagree: at $p = 10$, $n = 10^3$ the dense → sparse MCP path gains
-+0.016 in `max_f1` over the lasso and nothing in `bic_f1`.
+Why refit, and why by least squares:
 
-**Why refit, and why by least squares.** The estimate at a given $\lambda$ is shrunk by the
-path's penalty, so its likelihood says little about the *support*. The score therefore evaluates
-each support at the best unpenalised fit on it: $M$ restricted to the support plus the diagonal,
-minimising the direct loss $\tfrac12\|M\hat\Sigma+\hat\Sigma M^\top+C\|_F^2$, whose residual is
-linear in $M$, so an ordinary least-squares problem (`DirectRefit`). That refit is then plugged
-into the loss term $L$ of §2, the Gaussian log-likelihood. Two consequences: the same selection
-rule applies to every estimator and every loss, so only the paths differ; and the refit minimises
-the direct loss rather than maximising the likelihood, so $L$ is the likelihood *at the
-least-squares fit*, not the maximised likelihood. At $n = \infty$ with the correct $C$ the two coincide on the true support (both fit
-exactly); at finite $n$ they differ slightly. The `CovRefit` of §2 is the likelihood version; it was
-used in S3b for the covariance losses and is the runner's option `--refit loglik` (wave 5a of the
-campaign, cells `direct_<estimator>-ml_<C>`), at about 0.05 to 0.1 s per support at $p = 10$
-against microseconds for least squares.
+| | |
+|---|---|
+| why refit | the estimate at a given $\lambda$ is shrunk by the path's penalty, so its likelihood says little about the support; the score evaluates each support at the best unpenalised fit on it, $M$ restricted to the support plus the diagonal |
+| why least squares | the direct loss $\tfrac12\lVert M\hat\Sigma + \hat\Sigma M^\top + C\rVert_F^2$ has a residual linear in $M$, so the fit is an ordinary least-squares problem, `DirectRefit`; the refit is then plugged into the loss term $L$ of §2, the Gaussian log-likelihood |
+| consequences | the same selection rule applies to every estimator and every loss, so only the paths differ; the refit minimises the direct loss rather than maximising the likelihood, so $L$ is the likelihood at the least-squares fit, not the maximised likelihood; at $n = \infty$ with the correct $C$ the two coincide on the true support, both fit exactly; at finite $n$ they differ slightly |
+| the likelihood version | `CovRefit`, `--refit loglik`; used in S3b for the covariance losses and in wave 5a, cells `direct_<estimator>-ml_<C>`; about 0.05 to 0.1 s per support at $p = 10$ against microseconds for least squares |
+| where a loss enters | a score-based search has no $\lambda$ and no penalty on $M$, but needs a fitted model for every graph: the score is the loss term, $-2$ times the log-likelihood of the best model with that graph, plus the penalty, and that best model is an estimate of $M$ on $S$. Every score is two steps, the fit and the loss term, and a loss enters both; the search compares graphs only by this number |
 
-**Where a loss enters a search over graphs.** A score-based search has no $\lambda$ and no penalty
-on $M$, but it still needs a fitted model for every graph it looks at: the score of a graph $S$ is
-the loss term, $-2$ times the log-likelihood of *the best model with that graph*, plus the penalty,
-and "the best model with that graph" is an estimate of $M$ on the support $S$. So every score is
-two steps, and a loss enters both: the fit, and the loss term.
-
-1. **fit** $M_S$ on the support $S \cup \mathrm{diag}$, by one of
-   - least squares on the direct loss (`DirectRefit`; closed form, microseconds; the default), or
-   - maximising the Gaussian likelihood (`CovRefit`; iterative, 0.05 to 1 s; `--refit loglik`);
-2. **score** the fitted model: $\mathrm{score}(S) = L(S) + \mathrm{pen}(S)$ with
-   $L(S) = n[\log\det\Sigma_S + \mathrm{tr}(\Sigma_S^{-1}\hat\Sigma)]$, $\Sigma_S$ the covariance
-   of $M_S$, and the BIC penalty $(p+|S|)\log n$ or the eBIC penalty; the search compares graphs
-   only by this number.
-
-The meeting notes (`plan.md`, Simulations) name two scores, "quadratic loss + BIC-type penalty" and
-"likelihood + BIC-type penalty". The second is the likelihood loss term with the likelihood fit
-(`--refit loglik`, waves 5a and 8), as in Améndola et al. and Dettling et al. The campaign's
-default is in between: fitted by the quadratic loss, scored by the likelihood loss term.
-
-**The direct-loss score.** The first of the two, with the quadratic loss itself as the loss term,
-is `Scorer(..., score="direct")` (`bic_direct`, 9 October; tests in `tests/test_search.py`):
-
-$$\mathrm{score}_{\mathrm{dir}}(S) = N\log(\mathrm{RSS}_S/N) + (p+|S|)\log n, \qquad
-N = \tfrac{p(p+1)}{2},\quad \mathrm{RSS}_S = \sum_{i\le j} R_{ij}^2,\quad R = M_S\hat\Sigma + \hat\Sigma M_S^\top + C,$$
-
-the score of a Gaussian regression with unknown error variance on the $N$ distinct equations of
-the Lyapunov system, with the BIC penalty: the residual $R$ is symmetric and its upper triangle
-holds the $N$ equations once each (until 13 October 2026 the full Frobenius norm $\|R\|_F^2$ was
-used, which counts every off-diagonal equation twice — code review D; the table below was
-computed with that version). It is not a likelihood of the data: the $N$ residuals
-are neither independent nor of equal variance, and their number does not grow with $n$. A support
-with $p + |S| \ge N$ free entries generically fits the $N$ equations exactly: its RSS is zero up to
-rounding (floored at $10^{-14}\|C\|_F^2$, `RSS_FLOOR`), so its loss term lies far below that of
-every graph that does not fit exactly, and the score pulls toward dense graphs at every finite $n$.
-At $n = \infty$ the true support already fits exactly and the penalty decides among exact fits.
-
-**Checked on 32 graphs** (10 October; $p = 10$, $C = 2I$, $k = 1, \dots, 4$, the four true $C$, two
-replicates; the lasso path of the direct loss; every score with the BIC penalty;
-`next_steps/091026/score_check.py` and `.txt`):
+| check of 10 October | 32 graphs: $p = 10$, $C = 2I$, $k = 1, \dots, 4$, the four true $C$, two replicates; the lasso path of the direct loss; every score with the BIC penalty; the true graphs have 23.7 edges on average; `next_steps/091026/score_check.py` and `.txt` |
+|---|---|
 
 | $n$ | loss term of the score | from the truth: $F_1$ (edges) | selected on the path | after the search | s per graph |
 |---|---|---|---|---|---|
@@ -173,91 +142,71 @@ replicates; the lasso path of the direct loss; every score with the BIC penalty;
 | $10^4$ | likelihood, likelihood fit | 0.801 (23.5) | 0.566 (29.3) | 0.560 (23.2) | 623 |
 | $10^4$ | direct loss | 0.747 (31.0) | 0.440 (45.0) | 0.440 (45.0) | 0.4 |
 
-The true graphs have 23.7 edges on average.
-- **The direct-loss score is degenerate.** On the path it selects the densest graph, the lasso's
-  dense end with $p(p-1)/2 = 45$ edges, in every one of the 64 graphs, and the search stays there.
-  From the true graph it adds 7 to 11 edges. It is not used in the campaign.
-- **The likelihood fit and the least-squares fit select the same graphs.** The selected and the
-  searched graphs differ by at most 0.005 in $F_1$; from the truth the likelihood fit is 0.01 to
-  0.02 higher. It costs 700 to 1,000 times as much. This is wave 5a's result again, on other data.
+| finding | |
+|---|---|
+| the direct-loss score is degenerate | on the path it selects the densest graph, the lasso's dense end with $p(p-1)/2 = 45$ edges, in every one of the 64 graphs, and the search stays there; from the true graph it adds 7 to 11 edges; not used in the campaign |
+| the likelihood fit and the least-squares fit select the same graphs | the selected and the searched graphs differ by at most 0.005 in $F_1$; from the truth the likelihood fit is 0.01 to 0.02 higher; it costs 700 to 1,000 times as much; wave 5a's result again, on other data |
 
-**When the least-squares refit is unstable.** The least-squares fit of a sparse support is not
-entry by entry: the off-diagonal residuals $(M_{ii} + M_{jj})\hat\Sigma_{ij}$ couple the diagonal
-entries, and with the rescaled $C$, whose diagonal varies by an order of magnitude, the compromise
-can put a diagonal entry above zero. Then $M$ is unstable, the score is $+\infty$, and a search started
-there cannot leave unless a single move makes the refit stable. In wave 2 this happens to the
-**empty graph** in 6 to 7 % of the graphs at $p = 10$ and 24 to 25 % at $p = 20$ (rescaled $C$;
-never with $C = 2I$; most under `C_Random_Min_Diag` and `C_Random_Full`), and to the **true
-support** in 2 to 5 %, almost all `C_Random_Full`. The best of the 11 starts was dead for one graph
-of 2 375. The likelihood refit maximises over stable $M$ only (the covariance solver accepts no
-unstable iterate), so it has no dead starts: on the first such $p = 20$ graph the least-squares
-refit of the empty graph has an eigenvalue at $+0.11$, the likelihood refit has its largest real
-part at $-0.36$ and a finite score, and a search with the likelihood refit from the empty graph makes 43
-moves (`next_steps/051026/files/time_starts.py` for the dataset).
+When the least-squares refit is unstable:
+
+| | |
+|---|---|
+| mechanism | the least-squares fit of a sparse support is not entry by entry: the off-diagonal residuals $(M_{ii} + M_{jj})\hat\Sigma_{ij}$ couple the diagonal entries, and with the rescaled $C$, whose diagonal varies by an order of magnitude, the compromise can put a diagonal entry above zero. Then $M$ is unstable, the score is $+\infty$, and a search started there cannot leave unless a single move makes the refit stable |
+| wave 2, the empty graph dead | 6 to 7 % of the graphs at $p = 10$, 24 to 25 % at $p = 20$; rescaled $C$, never with $C = 2I$; most under `C_Random_Min_Diag` and `C_Random_Full` |
+| wave 2, the true support dead | 2 to 5 %, almost all `C_Random_Full` |
+| the best of the 11 starts dead | one graph of 2 375 |
+| the likelihood refit | maximises over stable $M$ only, the covariance solver accepts no unstable iterate, so it has no dead starts. On the first such $p = 20$ graph the least-squares refit of the empty graph has an eigenvalue at $+0.11$, the likelihood refit has its largest real part at $-0.36$ and a finite score, and a search with the likelihood refit from the empty graph makes 43 moves; `next_steps/051026/files/time_starts.py` for the dataset |
 
 ## 3. The moves and the search
 
-**Neighbourhood** of $S$, as in the paper:
+Neighbourhood of $S$, as in the paper:
 
 | move | candidates |
 |---|---|
 | delete | every entry of $S$ |
 | reverse | every $(i,j) \in S$ whose reverse $(j,i)$ is not in $S$; it is replaced by $(j,i)$ |
-| add | every off-diagonal entry not in $S$. Adding the reverse of a selected entry creates a 2-cycle |
+| add | every off-diagonal entry not in $S$; adding the reverse of a selected entry creates a 2-cycle |
 
-**Best improvement** (`greedy_search`): score every neighbour, move to the best one if it lowers
-the score, and repeat. Stop when no neighbour improves, or after `max_steps` (200 by default; the
-runners allow $p(p-1)$); a search stopped by the cap says so (`SearchResult.capped`).
-- Scored supports are cached, so no support is refitted twice.
-- **With an iterative refit** (the covariance losses; the likelihood refit of wave 5a),
-  `add_screen` can restrict the add moves scored per step to the ones with the largest
-  $\lvert\nabla L\rvert$ at the current refit; deletes and reverses are always all scored. The
-  searches from a path's selected graph do not use it (`--add-screen` is off in waves 5a and 8 (b);
-  scoring every add move with the likelihood refit costs 15 to 100 s per graph at $p = 10$), so the
-  two searches of wave 1 and wave 5a differ in the score only, not in the neighbourhood. The
-  100-start search with the likelihood refit, wave 8 (c), uses `--add-screen 20`: 100 starts of
-  one graph with every add move scored would take longer than a cluster task may run.
-- **Iterative refits that do not converge** (code review A2, 13 October 2026). The covariance
-  refits are capped at 3,000 steps. On a support with a 2-cycle the likelihood need not have a
-  maximiser: the two entries of the cycle can grow without bound while the loss keeps falling
-  (seen: $|M_{ij}|$ from 460 to 2,000 over 60,000 steps, the score still falling), so the refit
-  stops at the cap and the score is the value there, 5 to 19 units above the infimum at
-  $n = 10^3$, one to three edges' worth of BIC penalty — a bias against such graphs in every search
-  with the likelihood refit (waves 5a, 8 (b), 8 (c)). Measured on the stored wave 8 cells, 0 of 16
-  selected and searched supports were capped, and in one full search step 7 of 106 neighbours were,
-  all adds that create a 2-cycle; tightening them left the chosen move unchanged. Every refit now
-  reports whether it converged: `Scorer.unconverged` counts the capped refits, every
-  `SearchResult` carries the number that occurred during its search (`unconverged`) and whether it
-  was stopped by its step cap (`capped`), and the cluster runners store them per graph
-  (`bic_unconverged`, `search_unconverged`, `search_capped`; `pure_*`, `truth_*`). The scores
-  themselves are left as they are.
-- **The matrix behind the end graph** (code review A2b). The scorer caches scores, not matrices;
-  `greedy_search` now keeps the matrix of its best move when that support was scored for the first
-  time in the step, so the stored refit is exactly the one that was scored. A support scored in an
-  earlier step (a cache hit, typically "reverse" after "add") has its matrix recomputed from the
-  current warm start, which for an iterative refit can be another stationary point: if it scores
-  lower, that better value replaces the cached score (still a strict descent); if higher, the
-  cached score stands and the case is counted (`mismatches`, stored as `search_mismatches`). With
-  the least-squares refit the recomputed matrix is identical. The same recomputation is why two
-  start blocks of wave 8 (c), each with its own cache, can score one end graph differently (code
-  review A5; 4 of 36 end graphs by more than $10^{-9}$, up to $7.8\times10^{-3}$).
+Best improvement, `greedy_search`:
 
-**Starts:**
+```
+greedy_search(S_0):
+    S <- S_0
+    repeat up to max_steps times:                  # 200 by default; the runners allow p(p-1); SearchResult.capped says the cap stopped it
+        score every neighbour of S                 # scored supports are cached: no support is refitted twice
+        S* <- argmin over neighbours(S) of score
+        if score(S*) < score(S) - 1e-9 |score(S)|:  S <- S*
+        else:                                       stop     # no neighbour improves
+    return S
+```
+
+| option or finding | |
+|---|---|
+| `add_screen`, with an iterative refit | restricts the add moves scored per step to the ones with the largest $\lvert\nabla L\rvert$ at the current refit; deletes and reverses are always all scored. `--add-screen` is off in waves 5a and 8 (b), so those searches differ from wave 1 in the score only, not in the neighbourhood; scoring every add move with the likelihood refit costs 15 to 100 s per graph at $p = 10$. Wave 8 (c), the 100-start search with the likelihood refit, uses `--add-screen 20`: 100 starts of one graph with every add move scored would take longer than a cluster task may run |
+| iterative refits that do not converge, code review A2, 13 October 2026 | the covariance refits are capped at 3,000 steps. On a support with a 2-cycle the likelihood need not have a maximiser: the two entries of the cycle can grow without bound while the loss keeps falling, seen $\lvert M_{ij}\rvert$ from 460 to 2,000 over 60,000 steps with the score still falling, so the refit stops at the cap and the score is the value there, 5 to 19 units above the infimum at $n = 10^3$, one to three edges' worth of BIC penalty: a bias against such graphs in every search with the likelihood refit, waves 5a, 8 (b), 8 (c). Measured on the stored wave 8 cells, 0 of 16 selected and searched supports were capped, and in one full search step 7 of 106 neighbours were, all adds that create a 2-cycle; tightening them left the chosen move unchanged. The scores themselves are left as they are |
+| convergence flags | `Scorer.unconverged` counts the capped refits; every `SearchResult` carries `unconverged`, the number during its search, and `capped`, whether its step cap stopped it; the cluster runners store them per graph, `bic_unconverged`, `search_unconverged`, `search_capped`, and `pure_*`, `truth_*` |
+| the matrix behind the end graph, code review A2b | the scorer caches scores, not matrices; `greedy_search` keeps the matrix of its best move when that support was scored for the first time in the step, so the stored refit is exactly the one that was scored. A support scored in an earlier step, a cache hit, typically "reverse" after "add", has its matrix recomputed from the current warm start, which for an iterative refit can be another stationary point: if it scores lower, that better value replaces the cached score, still a strict descent; if higher, the cached score stands and the case is counted, `mismatches`, stored as `search_mismatches`. With the least-squares refit the recomputed matrix is identical |
+| code review A5 | the same recomputation is why two start blocks of wave 8 (c), each with its own cache, can score one end graph differently: 4 of 36 end graphs by more than $10^{-9}$, up to $7.8\times10^{-3}$ |
+
+Starts:
 
 | function | start |
 |---|---|
-| `greedy_search` | one given support, e.g. a penalised path's support at the $\lambda$ selected by the score (`bic_along_path`) |
-| `multistart_search` | several supports with one shared cache; the best-scoring result is returned. The pure search uses randomly drawn graphs plus the empty graph. **How a start is drawn** (`random_support`, "sparse"): one edge probability $d \sim U[0, 0.3]$ for the graph, then every off-diagonal entry independently with probability $d$ (2-cycles allowed, no self-loops); "uniform" (`--starts uniform`): every off-diagonal entry with probability $\tfrac12$, i.e. uniform over all directed graphs on $p$ nodes. The generator is seeded per data set with `(RESTART_SEED, p, k, C, rep)` in `run_search_shard.py`, so the starts of a data set are the same at every $n$, for both $C$ and whatever the shard layout |
+| `greedy_search` | one given support, e.g. a penalised path's support at the $\lambda$ selected by the score, `bic_along_path` |
+| `multistart_search` | several supports with one shared cache; the best-scoring result is returned. The pure search uses randomly drawn graphs plus the empty graph |
+| `random_support`, "sparse", `--starts sparse`, the default | one edge probability $d \sim U[0, 0.3]$ for the graph, then every off-diagonal entry independently with probability $d$; 2-cycles allowed, no self-loops |
+| "uniform", `--starts uniform` | every off-diagonal entry with probability $\tfrac12$, i.e. uniform over all directed graphs on $p$ nodes |
+| seed | `(RESTART_SEED, p, k, C, rep)` per data set in `run_search_shard.py`, so the starts of a data set are the same at every $n$, for both $C$ and whatever the shard layout |
 
 ## 3a. Side by side: the search of Améndola et al. (2020) and the search here
 
-Both are the same algorithm in outline, greedy hill-climbing over graphs with a score = likelihood
-loss term + penalty and single-edge moves. The differences are in the graph class, the score, the number and the
-distribution of the randomly drawn starting graphs, and in how the likelihood is maximised.
+Both are greedy hill-climbing over graphs with a score of likelihood loss term plus penalty and single-edge moves; they differ in the graph class, the score, the number and distribution of the random starting graphs, and in how the likelihood is maximised.
 
-### The paper's method (Améndola, Dettling, Drton, Onori & Wu 2020, §5–6)
+### The paper's method
 
 ```
+Améndola, Dettling, Drton, Onori & Wu (2020), §5–6
+
 Input:  sample covariance S (n observations, p variables), penalty (BIC or increased)
 Graph class:  simple mixed graphs G = (V, D, B): directed edges D and bidirected edges B,
               at most ONE edge of any type between a pair of nodes, cycles allowed
@@ -288,18 +237,17 @@ main:
     for r = 1 .. 300:   G_r <- greedy(random graph)       # 300 randomly drawn starting graphs per data set
     (and, as a reference, greedy(true graph))
     return the G_r with the highest score
+
+Simulations: p = 5 and 6, 100 graphs, n = 10², 10³, 10⁴.
+How the 300 starting graphs are drawn is not stated; the MCMC of their §6.1 draws the TRUE graphs
+uniformly over simple mixed graphs, "in analogy to [22]" = Nowzohour, Maathuis, Evans & Bühlmann (2017).
 ```
 
-How the 300 random starting graphs are drawn is not stated; the MCMC of their §6.1 draws the
-*true* graphs of the simulation uniformly over simple mixed graphs, "in analogy to [22]".
-Their reference [22], Nowzohour, Maathuis, Evans & Bühlmann (2017), draws the *starting graphs*
-uniformly over the graph class by an MCMC algorithm (their Algorithm 1; uniform sampling of
-constrained graph classes is not trivial) and uses R = 100 of them. Their simulations have
-p = 5 and 6, 100 graphs, n = 10², 10³, 10⁴.
-
-### The method here (`gclm.solvers.search`)
+### The method here
 
 ```
+gclm.solvers.search
+
 Input:  sample covariance Σ̂ (or the population Σ, "n = ∞"), the volatility matrix C the path used
 Graph class:  directed graphs on p nodes: any set S of off-diagonal entries of M,
               2-cycles allowed, no bidirected edges (C is known)
@@ -338,43 +286,19 @@ main, three uses:
     random graph, "uniform":  each off-diagonal entry with probability 1/2  (wave 5b; uniform over the class)
 ```
 
-### The starting graphs: Nowzohour et al. (2017) adapted to this class
+### The starting graphs
 
-Nowzohour, Maathuis, Evans & Bühlmann (2017) start their greedy search from $R = 100$ graphs
-drawn *uniformly* over their model class, bow-free acyclic path diagrams. A uniform draw over a
-constrained class is not trivial, because the constraints (acyclicity, no bow) are global, so they
-use an MCMC sampler (their Algorithm 1) whose stationary distribution is uniform over the class.
-Améndola et al. (2020) use the same sampler to draw the *true* graphs of their simulation and do
-not say how their 300 starting graphs are drawn.
+Nowzohour et al. 2017 adapted to this class:
 
-**The adaptation.** The class searched here is all directed graphs on $p$ nodes: any set $S$ of
-off-diagonal entries of $M$, with 2-cycles allowed, no self-loops (the diagonal is always free)
-and no bidirected edges ($C$ is known). There are $2^{p(p-1)}$ such graphs and no global
-constraint, so the uniform distribution factorises: every off-diagonal entry is in $S$
-independently with probability $\tfrac12$. That is `--starts uniform` in `run_search_shard.py`,
-and it is exactly uniform over the class, with no MCMC and no burn-in to argue about. Its expected
-density is $\tfrac12$, i.e. 45 edges at $p = 10$ and 190 at $p = 20$, against true graphs with
-density below 0.4 and 0.2. Two remarks:
-
-- Had the class been Améndola's "at most one edge per pair" (no 2-cycles), uniform would mean
-  drawing each of the $\binom p2$ pairs from $\{\text{none}, i \to j, j \to i\}$ with probability
-  $\tfrac13$ each, i.e. density $\tfrac23$ of the pairs. The search here allows 2-cycles, so the
-  fair coin per entry is the right analogue.
-- Uniform over the class is what the reference does, not necessarily what works: on the one
-  $p = 20$ graph timed (`next_steps/051026/files/time_starts.txt`) the best of five uniform starts
-  ended at a dense local optimum with 114 false positives, the best of five sparse starts at 3.
-
-**The sparse recipe** (`random_support`, `--starts sparse`, the default and the choice of S3b
-and wave 2) is this repository's own: one edge probability $d \sim U[0, 0.3]$ per starting graph,
-then every off-diagonal entry independently with probability $d$. It is a mixture of Erdős–Rényi
-digraphs over densities from 0 to 0.3, chosen so that the starts are about as dense as the true
-graphs and the searches short; the bound 0.3 and the mixture are not taken from a paper.
-
-**Seeding.** Both recipes draw from a generator seeded with `(RESTART_SEED, p, k, C, rep)`, so a
-data set has the same starting graphs at every $n$, under both $C$ and whatever the shard layout;
-the empty graph is appended last. **Wave 5b** runs both recipes with $R = 100$ on the same data
-sets (`search100s_p10_Cresc`, `search100u_p10_Cresc`), and `simulations/diagnostics/restarts.py`
-reads off the best of the first $r$ starts of either for every $r \le 100$.
+| | Nowzohour, Maathuis, Evans & Bühlmann (2017) | Améndola et al. (2020) | here, `--starts uniform` | here, `--starts sparse`, the default |
+|---|---|---|---|---|
+| class | bow-free acyclic path diagrams; the constraints, acyclicity and no bow, are global | simple mixed graphs | all directed graphs on $p$ nodes, $2^{p(p-1)}$ of them, no global constraint | the same |
+| draw | uniform over the class by an MCMC sampler, their Algorithm 1; uniform sampling of a constrained class is not trivial | not stated for the starting graphs; the true graphs of their simulation by the same sampler | the uniform distribution factorises: every off-diagonal entry in $S$ independently with probability $\tfrac12$, exactly uniform, no MCMC and no burn-in; expected density $\tfrac12$, 45 edges at $p = 10$ and 190 at $p = 20$, against true graphs with density below 0.4 and 0.2; the only published recipe among the references | one edge probability $d \sim U[0, 0.3]$ per starting graph, then every off-diagonal entry independently with probability $d$: a mixture of Erdős–Rényi digraphs over densities 0 to 0.3, chosen so that the starts are about as dense as the true graphs and the searches short; this repository's own recipe from S3b and wave 2, the bound 0.3 and the mixture not taken from a paper |
+| $R$ | 100 | 300 | 100, wave 5b | 10 plus the empty graph, wave 2; 100, wave 5b |
+| remark | | | had the class been the paper's, at most one edge per pair, uniform would draw each of the $\binom p2$ pairs from $\{\text{none}, i \to j, j \to i\}$ with probability $\tfrac13$, density $\tfrac23$ of the pairs; with 2-cycles allowed the fair coin per entry is the right analogue | |
+| timed $p = 20$ graph, `next_steps/051026/files/time_starts.txt` | | | the best of five uniform starts ended at a dense local optimum with 114 false positives | the best of five sparse starts at 3 |
+| seeding | | | generator seeded with `(RESTART_SEED, p, k, C, rep)`: the same starting graphs at every $n$, under both $C$ and whatever the shard layout; the empty graph appended last | the same |
+| wave 5b | | | both recipes with $R = 100$ on the same data sets, `search100s_p10_Cresc`, `search100u_p10_Cresc`; `simulations/diagnostics/restarts.py` reads off the best of the first $r$ starts of either for every $r \le 100$ | the same |
 
 ### The differences
 
@@ -383,8 +307,8 @@ reads off the best of the first $r$ starts of either for every $r \le 100$.
 | graph class | simple mixed graphs: directed and bidirected edges, at most one edge per pair | directed graphs: 2-cycles allowed, no bidirected edges ($C$ known) |
 | model | linear SEM with error covariance $\Omega$ (bidirected edges) | GCLM, $M\Sigma + \Sigma M^\top + C = 0$ |
 | maximised fit in the score | Gaussian likelihood, by block coordinate descent | least squares on the direct loss (closed form), plugged into the Gaussian likelihood; the likelihood refit (`CovRefit`) is the `--refit loglik` of wave 5a |
-| dimension in the penalty | $p + k$, $k$ = number of edges (justified by their expected-dimension theorem for simple mixed graphs) | $p + |S|$; exact when the support is identifiable, over-counts for both directions between two isolated nodes |
-| penalties | BIC; "increased" $+\log(p^{2k}3^k)$ | BIC; eBIC in Chen & Chen's form $+2\gamma \log\binom{p(p-1)}{|S|}$ (S3b, $\gamma = 1$) and in Dettling's form $+4\gamma|E|\log p$: offline on the path (S4 §5) and inside the selection and the search (wave 5c, `--ebic-gamma`) |
+| dimension in the penalty | $p + k$, $k$ = number of edges (justified by their expected-dimension theorem for simple mixed graphs) | $p + \lvert S\rvert$; exact when the support is identifiable, over-counts for both directions between two isolated nodes |
+| penalties | BIC; "increased" $+\log(p^{2k}3^k)$ | BIC; eBIC in Chen & Chen's form $+2\gamma \log\binom{p(p-1)}{\lvert S\rvert}$ (S3b, $\gamma = 1$) and in Dettling's form $+4\gamma\lvert E\rvert\log p$: offline on the path (S4 §5) and inside the selection and the search (wave 5c, `--ebic-gamma`) |
 | moves | add / remove / reverse one edge | add / delete / reverse one entry: the same |
 | acceptance | strictly higher score | strictly lower score (sign convention only) |
 | iteration cap | $10^4$ | $p(p-1)$, never reached |
@@ -392,68 +316,65 @@ reads off the best of the first $r$ starts of either for every $r \le 100$.
 | distribution of the starting graphs | not stated; uniform via MCMC in [22] | wave 2: edge probability $U[0, 0.3]$ per graph, i.e. sparser than uniform; this repository's own recipe from S3b, chosen so that the starts are about as dense as the true graphs and the searches short, not taken from a paper; wave 5b: that, and the uniform draw (a fair coin per entry, density 0.5; for this class no MCMC is needed), which is the only published recipe among the references |
 | problem size | $p = 5, 6$; 100 graphs; $n \le 10^4$ | $p = 10, 20$; 800 graphs per cell; $n \le \infty$ |
 | other starts | the true graph | the true graph; and the graph selected by the score on every estimator's path |
-
-The moves and the hill-climbing are the paper's; the score is the GCLM analogue of theirs with a
-cheaper refit; the starting graphs are the point where the two part: 10 sparse ones here against
-300 (or 100 uniform ones), and 10 had not saturated (S4 §4a). The `search-pure` numbers of S4 are
-therefore a lower bound on the paper's method in this setting; wave 5b runs 100 of each kind.
+| bottom line | | the moves and the hill-climbing are the paper's; the score is the GCLM analogue of theirs with a cheaper refit; the starting graphs are where the two part: 10 sparse ones here against 300, or 100 uniform ones, and 10 had not saturated (S4 §4a), so the `search-pure` numbers of S4 are a lower bound on the paper's method in this setting; wave 5b runs 100 of each kind |
 
 ## 4. Cost
 
-At $p = 20$ a step scores about 400 candidates. On the M2 a direct-loss search takes about 4 s from
-the empty graph and about 20 s from a random graph. The covariance-loss refits are about 10–100×
-more expensive per candidate. From a dense start it takes much longer: a graph selected by the score at
-$p = 20$ can be more than a hundred deletions away from where the search ends, which is one to two
-minutes.
+| setting | cost |
+|---|---|
+| $p = 20$, one step | about 400 candidates scored |
+| M2, direct-loss search from the empty graph | about 4 s |
+| M2, direct-loss search from a random graph | about 20 s |
+| covariance-loss refits | about 10 to 100 times more expensive per candidate |
+| dense start: a graph selected by the score at $p = 20$ | can be more than a hundred deletions away from where the search ends; one to two minutes |
 
 ## 4a. On the cluster (campaign of October 2026)
 
-- **After a path:** `simulations/run_s1_shard.py --select bic` scores every support of the path
-  (`bic_along_path`) and stores the graph selected by the score; `--select search` then runs
-  `greedy_search` from it. Function `select_graph`. The refit is the direct-loss one for every
-  loss, so that the selection rule is the same for all estimators.
-- **Without a path:** `simulations/run_search_shard.py` runs `multistart_search` from the empty
-  graph and `--restarts` randomly drawn graphs (10 in wave 2, 100 in wave 5b; `--starts sparse` or
-  `uniform`), and `greedy_search` from the true graph as a ceiling. The graph and the score every
-  start ends at are stored, and `simulations/diagnostics/restarts.py` reads off the best of the
-  first $r$ starts for every $r$. With `--start-blocks B` the starts of every graph are split into
-  $B$ contiguous blocks, one (graph, block) pair per task, for searches too long for one task
-  (wave 8 (c): 100 starts with the likelihood refit); `restarts.py` and `campaign.py` put the
-  blocks of a graph back together.
-- **The refit behind the score** is least squares on the direct loss for every loss (`--refit
-  direct`, the default), or the maximised likelihood (`--refit loglik`, wave 5a at $p = 10$).
-- **The eBIC penalty** is off (the BIC penalty is used) except from wave 5c on:
-  `run_s1_shard.py --ebic-gamma 0.5 1` selects and searches once more per $\gamma$ on the same path
-  (fields `ebic05_*`, `ebic1_*` next to the ones with the BIC penalty, so the two penalties are
-  paired graph by graph) and `run_search_shard.py --ebic-gamma 1` scores both of its searches with
-  it; Dettling's form.
-- **Rescoring a finished cell** (wave 6, `simulations/rescore_shard.py`): the stored supports of a
-  cell's paths are re-selected and re-searched with the eBIC penalty, after rebuilding each data
-  set from its seed (checked against the stored scores with the BIC penalty), so no path is
-  recomputed. Cells `rescore1_<source cell>`; `campaign.py` overlays them on the source cell's
-  rows, and `plot_campaign.py --rule ebic1` draws every figure with the eBIC penalty in the score
-  (`figures_ebic1/`).
-- **The volatility matrix** in the score is the one the estimator was fitted with: $2I$, or the
-  rescaled $C$ of `docs/DENSE_START.md` §2 (`--c-scale variance`).
-- **The step limit** `max_steps` is raised from the default 200 to $p(p-1)$ in both runners. Every
-  accepted move lowers the score, so the search ends by itself; the limit is only a guard.
+```
+# after a path: simulations/run_s1_shard.py, function select_graph
+run_s1_shard.py --select bic           # bic_along_path scores every support of the path; stores the selected graph
+run_s1_shard.py --select search        # then greedy_search from the selected graph
+run_s1_shard.py --refit direct         # the default: least squares on the direct loss, for every loss
+run_s1_shard.py --refit loglik         # the maximised likelihood; wave 5a at p = 10
+run_s1_shard.py --ebic-gamma 0.5 1     # wave 5c on: selects and searches once more per gamma on the same path;
+                                       # fields ebic05_*, ebic1_* next to the BIC ones, the two penalties paired graph by graph
+run_s1_shard.py --c-scale variance     # the rescaled C of docs/DENSE_START.md §2 in the score; otherwise 2I
+
+# without a path: simulations/run_search_shard.py
+run_search_shard.py --restarts 10      # wave 2: multistart_search from the empty graph and 10 random graphs,
+                                       # greedy_search from the true graph as a ceiling; end graph and score of every start stored
+run_search_shard.py --restarts 100     # wave 5b
+run_search_shard.py --starts sparse    # the default; or --starts uniform
+run_search_shard.py --start-blocks B   # B contiguous blocks of starts per graph, one (graph, block) pair per task,
+                                       # for searches too long for one task: wave 8 (c), 100 starts with the likelihood refit
+run_search_shard.py --ebic-gamma 1     # scores both of its searches with the eBIC penalty, Dettling's form
+
+# wave 6: rescoring a finished cell
+simulations/rescore_shard.py           # re-selects and re-searches the stored supports of a cell's paths with the eBIC
+                                       # penalty after rebuilding each data set from its seed, checked against the stored
+                                       # BIC scores; no path recomputed; cells rescore1_<source cell>, overlaid by campaign.py
+plot_campaign.py --rule ebic1          # every figure with the eBIC penalty in the score; figures_ebic1/
+simulations/diagnostics/restarts.py    # best of the first r starts for every r; with campaign.py puts the start blocks of a graph back together
+```
+
+| rule | |
+|---|---|
+| the refit behind the score | least squares on the direct loss for every loss, `--refit direct`, so that the selection rule is the same for all estimators; or the maximised likelihood, `--refit loglik` |
+| the eBIC penalty | off, the BIC penalty is used, except from wave 5c on |
+| the volatility matrix in the score | the one the estimator was fitted with: $2I$, or the rescaled $C$ of `docs/DENSE_START.md` §2 |
+| the step limit | `max_steps` raised from the default 200 to $p(p-1)$ in both runners; every accepted move lowers the score, so the search ends by itself, and the limit is only a guard |
 
 ## 5. Validation
 
-- **Unit tests** (`tests/test_search.py`): the refits recover $M^*$ on the true support; the
-  direct refit satisfies the normal equations; the score's penalties (BIC, both eBIC forms) and
-  unstable cases; the direct-loss score; the
-  neighbourhood moves; the score never increases along a search; multistart keeps the best; the
-  Example 2 reversal.
-- **Exhaustive check** (`simulations/diagnostics/search_study.py validate`): on Example 2 every
-  support with up to 7 edges (direct loss) or up to 5 (log-likelihood) is scored. The global
-  optimum is compared with the truth and with the result of the greedy search from every start.
-  Results: S3b §9.
+| check | content |
+|---|---|
+| unit tests, `tests/test_search.py` | the refits recover $M^*$ on the true support; the direct refit satisfies the normal equations; the score's penalties, BIC and both eBIC forms, and unstable cases; the direct-loss score; the neighbourhood moves; the score never increases along a search; multistart keeps the best; the Example 2 reversal |
+| exhaustive check, `simulations/diagnostics/search_study.py validate` | on Example 2 every support with up to 7 edges, direct loss, or up to 5, log-likelihood, is scored; the global optimum is compared with the truth and with the result of the greedy search from every start; results in S3b §9 |
 
 ## 6. References
 
-- Améndola, C., Dettling, P., Drton, M., Onori, F. & Wu, J. (2020). Structure learning for cyclic
-  linear causal models. *UAI 2020*. The greedy search of §5 and the scores (16)–(17).
-- Chen, J. & Chen, Z. (2008). Extended Bayesian information criteria for model selection with large
-  model spaces. *Biometrika* 95(3), 759–771.
-- Chickering, D. M. (2002). Optimal structure identification with greedy search. *JMLR* 3, 507–554.
+| | |
+|---|---|
+| Améndola, C., Dettling, P., Drton, M., Onori, F. & Wu, J. (2020) | Structure learning for cyclic linear causal models. *UAI 2020*. The greedy search of §5 and the scores (16), (17) |
+| Chen, J. & Chen, Z. (2008) | Extended Bayesian information criteria for model selection with large model spaces. *Biometrika* 95(3), 759–771 |
+| Chickering, D. M. (2002) | Optimal structure identification with greedy search. *JMLR* 3, 507–554 |

@@ -65,9 +65,15 @@
 #           threshold  E2: the thresholded lasso, refitted and not (--method threshold[-norefit]);
 #                      cells direct_threshold[-norefit]_<C>; 4 per n.
 #           betamin    E3: the weights |w| ~ U[w_min, 1] with w_min = 0 / 0.1 / 0.25 / 0.5
-#                      (--weights uniform --w-min), lasso / MCP / MCP-up / adaptive, both C, n = 1000 and
-#                      1e4 only; cells direct_<estimator>_<C>_w<wmin> (w0, w01, w025, w05); 32 per n.
-#           class      E4: the graph class no2c / dag (--graph), the same four estimators, both C,
+#                      (--weights uniform --w-min), lasso / MCP-up / adaptive, both C, n = 1000,
+#                      1e4 and inf; cells direct_<estimator>_<C>_w<wmin> (w0, w01, w025, w05); 32 per n.
+#                      Since 19 Oct on the true C = 2I graphs only (--c-choices C_ID: 100 graphs per p)
+#                      with the BIC and the eBIC(0.5, 1) selection and the search from each (--ebic-gamma).
+#           twocycle   E5 (19 Oct): the share of 2-cycles among the connected pairs, 0 / 0.25 / 0.5 /
+#                      0.75 / 1 (--graph pairs --two-cycle-share), at the random class's expected number
+#                      of edges; lasso / MCP-up / adaptive, both C, true C = 2I, every reduction, n = 1000,
+#                      1e4 and inf; cells direct_<estimator>_<C>_s<share> (s0, s025, s05, s075, s1); 30 per n.
+#           class      E4: the graph class dag (--graph), lasso / MCP-up / adaptive, both C,
 #                      n = 1000 and 1e4 only; cells direct_<estimator>_<C>_<graph>; 16 per n.
 #           starts-loglik  E1 on the log-likelihood loss, p = 10, n = 1000 and 1e4 only (the plan's
 #                      optional second line); cells loglik_MCP-up-<start>_<C>, loglik_adaptive-<start>_<C>.
@@ -126,7 +132,7 @@ LIST=0
 TIME=""
 SHARDS=""
 GROUP=""
-GROUPS9=(starts threshold betamin class starts-loglik)
+GROUPS9=(starts threshold betamin class twocycle starts-loglik)
 
 # The cells of a wave, one per line:
 #     name | job tag | runner | shards | time limit | runner arguments (without --n-obs)
@@ -321,31 +327,51 @@ cells() {
           case "$w" in 0) wc=0 ;; 0.1) wc=1 ;; 0.25) wc=2 ;; 0.5) wc=5 ;; esac
           for c in C2I Cresc; do
             if [ "$c" = C2I ]; then cs=identity; ci=i; else cs=variance; ci=r; fi
-            for e in lasso MCP MCP-up adaptive; do
+            for e in lasso MCP-up adaptive; do              # 19 Oct: MCP sparse -> dense dropped (its lock-in is wave 1's V1)
               case "$e" in
                 lasso) ec=la; sh9=4; ea="--penalty lasso" ;;
-                MCP) ec=Ms; sh9=8; ea="--penalty MCP" ;;
                 MCP-up) ec=Mu; sh9=16; ea="--penalty MCP --direction up" ;;
                 adaptive) ec=ad; sh9=4; ea="--method adaptive" ;;
               esac
-              echo "direct_${e}_${c}_${wtag}|9b${ec}${wc}${ci}|$run|$sh9|12:00:00|$s9 --c-scale $cs $ea --weights uniform --w-min $w"
+              # 19 Oct: the true C = 2I graphs only (a quarter of the cost, the rescaled C exact), and every
+              # reduction to one graph: the oracle, the BIC and the eBIC(0.5, 1) selection, the search from each
+              echo "direct_${e}_${c}_${wtag}|9b${ec}${wc}${ci}|$run|$sh9|12:00:00|$s9 --ebic-gamma 0.5 1 --c-choices C_ID --c-scale $cs $ea --weights uniform --w-min $w"
             done
           done
         done
       fi
       if [ -z "$GROUP" ] || [ "$GROUP" = class ]; then
-        for g in no2c dag; do
-          case "$g" in no2c) gc=n ;; dag) gc=d ;; esac
+        for g in dag; do
+          gc=d
           for c in C2I Cresc; do
             if [ "$c" = C2I ]; then cs=identity; ci=i; else cs=variance; ci=r; fi
-            for e in lasso MCP MCP-up adaptive; do
+            for e in lasso MCP-up adaptive; do              # 19 Oct: MCP sparse -> dense dropped (its lock-in is wave 1's V1)
               case "$e" in
                 lasso) ec=la; sh9=4; ea="--penalty lasso" ;;
-                MCP) ec=Ms; sh9=8; ea="--penalty MCP" ;;
                 MCP-up) ec=Mu; sh9=16; ea="--penalty MCP --direction up" ;;
                 adaptive) ec=ad; sh9=4; ea="--method adaptive" ;;
               esac
-              echo "direct_${e}_${c}_${g}|9c${ec}${gc}${ci}|$run|$sh9|12:00:00|$s9 --c-scale $cs $ea --graph $g"
+              echo "direct_${e}_${c}_${g}|9c${ec}${gc}${ci}|$run|$sh9|12:00:00|$s9 --ebic-gamma 0.5 1 --c-scale $cs $ea --graph $g"
+            done
+          done
+        done
+      fi
+      if [ -z "$GROUP" ] || [ "$GROUP" = twocycle ]; then
+        # E5 (19 Oct): the share of 2-cycles among the connected pairs, at the random class's expected
+        # number of edges (--graph pairs --two-cycle-share); lasso / MCP dense -> sparse / adaptive lasso,
+        # both C, the true C = 2I graphs, every reduction; cells direct_<estimator>_<C>_s<share>
+        for s in 0 0.25 0.5 0.75 1; do
+          stag=s${s/./}
+          case "$s" in 0) sc=0 ;; 0.25) sc=2 ;; 0.5) sc=5 ;; 0.75) sc=7 ;; 1) sc=1 ;; esac
+          for c in C2I Cresc; do
+            if [ "$c" = C2I ]; then cs=identity; ci=i; else cs=variance; ci=r; fi
+            for e in lasso MCP-up adaptive; do
+              case "$e" in
+                lasso) ec=la; sh9=4; ea="--penalty lasso" ;;
+                MCP-up) ec=Mu; sh9=16; ea="--penalty MCP --direction up" ;;
+                adaptive) ec=ad; sh9=4; ea="--method adaptive" ;;
+              esac
+              echo "direct_${e}_${c}_${stag}|9t${ec}${sc}${ci}|$run|$sh9|12:00:00|$s9 --ebic-gamma 0.5 1 --c-choices C_ID --c-scale $cs $ea --graph pairs --two-cycle-share $s"
             done
           done
         done
@@ -365,11 +391,13 @@ cells() {
   esac
 }
 
-# wave 9: the knob cells (betamin, class) and the loglik starts are planned at n = 1000 and 1e4 only
+# wave 9: the loglik starts are planned at n = 1000 and 1e4 only; the knob cells (betamin, class, twocycle)
+# also at n = inf (19 Oct)
 planned_at_n() {
   [ "$WAVE" = 9 ] || return 0
   case "$1" in
-    *_w[0-9]*|*_no2c|*_dag|loglik_*) [ "$2" = 1000 ] || [ "$2" = 1e4 ] ;;
+    *_w[0-9]*|*_s[0-9]*|*_dag) [ "$2" = 1000 ] || [ "$2" = 1e4 ] || [ "$2" = inf ] ;;   # the knob cells: also n = inf (19 Oct)
+    loglik_*) [ "$2" = 1000 ] || [ "$2" = 1e4 ] ;;
     *) return 0 ;;
   esac
 }
@@ -449,7 +477,7 @@ for n in "${NS[@]}"; do
     wanted "$name" || continue
     n_wanted=$((n_wanted + 1))
     run="$ROOT/${name}_n${n}"
-    planned_at_n "$name" "$n" || { echo "not planned $run  (wave 9 runs this cell at n = 1000 and 1e4 only)"; continue; }
+    planned_at_n "$name" "$n" || { echo "not planned $run  (wave 9 runs the loglik starts at n = 1000 and 1e4 only)"; continue; }
     shards=${SHARDS:-$shards}
     if [ -f "$run/n_shards" ]; then
       prev=$(cat "$run/n_shards")

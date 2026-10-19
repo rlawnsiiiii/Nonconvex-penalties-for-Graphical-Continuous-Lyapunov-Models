@@ -83,11 +83,13 @@ class S1Config:
     pilot: str = "lasso"
     # The generator's knobs of 13 October 2026 (gclm.data.simulate.sample_drift): the law of the
     # weights ("normal" = N(0, 1), "uniform" = |w| ~ U[w_min, 1] with a random sign), the lower
-    # bound of the uniform law, and the graph class ("random", "no2c", "dag").  Defaults = the
+    # bound of the uniform law, and the graph class ("random", "dag", "pairs").  Defaults = the
     # thesis generator, bit for bit.
     weights: str = "normal"
     w_min: float = 0.0
     graph: str = "random"
+    # E5 (19 October 2026): with graph = "pairs", the share of connected pairs that are 2-cycles
+    two_cycle_share: float = 0.0
     # The volatility matrix used for estimation: "identity" (2 I, Dettling's
     # pipeline, every run before the campaign of October 2026) or "variance"
     # (2 diag(1 / s_i^2) with s_i the standard deviations the data were divided by:

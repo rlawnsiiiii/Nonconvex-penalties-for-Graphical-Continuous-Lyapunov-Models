@@ -159,7 +159,7 @@ def lasso_path(
     ``"up"`` simply returns the ``"down"`` path.  For MCP / SCAD they reach
     different stationary points of the same objective: the estimator is the
     objective *plus* the order.  See next_steps/051026/cluster_campaign_051026.md
-    and next_steps/051026/orientation_lock_in.md for why the order matters here.
+    and next_steps/051026/orientation_lock_in_051026.md for why the order matters here.
 
     ``start`` (``direction="up"`` with MCP / SCAD only): the matrix to start the dense ->
     sparse path from instead of the lasso solution at the smallest lambda -- an exact fit of

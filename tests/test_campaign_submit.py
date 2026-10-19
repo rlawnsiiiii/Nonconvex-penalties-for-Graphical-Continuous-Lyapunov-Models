@@ -127,22 +127,25 @@ def test_waves_have_the_planned_cells(cluster):
 
 STARTS9 = ("exact", "l1", "l2", "truth0.05", "truth0.2")
 FOUR = ("lasso", "MCP", "MCP-up", "adaptive")
+THREE = ("lasso", "MCP-up", "adaptive")          # 19 Oct: MCP sparse -> dense dropped from the knob groups
 
 
 def test_wave_9_has_the_planned_groups(cluster):
-    """Plan of 13 October 2026: E1 starts (20 cells per n), E2 threshold (4), E3 betamin (32), E4 class
-    (16) and the optional loglik starts (20); --group selects one, the knob cells run at n = 1000 and
-    1e4 only."""
+    """Plan of 13 October 2026: E1 starts (20 cells per n), E2 threshold (4), E3 betamin (24 since MCP sparse
+    -> dense was dropped on 19 October), E4 class (6: dag only), E5 twocycle (30) and the optional loglik starts (20);
+    --group selects one; the loglik starts run at n = 1000 and 1e4 only, the knob groups also at inf."""
     submit, root, _ = cluster
     wave9 = listed(submit, 9)
     names = [c[0] for c in wave9]
-    # shards: starts 2 C x 5 starts x (16 + 4); threshold 4 x 4; betamin 4 w x 2 C x 32; class 2 g x 2 C x 32;
-    # loglik starts 5 x 2 x (8 + 16)
-    assert len(wave9) == 92 and sum(c[2] for c in wave9) == 200 + 16 + 256 + 128 + 240
+    # shards: starts 2 C x 5 starts x (16 + 4); threshold 4 x 4; betamin 4 w x 2 C x (4 + 16 + 4); class 1 g x 2 C x 24;
+    # twocycle 5 s x 2 C x (4 + 16 + 4); loglik starts 5 x 2 x (8 + 16)
+    assert len(wave9) == 104 and sum(c[2] for c in wave9) == 200 + 16 + 192 + 48 + 240 + 240
     groups = {"starts": [f"direct_{pr}-{st}_{c}" for c in ("C2I", "Cresc") for st in STARTS9 for pr in ("MCP-up", "adaptive")],
               "threshold": [f"direct_threshold{v}_{c}" for c in ("C2I", "Cresc") for v in ("", "-norefit")],
-              "betamin": [f"direct_{e}_{c}_w{w}" for w in ("0", "01", "025", "05") for c in ("C2I", "Cresc") for e in FOUR],
-              "class": [f"direct_{e}_{c}_{g}" for g in ("no2c", "dag") for c in ("C2I", "Cresc") for e in FOUR],
+              "betamin": [f"direct_{e}_{c}_w{w}" for w in ("0", "01", "025", "05") for c in ("C2I", "Cresc") for e in THREE],
+              "class": [f"direct_{e}_{c}_{g}" for g in ("dag",) for c in ("C2I", "Cresc") for e in THREE],
+              "twocycle": [f"direct_{e}_{c}_s{sh}" for sh in ("0", "025", "05", "075", "1") for c in ("C2I", "Cresc")
+                           for e in ("lasso", "MCP-up", "adaptive")],
               "starts-loglik": [f"loglik_{pr}-{st}_{c}" for c in ("C2I", "Cresc") for st in STARTS9 for pr in ("MCP-up", "adaptive")]}
     assert names == sum(groups.values(), [])
     for group, cells in groups.items():
@@ -162,14 +165,30 @@ def test_wave_9_has_the_planned_groups(cluster):
         if "_w" in name:
             w = name.rsplit("_w", 1)[1]
             assert f"--weights uniform --w-min {w[0]}{'.' + w[1:] if len(w) > 1 else ''}" in a
-        if name.endswith(("_no2c", "_dag")):
+            assert "--ebic-gamma 0.5 1" in a and "--c-choices C_ID" in a      # 19 Oct: every reduction, true C = 2I only
+        elif re.search(r"_s\d+$", name):                                       # E5: the 2-cycle share (19 Oct)
+            sh = name.rsplit("_s", 1)[1]
+            assert f"--graph pairs --two-cycle-share {sh[0]}{'.' + sh[1:] if len(sh) > 1 else ''}" in a
+            assert "--ebic-gamma 0.5 1" in a and "--c-choices C_ID" in a and "--weights" not in a
+        elif name.endswith("_dag"):                                            # E4: every reduction, all four true C
             assert f"--graph {name.rsplit('_', 1)[1]}" in a
-    # the knob cells and the loglik starts are not planned at n = inf: reported, nothing submitted
-    res, calls = submit("--wave", "9", "--group", "betamin", "--n", "inf", "--dry-run")
-    assert res.returncode == 0 and not calls and res.stdout.count("not planned") == 32
+            assert "--ebic-gamma 0.5 1" in a and "--c-choices" not in a
+        else:
+            assert "--ebic-gamma" not in a and "--c-choices" not in a         # the other groups are as planned
+        assert "_MCP_" not in name                                            # 19 Oct: MCP sparse -> dense dropped
+    # the loglik starts are not planned at n = inf: reported, nothing submitted; the three knob groups are (19 October)
+    res, calls = submit("--wave", "9", "--group", "starts-loglik", "--n", "inf", "--dry-run")
+    assert res.returncode == 0 and not calls and res.stdout.count("not planned") == 20
     assert "would submit 0 tasks in 0 cells" in res.stdout
+    res, calls = submit("--wave", "9", "--group", "betamin", "--n", "inf", "--dry-run")
+    assert res.returncode == 0 and res.stdout.count("sbatch --array=") == 24 and "would submit 192 tasks in 24 cells" in res.stdout
+    assert "--n-obs inf" in res.stdout and "--c-choices C_ID" in res.stdout and "not planned" not in res.stdout
+    res, calls = submit("--wave", "9", "--group", "twocycle", "--n", "inf", "--dry-run")
+    assert res.returncode == 0 and res.stdout.count("sbatch --array=") == 30 and "would submit 240 tasks in 30 cells" in res.stdout
+    res, calls = submit("--wave", "9", "--group", "class", "--n", "inf", "--dry-run")
+    assert res.returncode == 0 and res.stdout.count("sbatch --array=") == 6 and "would submit 48 tasks in 6 cells" in res.stdout
     res, calls = submit("--wave", "9", "--group", "class", "--n", "1000", "--dry-run")
-    assert res.returncode == 0 and res.stdout.count("sbatch --array=") == 16 and "would submit 128 tasks in 16 cells" in res.stdout
+    assert res.returncode == 0 and res.stdout.count("sbatch --array=") == 6 and "would submit 48 tasks in 6 cells" in res.stdout
     res, calls = submit("--wave", "9", "--group", "starts", "--n", "inf", "--only", "adaptive-l1", "--dry-run")
     assert res.returncode == 0 and res.stdout.count("sbatch --array=") == 2
     assert f"{root / 'direct_adaptive-l1_Cresc_ninf'} --p 10 20 --reps 25 --select search --c-scale variance --method adaptive --pilot l1 --n-obs inf" in res.stdout
@@ -179,9 +198,9 @@ def test_wave_9_has_the_planned_groups(cluster):
     # a trailing $ anchors an --only pattern at the end of the name: three weight levels without w_min = 0.1
     res, _ = submit("--wave", "9", "--group", "betamin", "--only", "_w0$", "_w025", "_w05", "--list")
     names = [line.split()[0] for line in res.stdout.splitlines()[1:]]
-    assert len(names) == 24 and not any(n.endswith("_w01") for n in names) and sum(n.endswith("_w0") for n in names) == 8
+    assert len(names) == 18 and not any(n.endswith("_w01") for n in names) and sum(n.endswith("_w0") for n in names) == 6
     res, _ = submit("--wave", "9", "--group", "betamin", "--only", "_w0", "--list")
-    assert len(res.stdout.splitlines()) - 1 == 32                   # without the anchor every level matches
+    assert len(res.stdout.splitlines()) - 1 == 24                   # without the anchor every level matches
 
 
 @pytest.mark.parametrize("wave", [1, 2, 3, 4, 5, 6, 7, 8, 9])
@@ -221,7 +240,10 @@ def test_every_cell_is_accepted_by_its_runner(cluster, wave):
                                               (2, (10,)) if ml else (25, (10,)))
             continue
         assert (ns.refit or "direct") == ("loglik" if "-ml" in name else "direct") and ns.add_screen is None
-        assert ns.ebic_gamma == ([0.5, 1.0] if "-ebic" in name else [])
+        knob = re.search(r"_(w|s)\d+$", name) is not None                # betamin / twocycle: true C = 2I only (19 Oct)
+        every = knob or name.endswith("_dag")                              # the three knob groups: every reduction
+        assert ns.ebic_gamma == ([0.5, 1.0] if ("-ebic" in name or every) else [])
+        assert ns.c_choices == (["C_ID"] if knob else None)
         cfg = run_s1_shard.config_from_args(ns)                   # raises if not implemented
         assert cfg.loss == name.split("_")[0]
         assert (cfg.direction == "up") == ("-up" in name)
@@ -240,11 +262,12 @@ def test_every_cell_is_accepted_by_its_runner(cluster, wave):
             assert cfg.pilot == (start if est.startswith("adaptive-") else "lasso")
             assert cfg.method == ("threshold" if est == "threshold" else "threshold-norefit" if est == "threshold-norefit"
                                   else "adaptive" if est.startswith("adaptive") else "path")
-            m = re.search(r"_w([0-9]+)_|_(no2c|dag)_", name + "_")
+            m = re.search(r"_w([0-9]+)_|_(dag)_|_s([0-9]+)_", name + "_")
+            decimal = lambda digits: float(f"{digits[0]}.{digits[1:]}") if len(digits) > 1 else float(digits)  # noqa: E731
             assert cfg.weights == ("uniform" if m and m.group(1) else "normal")
-            assert cfg.w_min == (float(f"{m.group(1)[0]}.{m.group(1)[1:]}") if m and m.group(1) and len(m.group(1)) > 1
-                                 else 0.0)
-            assert cfg.graph == (m.group(2) if m and m.group(2) else "random")
+            assert cfg.w_min == (decimal(m.group(1)) if m and m.group(1) else 0.0)
+            assert cfg.graph == (m.group(2) if m and m.group(2) else "pairs" if m and m.group(3) else "random")
+            assert cfg.two_cycle_share == (decimal(m.group(3)) if m and m.group(3) else 0.0)   # E5 (19 Oct)
 
 
 def test_submits_once_reports_status_and_fills_missing_shards(cluster):

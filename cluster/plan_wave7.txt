@@ -1,0 +1,12 @@
+# Plan for cluster/feed_queue.sh, wave 7 (9 October 2026): the log-likelihood loss at p = 20 with
+# both C and the dense-start estimators, and the likelihood refit inside the score and the search.
+# Only n = 1e4 here (about 1,100 CPU-h); n = 1000 and inf after a look at these results (the two
+# commented lines at the end, about 1,250 CPU-h each). Costs: next_steps/091026/next_steps_091026.md.
+--wave 7 --n 1e4 --only _p20                   # (a) p = 20, both C, 10 cells: 196 tasks, about 670 CPU-h
+--wave 7 --n 1e4 --only searchml               # (e) search from random graphs, likelihood refit: 64 tasks, 200+ CPU-h
+--wave 7 --n 1e4                               # (b) and (c): 104 tasks, about 250 CPU-h; (d) at 1e4 is wave 5a, complete
+# repairs: waits until no job of wave 7 is queued or running
+--wave 7 --fill --time 24:00:00
+# later, if Joon decides so:
+# --wave 7 --n 1000
+# --wave 7 --n inf

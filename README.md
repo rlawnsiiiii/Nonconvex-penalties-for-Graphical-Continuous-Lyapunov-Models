@@ -7,6 +7,7 @@ The default solver and why it is hand-written: [`docs/FISTA.md`](docs/FISTA.md).
 MCP and SCAD — definitions, the two conventions, validation: [`docs/NONCONVEX.md`](docs/NONCONVEX.md).
 Varando's likelihood and Frobenius losses, and their Newton solver: [`docs/LIKELIHOOD.md`](docs/LIKELIHOOD.md).
 Running the full reproduction on a cluster: [`docs/REPRODUCTION.md`](docs/REPRODUCTION.md).
+The generator's graph-class and beta-min knobs (experiments E4 and E3), from the generator to the figures: [`docs/GRAPH_CLASSES_AND_BETAMIN.md`](docs/GRAPH_CLASSES_AND_BETAMIN.md).
 
 ## Layout
 
@@ -37,7 +38,7 @@ tests/                       pytest; the `r` marker needs Rscript + glmnet/ncvre
 
 ```bash
 pip install -e ".[dev]"
-pytest                       # 518 tests; R-backed ones skip if Rscript is absent
+pytest                       # 533 tests; R-backed ones skip if Rscript is absent
 pytest -m "not r"            # skip the R validation explicitly
 
 python simulations/run_m0.py --reps 100          # reproduces Figure 3
