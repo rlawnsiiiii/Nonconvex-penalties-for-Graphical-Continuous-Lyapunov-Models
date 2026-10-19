@@ -26,14 +26,14 @@
 --wave 7 --fill --time 24:00:00
 --wave 8 --n 1e4                               # (b) 300 tasks (the direct-loss cells are wave 5a's), about 580 CPU-h
 --wave 8 --n 1000                              # (b) 348 tasks, about 770 CPU-h
---wave 8 --fill --time 24:00:00
+# --wave 8 --fill --time 24:00:00   # commented out 19 Oct: only the knob groups (class, betamin, twocycle) run now
 # repairs of waves 5 and 6 (from plan_091026.txt)
 --wave 5 --fill --time 24:00:00
 --wave 6 --fill --time 24:00:00
 # --- wave 9 (plan_mechanism_131026.md), cheap groups first ---
---wave 9 --group threshold                                   # E2: 12 cells, 48 tasks, about 75 CPU-h
---wave 9 --group starts --n 1e4                              # E1: 20 cells, 200 tasks, about 260 CPU-h
---wave 9 --group starts --n inf                              # E1: 20 cells, 200 tasks, about 270 CPU-h
+# --wave 9 --group threshold                                   # E2: 12 cells, 48 tasks, about 75 CPU-h   # commented out 19 Oct: only the knob groups (class, betamin, twocycle) run now
+# --wave 9 --group starts --n 1e4                              # E1: 20 cells, 200 tasks, about 260 CPU-h   # commented out 19 Oct: only the knob groups (class, betamin, twocycle) run now
+# --wave 9 --group starts --n inf                              # E1: 20 cells, 200 tasks, about 270 CPU-h   # commented out 19 Oct: only the knob groups (class, betamin, twocycle) run now
 --wave 9 --group class --n 1e4                               # E4: 6 cells (dag), 48 tasks, about 105 CPU-h (19 Oct: lasso / MCP-up / adaptive, every reduction, all four true C)
 --wave 9 --group class --n inf                               # E4 at the population covariance: 6 cells, 48 tasks, about 115 CPU-h (19 Oct)
 --wave 9 --group betamin --n 1e4                             # E3: 24 cells, 192 tasks, about 110 CPU-h (19 Oct: lasso / MCP-up / adaptive, true C = 2I only, every reduction; LRZ timings of wave 1)
@@ -42,7 +42,7 @@
 --wave 9 --group twocycle --n inf                            # E5 at the population covariance: 30 cells, 240 tasks, about 150 CPU-h
 --wave 9 --fill --time 24:00:00
 # the n = 1000 groups: expensive (the MCP paths at n = 1000 are slow); see the header before starting them
---wave 9 --group starts --n 1000 --shards 32 --time 24:00:00   # E1: 20 cells, 640 tasks, about 2,600 CPU-h (MCP-up from the truth: 12 h tasks)
+# --wave 9 --group starts --n 1000 --shards 32 --time 24:00:00   # E1: 20 cells, 640 tasks, about 2,600 CPU-h (MCP-up from the truth: 12 h tasks)   # commented out 19 Oct: only the knob groups (class, betamin, twocycle) run now
 --wave 9 --group class --n 1000 --shards 16 --time 24:00:00    # E4: 6 cells, 96 tasks, about 105 CPU-h (19 Oct; the 1,900 of the old line was MCP sparse -> dense on DAGs)
 --wave 9 --group betamin --n 1000 --shards 16 --time 24:00:00  # E3: 24 cells, 384 tasks, about 110 CPU-h with the 19 Oct arguments
 --wave 9 --group twocycle --n 1000 --shards 16 --time 24:00:00 # E5: 30 cells, 480 tasks, about 130 CPU-h
