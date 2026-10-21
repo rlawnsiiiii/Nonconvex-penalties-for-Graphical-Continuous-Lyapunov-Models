@@ -234,3 +234,29 @@ def test_graph_class_columns(tiny_campaign, tmp_path):
                           "--root", str(tiny_campaign), "--p", "5"], capture_output=True, text=True, cwd=ROOT)
     assert res.returncode == 0, res.stderr
     assert "paired gain in max_f1" in res.stdout and (tiny_campaign / "campaign_graph_class.csv").exists()
+
+
+def test_penalised_diagonal_cells_pair_with_their_own_lasso_and_their_unpenalised_selves(tmp_path):
+    """Wave 10 (21 October 2026): an estimator with the diagonal penalised ("-pd", true C = 2I only) is
+    compared with the lasso with the diagonal penalised, and with itself unpenalised on the shared graphs."""
+    cells = {"direct_lasso_Cresc_n1000": [], "direct_adaptive_Cresc_n1000": ["--method", "adaptive"],
+             "direct_lasso-pd_Cresc_n1000": ["--penalize-diagonal", "--c-choices", "C_ID"],
+             "direct_adaptive-pd_Cresc_n1000": ["--method", "adaptive", "--penalize-diagonal", "--c-choices", "C_ID"]}
+    common = ["--shard", "0", "--n-shards", "1", "--p", "5", "--reps", "1", "--n-obs", "1000", "--c-scale", "variance"]
+    for name, extra in cells.items():
+        res = subprocess.run([sys.executable, str(ROOT / "simulations" / "run_s1_shard.py"), *common, *extra,
+                              "--out-dir", str(tmp_path / name / "shards")], capture_output=True, text=True, cwd=ROOT)
+        assert res.returncode == 0, res.stderr
+        (tmp_path / name / "n_shards").write_text("1\n")
+    rows = campaign.load(tmp_path)
+    graphs = {m["estimator"]: m["graphs"] for m in campaign.means_table(rows)}
+    assert graphs == {"lasso": 16, "adaptive": 16, "lasso-pd": 4, "adaptive-pd": 4}
+    paired = {(r["estimator"], r["reference"], r["true_c"]): r for r in campaign.paired_table(rows)}
+    by = {e: {key(r): r for r in rows if r["estimator"] == e} for e in graphs}
+    for est, ref_name, ref in (("adaptive-pd", "same_c", "lasso-pd"), ("adaptive-pd", "unpenalised", "adaptive"),
+                               ("lasso-pd", "unpenalised", "lasso")):
+        d = [r["max_f1"] - by[ref][g]["max_f1"] for g, r in by[est].items()]
+        row = paired[(est, ref_name, "all")]
+        assert row["pairs"] == 4 and math.isclose(row["max_f1_diff"], np.mean(d), abs_tol=1e-12)
+    assert ("lasso-pd", "same_c", "all") not in paired              # not compared with itself
+    assert ("adaptive", "unpenalised", "all") not in paired         # only the -pd estimators have this reference

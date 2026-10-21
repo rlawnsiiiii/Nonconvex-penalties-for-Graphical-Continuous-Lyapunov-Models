@@ -26,7 +26,7 @@ import pytest
 
 from gclm.data.simulate import CChoice, draw_instance
 from gclm.data.examples import example2_path
-from gclm.objective.direct import diagonal_fit, lambda_max
+from gclm.objective.direct import diagonal_fit, diagonal_solution, lambda_max
 from gclm.objective.penalties import penalty_scale, penalty_weights
 from gclm.solvers.path import lambda_grid, lasso_path
 from gclm.solvers.proxgrad import solve_fista
@@ -537,3 +537,62 @@ def test_prox_near_the_step_cap(pen, gamma, frac):
 def test_prox_refuses_a_step_at_the_cap(pen, gamma):
     with pytest.raises(ValueError):
         prox(ZS, gamma if pen == "MCP" else gamma - 1, LAM, np.ones_like(ZS), pen, gamma)
+
+
+
+# --------------------------------------------------------------------------- #
+# The diagonal penalised (Dettling's eq. (1.4); wave 10): the diagonal-only solution and the
+# lambda_max of each penalty
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("penalty", ["lasso", *NONCONVEX])
+def test_diagonal_solution_is_stationary_on_the_diagonal(penalty):
+    """The diagonal-only solve meets the first-order condition of every diagonal entry of the whole
+    problem (its gradient there is the diagonal of 2 R Sigma); with the diagonal unpenalised it is the
+    diagonal fit itself."""
+    sigma, c, _ = _problem()
+    p = len(sigma)
+    lam = 0.5 * lambda_max(sigma, c, penalize_diagonal=True, penalty=penalty)
+    d = diagonal_solution(sigma, c, lam, penalty)
+    assert np.count_nonzero(d - np.diag(np.diag(d))) == 0
+    w = np.eye(p)                                                   # the diagonal entries only
+    assert stationarity(np.diag(np.diag(d)), np.diag(np.diag(direct_grad(d, sigma, c))), lam, w, penalty) < 1e-10
+    assert not np.allclose(d, diagonal_fit(sigma, c))               # shrunk
+    assert np.array_equal(diagonal_solution(sigma, c, lam, penalty, weights=np.zeros(p)), diagonal_fit(sigma, c))
+
+
+@pytest.mark.parametrize("penalty", ["lasso", *NONCONVEX])
+def test_each_penalty_has_its_own_lambda_max_with_the_diagonal_penalised(penalty):
+    """lambda_max is the smallest lambda at which the diagonal-only solution satisfies the first-order
+    condition of the whole problem: it does at lambda_max, it does not just below; the path ends there
+    at that diagonal solution and is stationary at every lambda of its grid."""
+    sigma, c, _ = _problem()
+    w = penalty_weights(len(sigma), penalize_diagonal=True)
+    lam = lambda_max(sigma, c, penalize_diagonal=True, penalty=penalty)
+    for factor, holds in ((1.0, True), (1.0 - 1e-6, False)):
+        d = diagonal_solution(sigma, c, factor * lam, penalty)
+        viol = stationarity(d, direct_grad(d, sigma, c), factor * lam, w, penalty)
+        assert (viol < 1e-10) == holds, (factor, viol)
+    directions = ("down", "up") if penalty != "lasso" else ("down",)
+    for direction in directions:
+        path = lasso_path(sigma, c, n_lambda=10, ratio=1e-2, penalty=penalty, direction=direction,
+                          penalize_diagonal=True, **TIGHT)
+        assert path.lambdas[-1] == lam
+        assert np.array_equal(path.estimates[-1], diagonal_solution(sigma, c, lam, penalty))
+        for lam_k, m in zip(path.lambdas, path.estimates):
+            assert stationarity(m, direct_grad(m, sigma, c), lam_k, w, penalty) < 1e-8
+
+
+def test_mcp_shrinks_the_diagonal_differently_so_its_lambda_max_differs():
+    sigma, c, _ = _problem()
+    lasso = lambda_max(sigma, c, penalize_diagonal=True)
+    mcp = lambda_max(sigma, c, penalize_diagonal=True, penalty="MCP")
+    assert not np.isclose(lasso, mcp)
+    assert not np.allclose(diagonal_solution(sigma, c, lasso), diagonal_solution(sigma, c, lasso, "MCP"))
+
+
+def test_the_penalised_diagonal_needs_the_textbook_convention():
+    sigma, c, _ = _problem()
+    with pytest.raises(ValueError, match="textbook"):
+        lasso_path(sigma, c, n_lambda=3, penalty="MCP", convention="ncvreg", penalize_diagonal=True)

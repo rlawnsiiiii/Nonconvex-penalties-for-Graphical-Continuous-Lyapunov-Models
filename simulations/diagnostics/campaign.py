@@ -164,6 +164,7 @@ ORDER = ("lasso", "lasso-up", "MCP", "SCAD", "MCP-up", "MCP-up-lasso", "SCAD-up"
          "MCP-up-exact", "MCP-up-l1", "MCP-up-l2", "MCP-up-truth0.05", "MCP-up-truth0.2",       # wave 9: E1
          "adaptive-exact", "adaptive-l1", "adaptive-l2", "adaptive-truth0.05", "adaptive-truth0.2",
          "threshold", "threshold-norefit",                                                      # wave 9: E2
+         "lasso-pd", "MCP-pd", "SCAD-pd", "MCP-up-pd", "SCAD-up-pd", "adaptive-pd",             # wave 10
          "lasso-ml", "lasso-up-ml", "MCP-ml", "MCP-up-ml", "MCP-up-lasso-ml", "adaptive-ml",
          "search-pure", "search-pure-100s", "search-pure-100u", "search-pure-30s", "search-pure-300s",
          "search-pure-e1", "search-pure-ml", "search-pure-100sml", "search-truth", "search-truth-e1",
@@ -473,18 +474,23 @@ def paired_table(rows: list[dict]) -> list[dict]:
     under that penalty (its ``ebic1_search_*`` columns, from wave 5c or the wave 6 rescoring).
     A column the reference lacks gives NaN: until 13 October 2026 an estimator's searched graph
     was then compared with the reference's selected graph under the name ``search_*_diff``
-    (code review B1; it hit the wave 7 cells at p = 10 against wave 3's lasso)."""
+    (code review B1; it hit the wave 7 cells at p = 10 against wave 3's lasso).
+    An estimator with the diagonal penalised ("-pd", wave 10) is compared with the lasso with the
+    diagonal penalised ("lasso-pd"), and also with itself with the diagonal unpenalised
+    ("unpenalised": e.g. adaptive-pd against adaptive on the same graphs)."""
     by = defaultdict(dict)                       # (loss, c, n, p, estimator, dgp) -> graph id -> row
     for r in rows:
         by[(r["loss"], r["c"], r["n"], r["p"], r["estimator"], r.get("dgp", ""))][tuple(r[k] for k in ID)] = r
     out = []
     for (loss, c, n, p, est, dgp), cell in sorted(by.items(), key=lambda kv: (
             kv[0][0], n_key(kv[0][2]), kv[0][3], kv[0][1], kv[0][5], estimator_key(kv[0][4]))):
-        ref_est = "lasso-ml" if est.endswith(("-ml", "sml")) else "lasso"   # the "-ml" cells and the
-        #                                                 100-start likelihood-refit searches (search-*-100sml)
+        ref_est = ("lasso-ml" if est.endswith(("-ml", "sml"))        # the "-ml" cells and the 100-start
+                   else "lasso-pd" if est.endswith("-pd") else "lasso")   # likelihood-refit searches; wave 10
         # the reference is drawn with the same generator (the knob cells of wave 9 pair with their own lasso)
-        for ref_name, ref_key in (("same_c", (loss, c, n, p, ref_est, dgp)),
-                                  ("dettling", (loss, "C2I", n, p, ref_est, dgp))):
+        refs = [("same_c", (loss, c, n, p, ref_est, dgp)), ("dettling", (loss, "C2I", n, p, ref_est, dgp))]
+        if est.endswith("-pd"):
+            refs.append(("unpenalised", (loss, c, n, p, est[:-len("-pd")], dgp)))
+        for ref_name, ref_key in refs:
             ref = by.get(ref_key)
             if ref is None or ref is cell:
                 continue

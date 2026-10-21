@@ -18,7 +18,7 @@ import pytest
 
 from gclm.data.simulate import CChoice, draw_instance, estimation_volatility
 from gclm.lyapunov import design_matrix, vec
-from gclm.objective.direct import diagonal_fit, direct_grad, lambda_max
+from gclm.objective.direct import diagonal_fit, diagonal_solution, direct_grad, lambda_max
 from gclm.objective.penalties import DEFAULT_GAMMA, lla_weights, penalty_weights, stationarity
 from gclm.solvers.coordinate import solve_design
 from gclm.solvers.path import adaptive_lasso_path, lambda_grid, lasso_path, lla_path
@@ -247,6 +247,32 @@ def test_adaptive_lasso_with_an_empty_pilot_returns_the_diagonal_fit(problem):
     assert len(path.estimates) == 5
     for m in path.estimates:
         assert np.allclose(m, diagonal_fit(sigma, c))
+
+
+def test_adaptive_lasso_with_the_diagonal_penalised(problem):
+    """Wave 10 (Dettling's eq. (1.4)): both steps penalise the diagonal.  The pilot is the lasso with
+    the diagonal penalised, the diagonal gets 1 / |M0_ii| like every other entry, every solution meets
+    the optimality conditions of that problem, and the top of the grid is the edge of the diagonal
+    solutions: a shrunken diagonal there, an edge just below."""
+    _, sigma, c, _ = problem
+    p = sigma.shape[0]
+    off = ~np.eye(p, dtype=bool)
+    path = adaptive_lasso_path(sigma, c, n_lambda=12, ratio=1e-3, zero_tol=0.0, penalize_diagonal=True, **TIGHT)
+    pilot = lasso_path(sigma, c, n_lambda=12, ratio=1e-3, penalize_diagonal=True, **TIGHT).estimates[0]
+    assert np.array_equal(path.pilot, pilot)
+    kept = pilot != 0
+    assert np.all(np.diag(kept)) and (off & ~kept).any()
+    expected = 1.0 / np.abs(pilot[kept])
+    assert np.allclose(path.weights[kept], expected / expected.min())     # the diagonal included
+    assert np.all(np.isinf(path.weights[~kept]))
+    finite = np.where(kept, path.weights, 0.0)
+    for lam, m in zip(path.lambdas, path.estimates):
+        assert np.all(m[~kept] == 0)
+        assert stationarity(m[kept], direct_grad(m, sigma, c)[kept], lam, finite[kept], "lasso") < 1e-7
+    assert np.all(path.estimates[-1][off] == 0) and np.any(path.estimates[-2][off] != 0)
+    assert np.array_equal(path.estimates[-1],                               # the diagonal-only solution
+                          diagonal_solution(sigma, c, path.lambdas[-1], weights=np.diag(path.weights)))
+    assert not np.allclose(np.diag(path.estimates[-1]), np.diag(diagonal_fit(sigma, c)))
 
 
 # --------------------------------------------------------------------------- #

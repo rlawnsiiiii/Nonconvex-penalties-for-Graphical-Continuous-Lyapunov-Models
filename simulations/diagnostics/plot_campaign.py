@@ -98,6 +98,12 @@ def read(path: Path) -> list[dict]:
     return list(csv.DictReader(path.open()))
 
 
+def thesis_rows(rows: list[dict]) -> list[dict]:
+    """The rows of cells drawn with the thesis generator (``dgp`` empty).  The knob cells of wave 9 carry
+    the same estimator, C, n and p, and would otherwise be mixed into these figures (21 October 2026)."""
+    return [r for r in rows if not r.get("dgp")]
+
+
 def f(x) -> float:
     try:
         return float(x)
@@ -505,7 +511,7 @@ def fig_restarts(root: Path, means, out, kind_filter=None, name="restarts", rows
                        if r["p"] == p and r["c"] == c and r["n"] == n and r["loss"] == "direct"}
             else:
                 if per_dataset is None and (root / "campaign_per_dataset.csv").exists():
-                    per_dataset = read(root / "campaign_per_dataset.csv")
+                    per_dataset = thesis_rows(read(root / "campaign_per_dataset.csv"))
                 if per_dataset:
                     ids = {(r["k"], r["c_choice"], r["rep"]) for r in per_dataset if r["cell"] == cell}
                     for est in ("search-pure", "lasso", "adaptive"):
@@ -718,9 +724,9 @@ def main() -> None:
                          "penalty, gamma = 1, inside the selection and the search (figures_ebic1/; "
                          "wave 5c and 6 cells)")
     args = ap.parse_args()
-    means = apply_rule(read(args.root / "campaign_means.csv"), args.rule)
-    paired = apply_rule(read(args.root / "campaign_paired.csv"), args.rule)
-    rows = apply_rule(read(args.root / "campaign_per_dataset.csv"), args.rule)
+    means = apply_rule(thesis_rows(read(args.root / "campaign_means.csv")), args.rule)
+    paired = apply_rule(thesis_rows(read(args.root / "campaign_paired.csv")), args.rule)
+    rows = apply_rule(thesis_rows(read(args.root / "campaign_per_dataset.csv")), args.rule)
     out = args.root / ("figures" if args.rule == "bic" else "figures_ebic1")
     if args.rule == "ebic1":
         METRIC_NAME["bic_f1"] = "F₁ of the selected graph (eBIC penalty, γ = 1)"

@@ -80,6 +80,13 @@
 #           Shard counts start from wave 1's per estimator and are to be set from the rehearsal
 #           (plan §6, step 5).  A wave 9 cell asked for at an n it is not planned at is reported
 #           and skipped.
+#   wave 10 (21 October) the direct-loss experiments of the 12 October briefing (slides/091026) again
+#           with the diagonal of M penalised too (Dettling's eq. (1.4), --penalize-diagonal), true C = 2I
+#           only (--c-choices C_ID), the BIC and the eBIC(0.5, 1) selection: lasso / MCP / SCAD /
+#           MCP-up / SCAD-up / adaptive, both C, (a) p = 10 and 20 with the search, n = 1000, 1e4 and
+#           inf, cells direct_<estimator>-pd_<C>; (b) p = 15 ... 50 at n = 1000, cells
+#           direct_<estimator>-pd_<C>_p<p> (--p selects the sizes, as in wave 4).  A quarter of the
+#           graphs of waves 1 and 4, hence about a quarter of their shards.
 #
 # From ~/repo on the login node (nothing needs to be activated first):
 #     bash cluster/submit_campaign.sh --wave 1 --list            # the cells of a wave
@@ -88,12 +95,13 @@
 #     bash cluster/submit_campaign.sh --wave 4 --p 15 25         # wave 4: one or more p
 #     bash cluster/submit_campaign.sh --wave 5 --n 1e4 --only -ml # wave 5a at one n
 #     bash cluster/submit_campaign.sh --wave 9 --group class --n 1000 1e4   # one group of wave 9
+#     bash cluster/submit_campaign.sh --wave 10 --n 1e4         # wave 10 (b) runs at n = 1000 only
 #     bash cluster/submit_campaign.sh --wave 1 --status          # state of every cell
 #     bash cluster/submit_campaign.sh --wave 1 --fill            # resubmit missing shards,
 #                                                                # once the jobs have ended
 # Options: --n takes one or more of 1000 1e4 1e5 inf (default: 1000 1e4 inf; for
-# wave 4 the default is 1000 alone).  --p takes one or more of 15 25 30 40 50 (wave 4 only; default
-# all five).  --only PATTERN... restricts to cells whose name contains one of the
+# wave 4 the default is 1000 alone).  --p takes one or more of 15 25 30 40 50 (waves 4 and 10;
+# default all five).  --only PATTERN... restricts to cells whose name contains one of the
 # patterns (e.g. --only MCP-up, --only Cresc); a pattern ending in $ must end the name (--only _w0$
 # is w_min = 0 alone).  --group NAME (wave 9 only) selects one of its groups: starts, threshold,
 # betamin, class, starts-loglik.  --time HH:MM:SS overrides the time
@@ -387,13 +395,46 @@ cells() {
           done
         done
       fi ;;
-    *) echo "unknown wave: $1 (1 to 9)" >&2; return 2 ;;
+    10)
+      # (21 October) the briefing's direct-loss cells with the diagonal penalised; shards per estimator
+      # (lasso MCP SCAD MCP-up SCAD-up adaptive) from the LRZ hours of waves 1 and 4 divided by four (C_ID
+      # only), so that a task takes about 1 to 2.5 h
+      local s10="--reps 25 --ebic-gamma 0.5 1 --c-choices C_ID --penalize-diagonal" e ec ea i p t10 sh
+      local ests=(lasso MCP SCAD MCP-up SCAD-up adaptive) codes=(la Ms Ss Mu Su ad)
+      local args10=("--penalty lasso" "--penalty MCP" "--penalty SCAD" "--penalty MCP --direction up"
+                    "--penalty SCAD --direction up" "--method adaptive")
+      for c in C2I Cresc; do                     # (a) p = 10 and 20, with the search
+        if [ "$c" = C2I ]; then cs=identity; ci=i; else cs=variance; ci=r; fi
+        sh=(2 2 2 4 4 2)
+        for i in 0 1 2 3 4 5; do
+          echo "direct_${ests[$i]}-pd_${c}|10${codes[$i]}${ci}|$run|${sh[$i]}|12:00:00|--p 10 20 --select search $s10 --c-scale $cs ${args10[$i]}"
+        done
+      done
+      for p in "${PS[@]}"; do                    # (b) p = 15 ... 50 at n = 1000, the selection only
+        case "$p" in
+          15|25) sh=(1 1 2 4 4 1); t10=12:00:00 ;;
+          30) sh=(1 2 2 4 4 1); t10=12:00:00 ;;
+          40) sh=(1 2 2 8 8 1); t10=24:00:00 ;;
+          50) sh=(2 4 4 8 8 2); t10=24:00:00 ;;
+        esac
+        for c in C2I Cresc; do
+          if [ "$c" = C2I ]; then cs=identity; ci=i; else cs=variance; ci=r; fi
+          for i in 0 1 2 3 4 5; do
+            echo "direct_${ests[$i]}-pd_${c}_p${p}|10${codes[$i]}${ci}${p}|$run|${sh[$i]}|$t10|--p $p --select bic $s10 --c-scale $cs ${args10[$i]}"
+          done
+        done
+      done ;;
+    *) echo "unknown wave: $1 (1 to 10)" >&2; return 2 ;;
   esac
 }
 
 # wave 9: the loglik starts are planned at n = 1000 and 1e4 only; the knob cells (betamin, class, twocycle)
 # also at n = inf (19 Oct)
 planned_at_n() {
+  if [ "$WAVE" = 10 ]; then                   # wave 10 (b), like wave 4: n = 1000 only
+    case "$1" in *_p[0-9]*) [ "$2" = 1000 ] ;; *) return 0 ;; esac
+    return
+  fi
   [ "$WAVE" = 9 ] || return 0
   case "$1" in
     *_w[0-9]*|*_s[0-9]*|*_dag) [ "$2" = 1000 ] || [ "$2" = 1e4 ] || [ "$2" = inf ] ;;   # the knob cells: also n = inf (19 Oct)
@@ -407,7 +448,7 @@ n_code() { case "$1" in 1000) echo 3 ;; 1e4) echo 4 ;; 1e5) echo 5 ;; inf) echo 
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --wave) WAVE=${2:?--wave needs 1 to 9}; shift 2 ;;
+    --wave) WAVE=${2:?--wave needs 1 to 10}; shift 2 ;;
     --group) GROUP=${2:?--group needs one of ${GROUPS9[*]}}; shift 2 ;;
     --dry-run) DRY=1; shift ;;
     --fill) FILL=1; shift ;;
@@ -430,16 +471,16 @@ while [ $# -gt 0 ]; do
     *) echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
-[ -n "$WAVE" ] || { echo "--wave is required (1 to 9); see --help" >&2; exit 2; }
+[ -n "$WAVE" ] || { echo "--wave is required (1 to 10); see --help" >&2; exit 2; }
 if [ -n "$GROUP" ]; then
   [ "$WAVE" = 9 ] || { echo "--group applies to wave 9 only" >&2; exit 2; }
   ok=0; for g in "${GROUPS9[@]}"; do [ "$g" = "$GROUP" ] && ok=1; done
   [ "$ok" -eq 1 ] || { echo "unknown group: $GROUP (one of ${GROUPS9[*]})" >&2; exit 2; }
 fi
-if [ "$WAVE" = 4 ]; then
-  [ "$NS_GIVEN" -eq 1 ] || NS=(1000)          # Figure 5's sample size unless --n says otherwise
+if [ "$WAVE" = 4 ] || [ "$WAVE" = 10 ]; then
+  [ "$WAVE" = 10 ] || [ "$NS_GIVEN" -eq 1 ] || NS=(1000)   # wave 4: Figure 5's sample size unless --n says otherwise
   for p in "${PS[@]}"; do
-    [[ "$p" =~ ^(15|25|30|40|50)$ ]] || { echo "unknown p for wave 4: $p (15, 25, 30, 40 or 50)" >&2; exit 2; }
+    [[ "$p" =~ ^(15|25|30|40|50)$ ]] || { echo "unknown p for wave $WAVE: $p (15, 25, 30, 40 or 50)" >&2; exit 2; }
   done
 fi
 CELLS=$(cells "$WAVE") || exit 2
@@ -477,7 +518,7 @@ for n in "${NS[@]}"; do
     wanted "$name" || continue
     n_wanted=$((n_wanted + 1))
     run="$ROOT/${name}_n${n}"
-    planned_at_n "$name" "$n" || { echo "not planned $run  (wave 9 runs the loglik starts at n = 1000 and 1e4 only)"; continue; }
+    planned_at_n "$name" "$n" || { echo "not planned $run  (wave 9 runs the loglik starts at n = 1000 and 1e4 only; wave 10 runs p >= 15 at n = 1000 only)"; continue; }
     shards=${SHARDS:-$shards}
     if [ -f "$run/n_shards" ]; then
       prev=$(cat "$run/n_shards")

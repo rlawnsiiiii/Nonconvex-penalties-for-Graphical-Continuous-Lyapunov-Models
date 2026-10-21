@@ -130,6 +130,15 @@ def test_tables_group_by_generator(wave9):
     assert all("true_c" in m and "dgp" in m for m in campaign.means_table(rows, by_true_c=True))
 
 
+def test_the_campaign_figures_read_the_thesis_generator_only(wave9):
+    """21 October 2026: plot_campaign.py and the slides' figure script pick rows by estimator, C, n and p,
+    which the knob cells share; thesis_rows keeps the thesis generator's rows, one per estimator here."""
+    import plot_campaign
+    means = plot_campaign.thesis_rows(campaign.means_table(campaign.load(wave9)))
+    assert means and all(m["dgp"] == "" for m in means)
+    assert sorted(m["estimator"] for m in means) == sorted(["lasso", "MCP-up-l1", "adaptive-truth0.05", "threshold"])
+
+
 def test_step7_analyses_and_figures_on_the_wave9_cells(wave9, tmp_path):
     """starts.py (E1/E2), graph_class.py with a generated class (E4) and betamin.py's knob table (E3),
     on the tiny campaign; then every script and figure script end to end."""

@@ -65,7 +65,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from gclm.objective import covariance as cov
-from gclm.objective.direct import diagonal_fit, direct_grad, lambda_max
+from gclm.objective.direct import diagonal_fit, diagonal_solution, direct_grad, lambda_max
 from gclm.objective.exact_fits import PRESENT
 from gclm.objective.penalties import (CONVENTIONS, canonical, lla_weights, penalty_scale,
                                       penalty_weights, resolve_gamma)
@@ -179,19 +179,6 @@ def lasso_path(
     """
     p = sigma.shape[0]
     weights = penalty_weights(p, penalize_diagonal=penalize_diagonal)
-
-    # lambda_max is needed for the grid, and again below to short-circuit the
-    # sparse end of the path: for lam >= lambda_max the minimiser is exactly the
-    # diagonal least-squares fit, by the definition of lambda_max.  With the
-    # diagonal unpenalised it is a closed form (O(p^3)), so computing it even
-    # when the caller supplied its own grid is cheap.
-    lam_max: float | None = None
-    if lambdas is None or not penalize_diagonal:
-        lam_max = lambda_max(sigma, c, penalize_diagonal=penalize_diagonal)
-    if lambdas is None:
-        lambdas = lambda_grid(lam_max, n_lambda=n_lambda, ratio=ratio)
-
-    lambdas = np.asarray(lambdas, dtype=float)
     solver_kwargs = dict(solver_kwargs)
 
     # Penalty and convention are resolved once, here, so that every backend
@@ -201,6 +188,21 @@ def lasso_path(
     gamma = resolve_gamma(penalty, solver_kwargs.pop("gamma", None))
     convention = solver_kwargs.pop("convention", "textbook")
     penalty_scale(sigma, convention)                       # validates the name
+    if penalize_diagonal and penalty != "lasso" and convention != "textbook":
+        raise ValueError("the penalised diagonal is implemented for the textbook convention of MCP / SCAD")
+
+    # lambda_max is needed for the grid, and again below to short-circuit the
+    # sparse end of the path: for lam >= lambda_max the estimate is the diagonal-only
+    # solution, by the definition of lambda_max.  With the diagonal unpenalised that is
+    # the diagonal least-squares fit and lambda_max is a closed form (O(p^3)), the same
+    # for every penalty, so computing it even when the caller supplied its own grid is
+    # cheap.  With the diagonal penalised both depend on the penalty: a bisection on the
+    # first-order condition, one p-variable solve per step (wave 10).
+    lam_max = lambda_max(sigma, c, penalize_diagonal=penalize_diagonal, penalty=penalty, gamma=gamma)
+    if lambdas is None:
+        lambdas = lambda_grid(lam_max, n_lambda=n_lambda, ratio=ratio)
+    lambdas = np.asarray(lambdas, dtype=float)
+    diagonal = lambda lam: diagonal_solution(sigma, c, lam, penalty, gamma, weights=np.diag(weights))  # noqa: E731
     if penalty != "lasso":
         solves = {"fista": CONVENTIONS, "ncvreg": ("ncvreg",), "skglm": ("textbook",)}
         if solver not in solves:
@@ -280,10 +282,11 @@ def lasso_path(
         iters, conv = np.zeros(len(lambdas), int), np.ones(len(lambdas), bool)
         for i in order:
             lam = lambdas[i]
-            if lam_max is not None and not penalize_diagonal and lam >= lam_max:
-                # 3. At lambda_max the path ends at the diagonal fit, as the
-                #    standard path does (it is a stationary point there).
-                warm = diagonal_fit(sigma, c)
+            if lam >= lam_max:
+                # 3. At lambda_max the path ends at the diagonal solution, as the
+                #    standard path does (it is a stationary point there): the diagonal
+                #    fit when the diagonal is unpenalised.
+                warm = diagonal(lam)
             else:
                 warm, info = fit(sigma, c, lam, weights=weights, m_init=warm, return_info=True,
                                  **solver_kwargs)
@@ -300,8 +303,8 @@ def lasso_path(
     warm = None
     for i in np.argsort(-lambdas, kind="stable"):
         lam = lambdas[i]
-        if lam_max is not None and not penalize_diagonal and lam >= lam_max:
-            warm = diagonal_fit(sigma, c)  # exact: KKT holds by definition of lam_max
+        if lam >= lam_max:
+            warm = diagonal(lam)  # exact: KKT holds by definition of lam_max (the diagonal fit if unpenalised)
         elif solver == "fista":
             warm, info = fit(sigma, c, lam, weights=weights, m_init=warm, return_info=True,
                              **solver_kwargs)
@@ -410,6 +413,7 @@ def adaptive_lasso_path(
     tol: float = 1e-10,
     max_iter: int = 50_000,
     zero_tol: float = 1e-12,
+    penalize_diagonal: bool = False,
 ) -> AdaptiveLassoPath:
     """Adaptive lasso (Zou 2006) with weights from the dense end of the lasso path.
 
@@ -417,29 +421,54 @@ def adaptive_lasso_path(
     grid (``ratio * lambda_max``), which is close to the minimum-l1 exact solution
     of the Lyapunov equation and keeps both directions of an uncertain edge.
 
-        w_ij = 1 / |M0_ij|^power    scaled so that the smallest weight is 1,
-                                    inf where M0_ij = 0 (that entry is excluded)
+    Weights, as on slide 1 of slides/091026 (Zou's weights with power gamma = 1):
+
+        w_ij = max_kl |M0_kl| / |M0_ij|      max over the penalised entries kl with M0_kl != 0
+        w_ij = inf  where M0_ij = 0           the entry is excluded: it stays zero
+
         M(lam) = argmin 0.5 ||M Sigma + Sigma M' + C||_F^2 + lam * sum_ij w_ij |M_ij|
+
+    The code computes ``1 / |M0_ij|^power`` and divides by the smallest of these numbers,
+    ``1 / max_kl |M0_kl|``; that is the formula above, and the largest pilot entry gets weight 1.
+    The normalisation does not change the path: multiplying every weight by a constant divides
+    lambda_max below, and with it the whole grid, by that constant, so every product lam * w_ij
+    on the grid -- all the problem sees -- stays the same.
 
     Large pilot entries are penalised little, small ones heavily: the same
     "start dense, then prune" idea as MCP / SCAD run dense -> sparse, but with a
     convex second step, so the path does not depend on warm starts.
 
-    The grid is the adaptive problem's own: 100 log-spaced values up to
-    ``lam_max = max_ij |grad_ij(M_diag)| / w_ij``, the smallest lambda at which the
-    solution is diagonal.  Diagonal unpenalised.  Increasing-lambda order.
+    The grid is the adaptive problem's own: 100 log-spaced values from ``ratio * lam_max`` to
+    ``lam_max``, the smallest lambda at which the solution is diagonal.  With the diagonal
+    unpenalised the diagonal candidate is the diagonal least-squares fit ``M_diag``, and it solves
+    the weighted problem exactly when every off-diagonal entry meets its first-order condition at
+    zero, ``|grad_ij(M_diag)| <= lam * w_ij`` (excluded entries always do), ``grad = 2 R Sigma``,
+    ``R = M Sigma + Sigma M' + C``.  That is ``lam >= max_ij |grad_ij(M_diag)| / w_ij = lam_max``;
+    just below it the entry attaining the max enters.  The plain lasso's lambda_max is the same
+    formula with ``w = 1`` (Dettling: "the minimal lambda such that M is diagonal").
+    Increasing-lambda order.
+
+    ``penalize_diagonal=True`` (Dettling's eq. (1.4); wave 10): both steps penalise the
+    diagonal as well.  The pilot is the lasso with the diagonal penalised, and the diagonal
+    entries get weights by the same formula (the max then runs over the diagonal too).  The
+    diagonal candidate is then the diagonal-only solution, shrunk by the penalty
+    (:func:`gclm.objective.direct.diagonal_solution`), so lambda_max has no closed form: it is
+    the smallest lambda at which that solution meets the same first-order condition, found by
+    bisection (:func:`gclm.objective.direct.lambda_max`).  At and above it the estimate is that
+    diagonal solution, as it is the diagonal fit when the diagonal is unpenalised.
     """
     p = sigma.shape[0]
     off = ~np.eye(p, dtype=bool)
+    penalised = np.ones((p, p), dtype=bool) if penalize_diagonal else off
     if pilot is None:
         pilot = lasso_path(sigma, c, n_lambda=n_lambda, ratio=ratio, tol=tol, max_iter=max_iter,
-                           zero_tol=zero_tol).estimates[0]
+                           zero_tol=zero_tol, penalize_diagonal=penalize_diagonal).estimates[0]
     pilot = np.array(pilot, dtype=float)
     size = np.abs(pilot)
-    kept = off & (size > 0)
-    weights = np.where(off, np.inf, 0.0)
+    kept = penalised & (size > 0)
+    weights = np.where(penalised, np.inf, 0.0)
     m_diag = diagonal_fit(sigma, c)
-    if not kept.any():             # nothing to select from: the path is the diagonal fit
+    if not (kept & off).any():     # nothing to select from: the path is the diagonal fit
         lambdas = lambda_grid(1.0, n_lambda, ratio) if lambdas is None else np.asarray(lambdas, float)
         return AdaptiveLassoPath(lambdas=lambdas, estimates=[m_diag.copy() for _ in lambdas],
                                  iterations=np.zeros(len(lambdas), int), converged=np.ones(len(lambdas), bool),
@@ -447,8 +476,11 @@ def adaptive_lasso_path(
     weights[kept] = size[kept] ** (-power)
     weights[kept] /= weights[kept].min()
 
-    grad = np.abs(direct_grad(m_diag, sigma, c))
-    lam_max = float(np.max(grad[kept] / weights[kept]))
+    if penalize_diagonal:
+        lam_max = lambda_max(sigma, c, penalize_diagonal=True, weights=weights)
+    else:
+        grad = np.abs(direct_grad(m_diag, sigma, c))
+        lam_max = float(np.max(grad[kept] / weights[kept]))
     if lambdas is None:
         lambdas = lambda_grid(lam_max, n_lambda=n_lambda, ratio=ratio)
     lambdas = np.asarray(lambdas, dtype=float)
@@ -458,8 +490,8 @@ def adaptive_lasso_path(
     warm = m_diag
     for i in np.argsort(-lambdas, kind="stable"):
         lam = lambdas[i]
-        if lam >= lam_max:
-            warm = m_diag
+        if lam >= lam_max:             # diagonal by the definition of lam_max
+            warm = m_diag if not penalize_diagonal else diagonal_solution(sigma, c, lam, weights=np.diag(weights))
         else:
             warm, info = solve_fista(sigma, c, lam, weights=weights, m_init=warm, tol=tol, max_iter=max_iter,
                                      return_info=True)

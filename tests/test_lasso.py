@@ -146,6 +146,43 @@ def test_lambda_max_bisection_matches_closed_form(instance):
     assert np.allclose(ratios, ratios[0])                  # log-equidistant
 
 
+def test_lambda_max_of_a_weighted_problem_with_the_diagonal_penalised(instance):
+    """The bisection on the first-order condition (wave 10) against solves of the whole weighted problem
+    (the adaptive lasso's): diagonal just above lambda_max, not just below; an excluded entry stays zero.
+    Weights on the diagonal need ``penalize_diagonal=True``."""
+    _, sigma, c = instance
+    p = sigma.shape[0]
+    off = ~np.eye(p, dtype=bool)
+    w = np.random.default_rng(0).uniform(1.0, 3.0, size=(p, p))
+    w[0, 1] = np.inf
+    kw = dict(tol=1e-12, max_iter=200_000)
+    lam = lambda_max(sigma, c, penalize_diagonal=True, weights=w)
+    above = solve_fista(sigma, c, lam * 1.001, weights=w, **kw)
+    below = solve_fista(sigma, c, lam * 0.999, weights=w, **kw)
+    assert np.all(above[off] == 0) and np.any(below[off] != 0) and below[0, 1] == 0
+    with pytest.raises(ValueError, match="penalize_diagonal=True"):
+        lambda_max(sigma, c, weights=w)
+
+
+@pytest.mark.parametrize("penalty", ["lasso", "MCP", "SCAD"])
+def test_unpenalised_diagonal_keeps_the_closed_form_for_every_penalty(instance, penalty):
+    """Waves 1 - 9 are untouched by wave 10: with the diagonal unpenalised, lambda_max is Dettling's
+    closed form max_{i != j} |[2 R(M_diag) Sigma]_ij| for every penalty, bit for bit, and every path
+    ends at the diagonal fit itself."""
+    _, sigma, c = instance
+    off = ~np.eye(sigma.shape[0], dtype=bool)
+    m_diag = diagonal_fit(sigma, c)
+    closed = float(np.max(np.abs((2.0 * lyapunov_residual(m_diag, sigma, c) @ sigma)[off])))
+    assert lambda_max(sigma, c, penalty=penalty) == closed
+    path = lasso_path(sigma, c, n_lambda=8, ratio=1e-2, penalty=penalty)
+    assert np.array_equal(path.estimates[-1], m_diag) and path.iterations[-1] == 0
+    if penalty != "lasso":
+        up = lasso_path(sigma, c, n_lambda=8, ratio=1e-2, penalty=penalty, direction="up")
+        assert np.array_equal(up.estimates[-1], m_diag)
+
+
+
+
 def test_path_is_monotone_in_sparsity(instance):
     """Sparsity should grow with lambda (not guaranteed in theory, but a strong
     smoke test that warm starts are not leaving stale coefficients behind)."""

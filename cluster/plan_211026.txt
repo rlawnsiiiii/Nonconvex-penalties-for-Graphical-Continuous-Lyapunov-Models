@@ -1,0 +1,11 @@
+# Plan for cluster/feed_queue.sh, 21 October 2026: wave 10, the direct-loss experiments of the briefing of
+# 12 October (slides/091026) again with the diagonal of M penalised too (Dettling's eq. (1.4),
+# --penalize-diagonal), on the true C = 2I graphs, with the BIC and the eBIC(0.5, 1) selection.
+# docs/PENALIZED_DIAGONAL.md.  ONE feeder runs everything: stop any other feeder first.
+#
+# Costs: the LRZ hours of the same cells in waves 1 and 4 (shard provenance) divided by four (C_ID only);
+# penalised paths cost the same as unpenalised ones (laptop, p = 20, within 10 %).  About 370 CPU-h.
+--wave 10 --n 1e4            # (a) p = 10, 20 with the search: 12 cells, 32 tasks, about 35 CPU-h
+--wave 10 --n inf            # (a) 12 cells, 32 tasks, about 35 CPU-h
+--wave 10 --n 1000           # (a) 12 cells, 32 tasks, about 35 CPU-h; (b) p = 15 ... 50: 60 cells, 180 tasks, about 265 CPU-h
+--wave 10 --fill

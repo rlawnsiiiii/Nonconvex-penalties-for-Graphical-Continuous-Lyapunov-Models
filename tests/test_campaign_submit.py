@@ -120,7 +120,7 @@ def test_waves_have_the_planned_cells(cluster):
     for name, _, n_shards, _, runner, args in wave8:              # one task per source shard
         if runner == "rescore_shard.py":
             assert n_shards == shards[args[args.index("--source-cell") + 1]], name
-    for wave in (1, 2, 3, 4, 5, 6, 7, 8, 9):                      # job names: unique, short enough
+    for wave in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10):                  # job names: unique, short enough
         tags = [c[1] for c in listed(submit, wave)]
         assert len(set(tags)) == len(tags) and all(len(t) + 1 < 10 for t in tags)
 
@@ -203,7 +203,7 @@ def test_wave_9_has_the_planned_groups(cluster):
     assert len(res.stdout.splitlines()) - 1 == 24                   # without the anchor every level matches
 
 
-@pytest.mark.parametrize("wave", [1, 2, 3, 4, 5, 6, 7, 8, 9])
+@pytest.mark.parametrize("wave", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
 def test_every_cell_is_accepted_by_its_runner(cluster, wave):
     """The arguments the submit script would pass parse with the runner's own
     command line and describe an implemented combination, with the C and the
@@ -241,10 +241,12 @@ def test_every_cell_is_accepted_by_its_runner(cluster, wave):
             continue
         assert (ns.refit or "direct") == ("loglik" if "-ml" in name else "direct") and ns.add_screen is None
         knob = re.search(r"_(w|s)\d+$", name) is not None                # betamin / twocycle: true C = 2I only (19 Oct)
-        every = knob or name.endswith("_dag")                              # the three knob groups: every reduction
+        pd = "-pd_" in name                                                # wave 10: the diagonal penalised, C_ID
+        every = knob or name.endswith("_dag") or pd                        # every reduction
         assert ns.ebic_gamma == ([0.5, 1.0] if ("-ebic" in name or every) else [])
-        assert ns.c_choices == (["C_ID"] if knob else None)
+        assert ns.c_choices == (["C_ID"] if knob or pd else None)
         cfg = run_s1_shard.config_from_args(ns)                   # raises if not implemented
+        assert cfg.penalize_diagonal == pd
         assert cfg.loss == name.split("_")[0]
         assert (cfg.direction == "up") == ("-up" in name)
         assert (cfg.method == "lla") == ("-lla" in name)
@@ -254,7 +256,7 @@ def test_every_cell_is_accepted_by_its_runner(cluster, wave):
         assert (cfg.up_start == "lasso") == ("-up-lasso" in name)
         label = re.search(r"_p(\d+)$", name)
         expected_p = ((int(label.group(1)),) if label else
-                      (10, 20) if wave == 1 or "-ebic" in name or (wave == 9 and cfg.loss == "direct") else (10,))
+                      (10, 20) if wave in (1, 10) or "-ebic" in name or (wave == 9 and cfg.loss == "direct") else (10,))
         assert cfg.n_rep == 25 and cfg.p_values == expected_p
         if wave == 9:                                             # the start, the pilot and the generator knobs
             start = est.rsplit("-", 1)[1].replace("truth", "truth-") if est.startswith(("MCP-up-", "adaptive-")) else "lasso"
@@ -337,6 +339,34 @@ def test_wave_4_runs_over_p_at_n_1000(cluster):
     assert res.returncode == 2 and "unknown p" in res.stderr
 
 
+def test_wave_10_reruns_the_briefing_with_the_diagonal_penalised(cluster):
+    """21 October 2026: the direct-loss cells of the briefing (waves 1 and 4 without LLA) with
+    --penalize-diagonal on the true C = 2I graphs; p = 10 and 20 at every n with the search, p = 15 ... 50
+    at n = 1000 only with the selection (--p as in wave 4)."""
+    submit, root, _ = cluster
+    six = ("lasso", "MCP", "SCAD", "MCP-up", "SCAD-up", "adaptive")
+    wave10 = listed(submit, 10)
+    names = [c[0] for c in wave10]
+    assert names[:12] == [f"direct_{e}-pd_{c}" for c in ("C2I", "Cresc") for e in six]
+    assert names[12:] == [f"direct_{e}-pd_{c}_p{p}" for p in (15, 25, 30, 40, 50) for c in ("C2I", "Cresc") for e in six]
+    for name, _, _, time, _, args in wave10:
+        a = " ".join(args)
+        assert "--penalize-diagonal" in a and "--c-choices C_ID" in a and "--ebic-gamma 0.5 1" in a
+        assert ("--select bic" in a) == ("_p" in name) and ("--select search" in a) == ("_p" not in name)
+        assert time == ("24:00:00" if re.search(r"_p(40|50)$", name) else "12:00:00")
+    res, calls = submit("--wave", "10", "--n", "1e4", "--dry-run")
+    assert res.returncode == 0 and not calls and not root.exists()
+    assert "would submit 32 tasks in 12 cells" in res.stdout and res.stdout.count("not planned") == 60
+    res, _ = submit("--wave", "10", "--dry-run")
+    assert "would submit 276 tasks in 96 cells" in res.stdout
+    res, calls = submit("--wave", "10", "--n", "1000", "--p", "40", "--only", "adaptive-pd_Cresc")
+    assert res.returncode == 0 and len(calls) == 2
+    assert f"-J 10adr3 cluster/campaign_array.sbatch simulations/run_s1_shard.py {root / 'direct_adaptive-pd_Cresc_n1000'}" in calls[0]
+    assert f"{root / 'direct_adaptive-pd_Cresc_p40_n1000'} --p 40 --select bic" in calls[1]
+    res, _ = submit("--wave", "10", "--p", "20", "--list")
+    assert res.returncode == 2 and "unknown p for wave 10" in res.stderr
+
+
 def test_dry_run_and_argument_errors(cluster):
     submit, root, _ = cluster
     res, calls = submit("--wave", "3", "--dry-run")
@@ -344,7 +374,7 @@ def test_dry_run_and_argument_errors(cluster):
     assert res.stdout.count("sbatch --array=") == 24 and "would submit 168 tasks in 24 cells" in res.stdout
     res, calls = submit("--wave", "1", "--n", "1000", "--shards", "3", "--only", "lasso_C2I")
     assert "--array=0-2" in calls[0] and (root / "direct_lasso_C2I_n1000" / "n_shards").read_text().strip() == "3"
-    for bad in (["--list"], ["--wave", "10", "--list"], ["--wave", "1", "--n", "500"],
+    for bad in (["--list"], ["--wave", "11", "--list"], ["--wave", "1", "--n", "500"],
                 ["--wave", "1", "--shards", "0"], ["--wave", "1", "--frobnicate"]):
         res, _ = submit(*bad)
         assert res.returncode == 2, bad

@@ -291,15 +291,24 @@ def check_method(cfg: S1Config) -> None:
         raise ValueError("w_min applies to --weights uniform (the normal weights have no lower bound)")
     if cfg.graph != "pairs" and cfg.two_cycle_share != 0.0:
         raise ValueError("two_cycle_share applies to --graph pairs")
+    if cfg.penalize_diagonal:                   # wave 10 (21 October 2026): Dettling's eq. (1.4)
+        if cfg.loss != "direct":
+            raise ValueError("--penalize-diagonal applies to the direct loss only (the covariance losses leave "
+                             "the diagonal unpenalised)")
+        if cfg.method not in ("path", "adaptive"):
+            raise ValueError("--penalize-diagonal is implemented for --method path and adaptive only")
+        if cfg.start_name != "lasso" or cfg.pilot != "lasso":
+            raise ValueError("--penalize-diagonal starts from the lasso's dense end only")
+        if cfg.penalty != "lasso" and cfg.convention != "textbook":
+            raise ValueError("--penalize-diagonal with MCP / SCAD uses the textbook convention")
     if cfg.method == "path":
         return
     if cfg.method == "adaptive" and cfg.loss != "direct":
         if cfg.penalty != "lasso":
             raise ValueError("method 'adaptive' is the adaptive lasso: leave --penalty at lasso")
         return
-    if cfg.loss != "direct" or cfg.solver != "fista" or cfg.penalize_diagonal:
-        raise ValueError(f"method {cfg.method!r} is implemented for the direct loss with the "
-                         "fista solver and an unpenalised diagonal")
+    if cfg.loss != "direct" or cfg.solver != "fista":
+        raise ValueError(f"method {cfg.method!r} is implemented for the direct loss with the fista solver")
     if cfg.method == "lla" and cfg.penalty == "lasso":
         raise ValueError("method 'lla' needs --penalty MCP or SCAD")
     if cfg.method == "lla" and cfg.convention != "textbook":
@@ -433,7 +442,7 @@ def run_one(p, k, c_choice, rep, cfg, select: str = "none", refit: str = "direct
     if cfg.loss == "direct" and cfg.method == "adaptive":
         # the adaptive lasso has its own weights and therefore its own grid
         path = adaptive_lasso_path(sigma_hat, c_est, n_lambda=n_l, ratio=cfg.lambda_ratio,
-                                   tol=cfg.tol, pilot=start_matrix)
+                                   tol=cfg.tol, pilot=start_matrix, penalize_diagonal=cfg.penalize_diagonal)
         lams, lmax = path.lambdas, float(path.lambdas[-1])
         obj = np.array([direct_loss(m_hat, sigma_hat, c_est)
                         + lam * float(np.sum(path.weights[m_hat != 0] * np.abs(m_hat[m_hat != 0])))
@@ -451,7 +460,11 @@ def run_one(p, k, c_choice, rep, cfg, select: str = "none", refit: str = "direct
         obj = np.array([direct_loss(m_hat, sigma_hat, c_est) for m_hat in path.estimates])
         iters, converged = path.iterations.astype(np.int32), path.converged
     elif cfg.loss == "direct":
-        lmax = lambda_max(sigma_hat, c_est, penalize_diagonal=cfg.penalize_diagonal)
+        # the smallest lambda with a diagonal estimate under the cell's penalty: with the diagonal
+        # unpenalised the same closed form for the lasso, MCP and SCAD (waves 1 - 9); with it penalised
+        # each penalty's own (wave 10)
+        lmax = lambda_max(sigma_hat, c_est, penalize_diagonal=cfg.penalize_diagonal, penalty=cfg.penalty,
+                          gamma=cfg.gamma)
         lams = lambda_grid(lmax, n_lambda=n_l, ratio=cfg.lambda_ratio)
         if cfg.method == "lla":
             path = lla_path(sigma_hat, c_est, lambdas=lams, penalty=cfg.penalty,
@@ -558,6 +571,9 @@ def build_parser() -> argparse.ArgumentParser:
                          "so runs at different n are paired dataset by dataset")
     ap.add_argument("--solver", default=None)
     ap.add_argument("--tol", type=float, default=None)
+    ap.add_argument("--penalize-diagonal", action="store_true",
+                    help="penalise the diagonal of M as well (Dettling's eq. (1.4)); direct loss, --method path "
+                         "or adaptive (wave 10)")
     ap.add_argument("--penalty", default=None, choices=["lasso", "MCP", "SCAD"])
     ap.add_argument("--gamma", type=float, default=None)
     ap.add_argument("--convention", default=None, choices=["textbook", "ncvreg"])
@@ -648,6 +664,7 @@ def config_from_args(args: argparse.Namespace) -> S1Config:
         graph=args.graph or base.graph,
         two_cycle_share=args.two_cycle_share if args.two_cycle_share is not None else base.two_cycle_share,
         c_choices=tuple(CChoice(c) for c in args.c_choices) if args.c_choices else base.c_choices,
+        penalize_diagonal=args.penalize_diagonal or base.penalize_diagonal,
     )
     # settings that would be recorded in config_json without having any effect (code review C5)
     if args.direction and cfg.method != "path":

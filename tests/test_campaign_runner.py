@@ -22,6 +22,7 @@ import pytest
 from gclm.config import S1Config
 from gclm.data.simulate import CChoice, draw_instance, estimation_volatility
 from gclm.metrics import confusion, orientation_breakdown
+from gclm.objective.direct import lambda_max
 from gclm.solvers.search import Scorer
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -153,12 +154,38 @@ def test_adaptive_lasso_has_its_own_lambda_grid(tmp_path):
     (("--method", "adaptive", "--penalty", "MCP"), "adaptive lasso"),
     (("--method", "lla", "--penalty", "MCP", "--loss", "loglik"), "direct loss"),
     (("--method", "lla", "--penalty", "MCP", "--convention", "ncvreg"), "textbook"),
+    (("--penalize-diagonal", "--method", "lla", "--penalty", "MCP"), "path and adaptive only"),     # wave 10
+    (("--penalize-diagonal", "--loss", "loglik"), "direct loss only"),
+    (("--penalize-diagonal", "--method", "adaptive", "--pilot", "exact"), "lasso's dense end only"),
+    (("--penalize-diagonal", "--penalty", "MCP", "--direction", "up", "--up-start", "l1"), "lasso's dense end only"),
 ])
 def test_combinations_that_are_not_implemented_are_refused(tmp_path, extra, message):
     res, shard = run(tmp_path, *extra)
     assert res.returncode != 0 and shard is None
     assert message in res.stderr
     assert not list((tmp_path / "out").glob("*.npz"))
+
+
+@pytest.mark.parametrize("extra", [(), ("--penalty", "MCP"), ("--penalty", "SCAD", "--direction", "up"),
+                                   ("--method", "adaptive")])
+def test_the_diagonal_can_be_penalised_on_the_direct_loss(tmp_path, extra):
+    """Wave 10 (Dettling's eq. (1.4)): ``--penalize-diagonal`` is recorded; the top of the grid is the
+    smallest lambda with a diagonal estimate under the cell's own penalty (the bisection on the
+    first-order condition), where the estimate is the diagonal-only solution (no solver steps), and
+    an edge enters just below; the optimality conditions hold along the path."""
+    res, shard = run(tmp_path, "--penalize-diagonal", *extra, "--select", "bic", name="pd")
+    assert res.returncode == 0, res.stderr
+    cfg = json.loads(str(shard["config_json"]))
+    assert cfg["penalize_diagonal"] is True
+    nnz, iters = shard["nnz"][0], shard["iterations"][0]
+    assert nnz[0] > 0 and nnz[-1] == 0 and nnz[-2] > 0 and iters[-1] == 0
+    assert shard["converged"].all() and np.all(np.isfinite(shard["kkt"])) and shard["kkt"].max() < 1e-4
+    if cfg["method"] == "path":                         # the grid of the cell's penalty (adaptive: its own weights)
+        _, sigma_hat, c_est = dataset(shard, 0, 1000, "identity")
+        assert shard["lambda_max"][0] == lambda_max(sigma_hat, c_est, penalize_diagonal=True,
+                                                    penalty=cfg["penalty"], gamma=cfg["gamma"])
+    _, plain = run(tmp_path, *extra, "--select", "bic", name="plain")
+    assert not np.isclose(plain["lambda_max"][0], shard["lambda_max"][0])
 
 
 def dataset(shard, i, n_obs, c_scale):
