@@ -1,0 +1,419 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=2.5cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{enumitem}
+\usepackage{booktabs,tabularx,array}
+\usepackage{parskip}
+\usepackage{url}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black,citecolor=blue!50!black]{hyperref}
+
+% ---------------------------------------------------------------- numbering
+\numberwithin{equation}{section}
+\setcounter{section}{-1}
+
+% ------------------------------------------- theorem environments (W.1, ...)
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}
+\renewcommand{\thetheorem}{W.\arabic{theorem}}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{proposition}[theorem]{Proposition}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+% ------------------------------------------------------------------- macros
+\newcommand{\opnorm}[1]{{\vert\kern-0.25ex\vert\kern-0.25ex\vert #1 \vert\kern-0.25ex\vert\kern-0.25ex\vert}}
+\DeclareMathOperator{\vect}{vec}
+\DeclareMathOperator{\sign}{sign}
+\DeclareMathOperator{\diag}{diag}
+\DeclareMathOperator{\tr}{tr}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\newcommand{\changed}{$\blacktriangleright$\ }
+\DeclareUrlCommand\code{\urlstyle{tt}}
+
+\title{\textbf{Adaptive (weighted) lasso in GCLMs}\\[0.4em]}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+% =========================================================================
+\section{Setting (DDK \S\S2--3)}\label{sec:setting}
+
+\paragraph{Data and model.} $X_1,\dots,X_n\in\mathbb R^p$ are i.i.d.\ $N(0,\Sigma^*)$ with $M^*\Sigma^*+\Sigma^*M^{*\top}+C=0$, where $M^*\in\mathrm{Stab}_p$ and $C\in PD_p$ is known. $\hat\Sigma=\frac1n\sum_iX_iX_i^\top$.
+
+\paragraph{Design and Gram matrix.} For symmetric $\Sigma$:
+\[
+A(\Sigma)=(\Sigma\otimes I_p)+(I_p\otimes\Sigma)K^{(p,p)},\qquad
+\Gamma(\Sigma)=A(\Sigma)^\top A(\Sigma),\qquad
+g(\Sigma)=-A(\Sigma)^\top\vect(C),
+\]
+so that
+\[
+\tfrac12\|M\Sigma+\Sigma M^\top+C\|_F^2=\tfrac12\vect(M)^\top\Gamma(\Sigma)\vect(M)-g(\Sigma)^\top\vect(M)+\tfrac12\|C\|_F^2 .
+\]
+
+\paragraph{Shorthand.} $\hat\Gamma=\Gamma(\hat\Sigma)$, $\Gamma^*=\Gamma(\Sigma^*)$, $\hat g$, $g^*$, $\Delta_\Gamma=\hat\Gamma-\Gamma^*$, $\Delta_g=\hat g-g^*$. Indices are pairs $(j,k)$; $m=\vect(M)$, $m^*=\vect(M^*)$.
+
+\paragraph{Support.} $S=\{(j,k):M^*_{jk}\ne0\}$, $d=|S|$; Since $M^*$ solves the Lyapunov equation, $\Gamma^*m^*=g^*$.
+
+\paragraph{Constants (DDK).}
+\begin{gather*}
+c_{\Gamma^*}=\opnorm{(\Gamma^*_{SS})^{-1}}_\infty,\qquad c_{M^*}=\|m^*\|_\infty,\\
+P:=\Gamma^*_{S^cS}(\Gamma^*_{SS})^{-1},\qquad \rho:=\opnorm{P}_\infty,\qquad \beta_{\min}:=\min_{(j,k)\in S}|M^*_{jk}|
+\end{gather*}
+
+
+% =========================================================================
+\section{Estimator, weights, weighted irrepresentability constant}\label{sec:estimator}
+
+\paragraph{Pilot and weights}
+\begin{itemize}
+  \item The random pilot $\hat M^0$ is the lasso (diagonals penalized), at the smallest $\lambda$ of its grid.
+  \item With $\hat\mu:=\max_{(k,l)}|\hat M^0_{kl}|$, the maximum over all entries including the diagonal,
+  \[
+  \hat w_{jk}=\frac{\hat\mu}{|\hat M^0_{jk}|}\quad\text{if }\hat M^0_{jk}\ne0,\qquad
+  \hat w_{jk}=\infty\ \ (\text{entry excluded, stays }0)\quad\text{if }\hat M^0_{jk}=0 .
+  \]
+  \item All finite weights are $\ge1$, with equality at the largest pilot entry.
+\end{itemize}
+
+\paragraph{Estimator} (weighted direct Lyapunov lasso, all entries penalised):
+\begin{equation}\label{eq:est}
+\begin{split}
+\hat M&\in\argmin_{M\in\mathbb R^{p\times p}}\ \tfrac12\|M\hat\Sigma+\hat\Sigma M^\top+C\|_F^2+\lambda\sum_{j,k}\hat w_{jk}|M_{jk}|\\
+&=\argmin_m\ \tfrac12m^\top\hat\Gamma m-\hat g^\top m+\lambda\|\hat Wm\|_1,\qquad \hat W=\diag(\hat w).
+\end{split}
+\end{equation}
+An infinite weight means the constraint $m_j=0$.
+
+\paragraph{Scale invariance.} Replacing $(\lambda,\hat w)$ by $(\lambda/c,\,c\hat w)$ leaves the objective unchanged. The products $\lambda\hat w_j$ matter.
+
+\paragraph{Quantities.} Define
+\[
+\underline w:=\min_{j\in S^c}\hat w_j,\qquad
+\bar w_S:=\max_{k\in S}\hat w_k<\infty,\qquad
+r:=\frac{\bar w_S}{\underline w}=\frac{\max_{j\in S^c}|\hat M^0_j|}{\min_{k\in S}|\hat M^0_k|},
+\]
+
+\begin{itemize}
+  \item $\bar w_S<\infty$ requires the pilot to have no zero on $S$, a necessary condition for recovery. In particular, all infinite weights lie in $S^c$.
+ \end{itemize}
+
+\paragraph{Weighted irrepresentability constant} (Zhou, van de Geer \& Bühlmann 2009, Def.~8.1):
+\begin{equation}\label{eq:rhow}
+\rho_w:=\max_{j\in S^c}\ \frac{1}{\hat w_j}\sum_{k\in S}|P_{jk}|\,\hat w_k\ \ \Big(=\opnorm{\hat W_{S^c}^{-1}P_{S^c\cdot}\hat W_{SS}}_\infty\Big).
+\end{equation}
+
+\paragraph{A free constant.} Fix any $\kappa\ge1+\rho$. The natural choice is $\kappa=1+\rho$. In DDK's setting, $\rho\le1-\alpha$ and $\kappa=2-\alpha$ is admissible, and this is the choice that reproduces D.1.
+
+% =========================================================================
+\section{W.1 (deterministic; analogue of DDK Theorem D.1)}\label{sec:W1}
+
+\begin{theorem}\label{thm:W1}
+Let $M^*\in\mathrm{Stab}_p$ have support $S$, let $\hat w$ be weights with $\bar w_S<\infty$, and let $\kappa\ge1+\rho$. Assume:
+\begin{enumerate}[label=\upshape(W\arabic*),leftmargin=3.2em]
+  \item $\Gamma^*_{SS}$ is invertible;
+  \item (weighted irrepresentability) $\rho_w\le1-\alpha$ for some $\alpha\in(0,1]$;
+  \item $\opnorm{(\Delta_\Gamma)_{\cdot S}}_\infty\le\varepsilon_1$ and $\|\Delta_g\|_\infty\le\varepsilon_2$, with
+  \[
+  \varepsilon_1\le\frac{\alpha}{3c_{\Gamma^*}(\kappa r+\alpha)};
+  \]
+  \item the effective penalty off the support satisfies
+  \[
+  \lambda\,\underline w>\frac{3\kappa}{\alpha}\max\{c_{M^*}\varepsilon_1,\ \varepsilon_2\}.
+  \]
+\end{enumerate}
+Then:
+\begin{enumerate}[label=\upshape\textbf{(\alph*)},leftmargin=2.5em]
+  \item The minimiser $\hat M$ of \eqref{eq:est} is unique, its support is contained in the true support ($\hat S\subseteq S$), and
+  \begin{equation}\label{eq:bw}
+  \begin{split}
+  \|\hat M-M^*\|_\infty&\le b_w:=\frac{c_{\Gamma^*}}{1-c_{\Gamma^*}\varepsilon_1}\big(c_{M^*}\varepsilon_1+\varepsilon_2+\lambda\bar w_S\big)\\
+  &<c_{\Gamma^*}\,\lambda\Big(\bar w_S+\frac{\alpha}{\kappa}\,\underline w\Big).
+  \end{split}
+  \end{equation}
+  The last bound is informative only when $\underline w<\infty$.
+  \item If moreover $\beta_{\min}=\min_{(j,k)\in S}|M^*_{jk}|>b_w$, then $\hat S=S$ and $\sign(\hat M_{jk})=\sign(M^*_{jk})$ for all $(j,k)\in S$.
+\end{enumerate}
+\end{theorem}
+
+\paragraph{Reduction to DDK Theorem D.1.} Take $\hat w\equiv1$ and $\kappa=2-\alpha$; this needs $\rho\le1-\alpha$. Then:
+\begin{itemize}
+  \item (W2) is DDK's (D.1), $\rho\le1-\alpha$;
+  \item (W3) is DDK's $\varepsilon_1\le\alpha/(6c_{\Gamma^*})$, since $3c_{\Gamma^*}(\kappa\cdot1+\alpha)=6c_{\Gamma^*}$;
+  \item (W4) is DDK's $\lambda>\frac{3(2-\alpha)}{\alpha}\max\{c_{M^*}\varepsilon_1,\varepsilon_2\}$;
+  \item the right-hand bound in \eqref{eq:bw} is $c_{\Gamma^*}\lambda\big(1+\frac{\alpha}{2-\alpha}\big)=\frac{2c_{\Gamma^*}\lambda}{2-\alpha}$, which is DDK's bound;
+  \item DDK's beta-min $\beta_{\min}>2c_{\Gamma^*}\lambda/(2-\alpha)$ implies the one in (b).
+\end{itemize}
+
+% =========================================================================
+\section{Proof of W.1}\label{sec:proof}
+
+\paragraph{KKT conditions} Problem \eqref{eq:est} is convex, since $\hat\Gamma\succeq0$.
+\begin{equation}\label{eq:kkt}
+\begin{gathered}
+\big(\hat\Gamma\hat m-\hat g\big)_j+\lambda\,\hat w_j\hat z_j=0\quad(\text{for every $j$ with $\hat{w}_j < \infty$}),\\
+\hat z_j=\sign(\hat m_j)\ \text{if }\hat m_j\ne0,\qquad \hat z_j\in[-1,1]\ \text{if }\hat m_j=0 .
+\end{gathered}
+\end{equation}
+
+\emph{Block form.} Since $\Gamma^*m^*=g^*$, we have $\hat\Gamma\hat m-\hat g=\Gamma^*(\hat m-m^*)+\Delta_\Gamma\hat m-\Delta_g$. With $\Delta_M:=\hat m-m^*$, the KKT conditions \eqref{eq:kkt} read
+\begin{align*}
+&\begin{bmatrix}\Gamma^*_{SS}&\Gamma^*_{SS^c}\\\Gamma^*_{S^cS}&\Gamma^*_{S^cS^c}\end{bmatrix}
+\begin{bmatrix}(\Delta_M)_S\\(\Delta_M)_{S^c}\end{bmatrix}\\
+&\quad+\begin{bmatrix}(\Delta_\Gamma)_{SS}&(\Delta_\Gamma)_{SS^c}\\(\Delta_\Gamma)_{S^cS}&(\Delta_\Gamma)_{S^cS^c}\end{bmatrix}
+\begin{bmatrix}\hat m_S\\\hat m_{S^c}\end{bmatrix}
+-\begin{bmatrix}(\Delta_g)_S\\(\Delta_g)_{S^c}\end{bmatrix}
++\lambda\begin{bmatrix}(\hat w\circ\hat z)_S\\(\hat w\circ\hat z)_{S^c}\end{bmatrix}
+=\begin{bmatrix}0\\0\end{bmatrix},
+\end{align*}
+where the $S^c$-rows are taken only for $j$ with $\hat w_j<\infty$.
+
+\changed The PDW constructs a pair $(\tilde m,\tilde z)$ satisfying \eqref{eq:kkt} with $\tilde m_{S^c}=0$.
+
+\paragraph{Step 1 (restricted problem)} Let
+\begin{equation}\label{eq:restricted}
+\tilde m=\argmin_{m:\ m_{S^c}=0}\ \tfrac12m^\top\hat\Gamma m-\hat g^\top m+\lambda\|\hat Wm\|_1 .
+\end{equation}
+
+The restricted objective is strictly convex (as $\hat\Gamma$ positive semidefinite and invertible according to DDK) and $\tilde m$ is unique.
+
+
+At $\tilde m$, where $\tilde m_{S^c}=0$, the $S$-rows give
+\begin{equation}\label{eq:Srows}
+(\hat\Gamma \tilde m - \hat g)_S + \lambda(\hat w\circ\tilde z)_S
+  = \hat\Gamma_{SS}\tilde m_S - \hat g_S + \lambda(\hat w\circ\tilde z)_S = 0.
+\end{equation}
+
+\emph{\textbf{Error bound:}} 
+
+Since $m^*_{S^c}=0$ and $\Gamma^*_{SS}m^*_S-g^*_S = 0$, we have
+\begin{equation*}
+\hat\Gamma_{SS}m^*_S-\hat g_S= \underbrace{\Gamma_{SS}^*m^*_S - g^*_S}_{=0} + (\Delta_\Gamma)_{SS}m^*_S-(\Delta_g)_S = (\Delta_\Gamma)_{SS}m^*_S-(\Delta_g)_S .
+\end{equation*}
+Subtracting this from \eqref{eq:Srows} gives
+\begin{equation*}
+\hat\Gamma_{SS}(\underbrace{\tilde{m}_S-m^*_S}_{=\tilde\Delta_S}) + \lambda(\hat w\circ\tilde z)_S = -((\Delta_\Gamma)_{SS}m^*_S - (\Delta_g)_S)
+\end{equation*}
+As $\hat\Gamma_{SS}$ invertible (shown in DDK):
+\[
+\tilde\Delta_S:=\tilde m_S-m^*_S=-(\hat\Gamma_{SS})^{-1}\underbrace{\Big((\Delta_\Gamma)_{SS}m^*_S-(\Delta_g)_S+\lambda(\hat w\circ\tilde z)_S\Big)}_{=:v}.
+\]
+Then: $\|\tilde\Delta_S\|_\infty\le\opnorm{(\hat\Gamma_{SS})^{-1}}_\infty\|v\|_\infty$. 
+
+For $v$,
+\begin{align*}
+\|v\|_\infty
+&\le\|(\Delta_\Gamma)_{SS}m^*_S\|_\infty+\|(\Delta_g)_S\|_\infty+\lambda\|(\hat w\circ\tilde z)_S\|_\infty && \text{(triangle inequality)}\\
+&\le\opnorm{(\Delta_\Gamma)_{\cdot S}}_\infty\,c_{M^*}+\|\Delta_g\|_\infty+\lambda\bar w_S && (\|m^*_S\|_\infty\le c_{M^*},\ |\tilde z_k|\le1)\\
+&\le c_{M^*}\varepsilon_1+\varepsilon_2+\lambda\bar w_S && \text{(W3)}.
+\end{align*}
+
+For the inverse, write $\hat\Gamma_{SS}=\Gamma^*_{SS}+(\Delta_\Gamma)_{SS}=\Gamma^*_{SS}(I+X)$ with $X:=(\Gamma^*_{SS})^{-1}(\Delta_\Gamma)_{SS}$. Then
+\begin{align*}
+\opnorm{X}_\infty
+&\le\opnorm{(\Gamma^*_{SS})^{-1}}_\infty\,\opnorm{(\Delta_\Gamma)_{SS}}_\infty && \text{(submultiplicativity)}\\
+&\le c_{\Gamma^*}\varepsilon_1 && \text{(W3)}\\
+&\le\frac{\alpha}{3(\kappa r+\alpha)}\le\frac13 && \text{(W3)}.
+\end{align*}
+So the Neumann series $(I+X)^{-1}=\sum_{k\ge0}(-X)^k$ converges, $\hat\Gamma_{SS}$ is invertible, and
+\begin{align}
+\opnorm{(\hat\Gamma_{SS})^{-1}}_\infty
+&=\opnorm{(I+X)^{-1}(\Gamma^*_{SS})^{-1}}_\infty\notag\\
+&\le\opnorm{(I+X)^{-1}}_\infty\,c_{\Gamma^*} && \text{(submultiplicativity)}\notag\\
+&\le\sum_{k\ge0}\opnorm{X}_\infty^k\,c_{\Gamma^*}=\frac{c_{\Gamma^*}}{1-\opnorm{X}_\infty} && \text{(Neumann series)}\notag\\
+&\le\frac{c_{\Gamma^*}}{1-c_{\Gamma^*}\varepsilon_1} && (\opnorm{X}_\infty\le c_{\Gamma^*}\varepsilon_1).\label{eq:inv}
+\end{align}
+Multiplying the two bounds gives
+\begin{equation}\label{eq:errbound}
+\|\tilde\Delta_S\|_\infty\le\frac{c_{\Gamma^*}}{1-c_{\Gamma^*}\varepsilon_1}\big(c_{M^*}\varepsilon_1+\varepsilon_2+\lambda\bar w_S\big)=:b_w.
+\end{equation}
+
+\emph{\textbf{Converting the bound into $\lambda$:}}
+
+By (W4), $c_{M^*}\varepsilon_1+\varepsilon_2\le2\max\{c_{M^*}\varepsilon_1,\varepsilon_2\}<\frac{2\alpha}{3\kappa}\lambda\underline w$. By (W3), $\frac{1}{1-c_{\Gamma^*}\varepsilon_1}\le\frac{3(\kappa r+\alpha)}{3\kappa r+2\alpha}$. Hence
+\begin{equation}\label{eq:bwlambda}
+\begin{split}
+b_w&<c_{\Gamma^*}\cdot\frac{3(\kappa r+\alpha)}{3\kappa r+2\alpha}\cdot\lambda\underline w\Big(r+\frac{2\alpha}{3\kappa}\Big)\\
+&=c_{\Gamma^*}\lambda\underline w\,\frac{\kappa r+\alpha}{\kappa}=c_{\Gamma^*}\lambda\Big(\bar w_S+\frac{\alpha}{\kappa}\underline w\Big).
+\end{split}
+\end{equation}
+
+\changed This is (D.4). With $\hat w\equiv1$ and $\kappa=2-\alpha$ the right-hand side is DDK's $\frac{6c_{\Gamma^*}}{6-\alpha}\cdot\frac{6-\alpha}{3(2-\alpha)}\lambda=\frac{2c_{\Gamma^*}\lambda}{2-\alpha}$.
+
+\paragraph{Step 2 (subgradient on $S$).} Take $\tilde z_S$ from \eqref{eq:Srows}. By construction it is a subgradient of $\|\cdot\|_1$ at $\tilde m_S$.
+
+\paragraph{Step 3 (dual vector on $S^c$).} Evaluate the block form at $(\tilde m,\tilde z)$. Since $\tilde m_{S^c}=m^*_{S^c}=0$, we have $(\Delta_M)_{S^c}=0$ and $(\Delta_M)_S=\tilde\Delta_S$:
+\begin{align*}
+&\begin{bmatrix}\Gamma^*_{SS}&\Gamma^*_{SS^c}\\\Gamma^*_{S^cS}&\Gamma^*_{S^cS^c}\end{bmatrix}
+\begin{bmatrix}\tilde\Delta_S\\0\end{bmatrix}\\
+&\quad+\begin{bmatrix}(\Delta_\Gamma)_{SS}&(\Delta_\Gamma)_{SS^c}\\(\Delta_\Gamma)_{S^cS}&(\Delta_\Gamma)_{S^cS^c}\end{bmatrix}
+\begin{bmatrix}\tilde m_S\\0\end{bmatrix}
+-\begin{bmatrix}(\Delta_g)_S\\(\Delta_g)_{S^c}\end{bmatrix}
++\lambda\begin{bmatrix}(\hat w\circ\tilde z)_S\\(\hat w\circ\tilde z)_{S^c}\end{bmatrix}
+=\begin{bmatrix}0\\0\end{bmatrix}.
+\end{align*}
+The zeros remove the $S^c$-columns of $\Gamma^*$ and $\Delta_\Gamma$. Collect the noise in
+\[
+u:=(\Delta_\Gamma)_{\cdot S}\tilde m_S-\Delta_g,\qquad\text{i.e.}\quad u_S=(\Delta_\Gamma)_{SS}\tilde m_S-(\Delta_g)_S,\quad u_{S^c}=(\Delta_\Gamma)_{S^cS}\tilde m_S-(\Delta_g)_{S^c}.
+\]
+The two block rows read
+\begin{align*}
+\Gamma^*_{SS}\tilde\Delta_S+u_S+\lambda(\hat w\circ\tilde z)_S&=0 && (S\text{-rows}),\\
+\Gamma^*_{S^cS}\tilde\Delta_S+u_{S^c}+\lambda(\hat w\circ\tilde z)_{S^c}&=0 && (S^c\text{-rows with }\hat w_j<\infty).
+\end{align*}
+Solving the $S$-rows gives $\tilde\Delta_S=-(\Gamma^*_{SS})^{-1}\big(u_S+\lambda(\hat w\circ\tilde z)_S\big)$. 
+
+Define $\tilde z_j$, for $j\in S^c$ with $\hat w_j<\infty$, by the $S^c$-rows, solved for the $\tilde z$-term. Then insert $\tilde\Delta_S$ and write $P=\Gamma^*_{S^cS}(\Gamma^*_{SS})^{-1}$:
+\begin{align*}
+\lambda(\hat w\circ\tilde z)_{S^c}
+&=-\Gamma^*_{S^cS}\tilde\Delta_S-u_{S^c} && (S^c\text{-rows})\\
+&=\Gamma^*_{S^cS}(\Gamma^*_{SS})^{-1}\big(u_S+\lambda(\hat w\circ\tilde z)_S\big)-u_{S^c} && (\text{insert }\tilde\Delta_S)\\
+&=P\big(u_S+\lambda(\hat w\circ\tilde z)_S\big)-u_{S^c} && (\text{definition of }P)\\
+&=Pu_S-u_{S^c}+\lambda P(\hat w\circ\tilde z)_S && (\text{expand}),
+\end{align*}
+and dividing row $j$ by $\lambda\hat w_j$,
+\begin{equation}\label{eq:dual}
+\tilde z_j=\underbrace{\frac{1}{\lambda\hat w_j}\big[Pu_S-u_{S^c}\big]_j}_{\text{noise}}+\underbrace{\frac{1}{\hat w_j}\big[P(\hat w\circ\tilde z)_S\big]_j}_{\text{deterministic}} .
+\end{equation}
+
+\changed This is (D.5) with $\sign(\vect(\tilde M)_S)$ replaced by $(\hat w\circ\tilde z)_S$ and row $j$ divided by $\hat w_j$.
+
+\emph{Deterministic term.} Since $|\tilde z_k|\le1$,
+\begin{equation}\label{eq:det}
+\Big|\frac{1}{\hat w_j}\big[P(\hat w\circ\tilde z)_S\big]_j\Big|\le\frac{1}{\hat w_j}\sum_{k\in S}|P_{jk}|\hat w_k\le\rho_w\le1-\alpha\qquad\text{by (W2)}.
+\end{equation}
+
+\changed DDK bound this term by $\rho\le1-\alpha$. This is the only place where the weighted condition enters.
+
+\emph{Noise term.}
+\begin{align}
+|\text{noise}_j|
+&\le\frac{1}{\lambda\hat w_j}\big(\rho\|u_S\|_\infty+\|u_{S^c}\|_\infty\big) && (\opnorm{P}_\infty=\rho)\notag\\
+&\le\frac{\kappa}{\lambda\underline w}\|u\|_\infty && (1+\rho\le\kappa,\ \hat w_j\ge\underline w)\notag\\
+&\le\frac{\kappa}{\lambda\underline w}\big(\varepsilon_1\|\tilde m_S\|_\infty+\varepsilon_2\big) && \text{Def. of $u$, (W3)}\notag\\
+&\le\underbrace{\frac{\kappa\,c_{M^*}\varepsilon_1}{\lambda\underline w}}_{G_1}+\underbrace{\frac{\kappa\,\varepsilon_1\|\tilde\Delta_S\|_\infty}{\lambda\underline w}}_{G_2}+\underbrace{\frac{\kappa\,\varepsilon_2}{\lambda\underline w}}_{G_3} && (\|\tilde m_S\|_\infty\le c_{M^*}+\|\tilde\Delta_S\|_\infty).\label{eq:noise}
+\end{align}
+
+\changed These are DDK's $G_1,G_2,G_3$ (pp.~532--533), with $(2-\alpha)/\lambda$ replaced by $\kappa/(\lambda\underline w)$. Each is below $\alpha/3$:
+\begin{itemize}
+  \item $G_1,G_3<\alpha/3$ by (W4);
+  \item by \eqref{eq:errbound}--\eqref{eq:bwlambda}, $G_2<\frac{\kappa\varepsilon_1}{\lambda\underline w}\,c_{\Gamma^*}\lambda\underline w\,\frac{\kappa r+\alpha}{\kappa}=c_{\Gamma^*}\varepsilon_1(\kappa r+\alpha)\le\alpha/3$ by (W3).
+\end{itemize}
+With \eqref{eq:det},
+\begin{equation}\label{eq:dualfeas}
+\max_{j\in S^c,\ \hat w_j<\infty}|\tilde z_j|<(1-\alpha)+\tfrac\alpha3+\tfrac\alpha3+\tfrac\alpha3=1 .
+\end{equation}
+If $\hat w_j=\infty$ for every $j\in S^c$ (the pilot is zero on all of $S^c$), Step 3 is empty: every $S^c$-coordinate is fixed at $0$ by the constraint, so there is no $\tilde z_j$ to bound and $\hat m_{S^c}=0$ holds automatically.
+
+\paragraph{Step 4 (the witness is the unique minimiser; $\hat S\subseteq S$).} The pair $(\tilde m,\tilde z)$ satisfies \eqref{eq:kkt}:
+\begin{itemize}
+  \item the $S$-rows by \eqref{eq:Srows} and the rows $j\in S^c$ with $\hat w_j<\infty$ by construction;
+  \item $\tilde m_j=0$ wherever $\hat w_j=\infty$, since all infinite weights lie in $S^c$;
+  \item $\tilde z$ is a valid subgradient, since $|\tilde z_j|<1$ at the zero coordinates $j\in S^c$ with $\hat w_j<\infty$ by \eqref{eq:dualfeas}, and $\tilde z_S$ comes from Step~2.
+\end{itemize}
+So $\tilde m$ is a minimiser.
+
+\emph{\textbf{Every minimiser has support in $S$}} (Wainwright 2009, Lemma~1, cited by DDK on p.~532). Strict dual feasibility implies hat $\hat{S} \subseteq S$.
+
+\emph{\textbf{Uniqueness.}} Every minimiser lives on $\{m_{S^c}=0\}$, where the objective is strictly convex (Step 1). Part (a) follows from \eqref{eq:errbound}--\eqref{eq:bwlambda}. \hfill$\square_{\text{(a)}}$
+
+\paragraph{Part (b).} For $(j,k)\in S$, (a) gives $|\hat M_{jk}-M^*_{jk}|\le b_w<\beta_{\min}\le|M^*_{jk}|$. Hence $\hat M_{jk}\ne0$ with the sign of $M^*_{jk}$, so $S\subseteq\hat S$, and with (a), $\hat S=S$. 
+
+% =========================================================================
+\section{Theorem W.2 (probabilistic; the analogue of DDK Theorem 2)}\label{sec:W2}
+
+\paragraph{DDK's tools, used unchanged.}
+\begin{itemize}
+  \item Lemma~E.6: $\opnorm{\Delta_\Sigma}_2<\min\{\varepsilon_1/(\sqrt d(4+8c_{\Sigma^*})),\ \varepsilon_2/(2c_C)\}$ implies $\opnorm{(\Delta_\Gamma)_{\cdot S}}_\infty<\varepsilon_1$ and $\|\Delta_g\|_\infty<\varepsilon_2$, with $c_{\Sigma^*}=\opnorm{\Sigma^*}_2$ and $c_C=\|\vect(C)\|_2$.
+  \item Corollary~E.5 (from Wainwright 2019, Thm~6.5) bounds $\opnorm{\Delta_\Sigma}_2$.
+  \item Neither involves the penalty. As in DDK,
+  \[
+  \begin{split}
+  \tilde c=\max\Big\{&\frac{4\max\{1,c_{\Sigma^*}^2\}(4+8c_{\Sigma^*})^2}{c_3},\ 16c_1^2c_{\Sigma^*}^2(4+8c_{\Sigma^*})^2,\\
+  &\frac{16\max\{1,c_{\Sigma^*}^2\}c_C^2}{c_3},\ 64c_1^2c_{\Sigma^*}^2c_C^2\Big\},
+  \end{split}
+  \]
+  with the universal constants $c_1,c_2,c_3$ of Theorem~E.4.
+\end{itemize}
+
+\begin{theorem}\label{thm:W2}
+In the setting of DDK Theorem~2, let $\kappa\ge1+\rho$, $\alpha\in(0,1]$ and $\bar r\ge0$. Let $\mathcal E_w$ be an event on which the weights satisfy $\bar w_S<\infty$, $\rho_w\le1-\alpha$ and $r\le\bar r$. Put
+\[
+\varepsilon:=\sqrt{\tau_1\tilde c\,d\,p/n},\qquad c_w:=\frac{3c_{\Gamma^*}(\kappa\bar r+\alpha)}{\alpha}\qquad\Big(\text{DDK: }c_*=\frac{6c_{\Gamma^*}}{\alpha}\Big).
+\]
+Suppose $n>\tau_1\tilde c\,d\,p\max\{c_w^2,1/4\}$ for some $\tau_1>1$, and that on $\mathcal E_w$
+\[
+\lambda\,\underline w>\frac{3\kappa}{\alpha}\max\{c_{M^*},1\}\,\varepsilon .
+\]
+For the implemented weights ($\hat w\ge1$) it suffices that $\lambda>\frac{3\kappa}{\alpha}\max\{c_{M^*},1\}\varepsilon$; this is DDK's condition with $2-\alpha$ replaced by $\kappa$. Then, with probability at least $1-c_2\exp(-\tau_1p)-P(\mathcal E_w^c)$:
+\begin{enumerate}[label=\upshape(\alph*)]
+  \item the minimiser of \eqref{eq:est} is unique, $\hat S\subseteq S$, and
+  \[
+  \|\hat M-M^*\|_\infty\le\frac{c_{\Gamma^*}}{1-c_{\Gamma^*}\varepsilon}\big((c_{M^*}+1)\varepsilon+\lambda\bar w_S\big)<c_{\Gamma^*}\lambda\Big(\bar w_S+\frac\alpha\kappa\underline w\Big);
+  \]
+  \item if $\beta_{\min}$ exceeds the first bound in (a), then $\hat S=S$ with the signs of $M^*$.
+\end{enumerate}
+\end{theorem}
+
+\begin{proof}
+DDK Appendix~F, steps 1--3, with $\varepsilon_1=\varepsilon_2=\varepsilon$.
+\begin{itemize}
+  \item \textbf{Steps 1--2 are unchanged.} $\varepsilon/(\sqrt d(4+8c_{\Sigma^*}))$ and $\varepsilon/(2c_C)$ lie in the admissible range of Corollary~E.5. The upper end uses only $\max\{c_w^2,1/4\}\ge1/4$, the lower end only $\tilde c$. So with probability at least $1-c_2\exp(-\tau_1p)$, $\opnorm{(\Delta_\Gamma)_{\cdot S}}_\infty<\varepsilon$ and $\|\Delta_g\|_\infty<\varepsilon$. Both are bounds on the same random variable $\opnorm{\Delta_\Sigma}_2$, so no union bound is needed.
+  \item \textbf{Step 3 replaces $c_*$ by $c_w$.} $\varepsilon<1/\max\{c_w,1/2\}\le1/c_w=\alpha/(3c_{\Gamma^*}(\kappa\bar r+\alpha))\le\alpha/(3c_{\Gamma^*}(\kappa r+\alpha))$ on $\mathcal E_w$, which is (W3).
+  \item \textbf{Conclude.} The $\lambda$-condition is (W4), since $\max\{c_{M^*}\varepsilon,\varepsilon\}=\max\{c_{M^*},1\}\varepsilon$. Apply Theorem~\ref{thm:W1} on $\mathcal E_w\cap\{\text{concentration}\}$.\qedhere
+\end{itemize}
+\end{proof}
+
+\emph{Reading.} With $\hat w\equiv1$, $\kappa=2-\alpha$ and $\bar r=1$, Theorem~\ref{thm:W2} is DDK's Theorem~2. With a good pilot, $\bar r\to0$ and one may take $\alpha\to1$, so $c_w\to3c_{\Gamma^*}$. The sample size then no longer depends on an irrepresentability gap: it becomes $n\gtrsim\tilde c\,dp\cdot9c_{\Gamma^*}^2$, against DDK's $\tilde c\,dp\cdot36c_{\Gamma^*}^2/\alpha^2$ with $\alpha$ the (often non-existent) lasso gap. The order $\Omega(dp)$ in $(d,p)$ is unchanged.
+% =========================================================================
+\begin{corollary}[A pilot close to the truth]\label{cor:W3}
+Let $\|\hat M^0-M^*\|_\infty\le\delta<\beta_{\min}/(1+\rho)$ and put
+$\bar r:=\delta/(\beta_{\min}-\delta)$, $\alpha:=1-\rho\bar r$. Then $\alpha\in(0,1]$ and
+\begin{itemize}
+  \item[(i)] $\bar w_S<\infty$, and all infinite weights lie in $S^c$;
+  \item[(ii)] $r\le\bar r$;
+  \item[(iii)] $\rho_w\le\rho r\le1-\alpha$, i.e.\ (W2) holds.
+\end{itemize}
+Hence, \textbf{whatever the size of $\rho$}, Theorem~\ref{thm:W1} applies with this $\alpha$
+whenever (W1), (W3), (W4) hold, and Theorem~\ref{thm:W2} applies with
+$\mathcal E_w=\{\|\hat M^0-M^*\|_\infty\le\delta\}$ and this $\bar r$.
+\end{corollary}
+
+\begin{proof}
+Multiplying by $\beta_{\min}-\delta>0$, $\rho\bar r<1\iff(1+\rho)\delta<\beta_{\min}$, so $\alpha\in(0,1]$.
+
+(i) For $j\in S^c$, $M^*_j=0$, so $|\hat M^0_j|=|\hat M^0_j-M^*_j|\le\delta$. For $k\in S$, the
+reverse triangle inequality gives
+$|\hat M^0_k|\ge|M^*_k|-|\hat M^0_k-M^*_k|\ge\beta_{\min}-\delta>0$.
+So the pilot has no zero on $S$: every $\hat w_k=\hat\mu/|\hat M^0_k|$, $k\in S$, is finite, and
+infinite weights (pilot zeros) occur only where $M^*_j=0$.
+
+(ii) Since $\hat w_j=\hat\mu/|\hat M^0_j|$ is decreasing in $|\hat M^0_j|$ (with $\hat\mu/0:=\infty$),
+the two bounds in (i) give
+\[
+  r=\frac{\bar w_S}{\underline w}
+   =\frac{\max_{j\in S^c}|\hat M^0_j|}{\min_{k\in S}|\hat M^0_k|}
+   \le\frac{\delta}{\beta_{\min}-\delta}=\bar r .
+\]
+
+(iii) Bounding $\hat w_k\le\bar w_S$ ($k\in S$) and $\hat w_j\ge\underline w$ ($j\in S^c$) in (1.2)
+gives $\rho_w\le r\,|||P|||_\infty=\rho r\le\rho\bar r=1-\alpha$.
+
+Finally, (i) and (iii) are the hypotheses of Theorem~\ref{thm:W1} that involve the pilot, and
+(i)--(iii) are exactly what Theorem~\ref{thm:W2} requires to hold on $\mathcal E_w$.
+\end{proof}
+
+\noindent
+Since the diagonal is penalised, $\beta_{\min}$ includes it. Diagonal entries are typically the
+largest, so in practice $\beta_{\min}$ is the weakest edge. As $\delta\uparrow\beta_{\min}/(1+\rho)$,
+$\alpha\downarrow0$ and (W3)--(W4) become more demanding: $\rho$ no longer restricts the model,
+only the required pilot accuracy.
+
+\end{document}

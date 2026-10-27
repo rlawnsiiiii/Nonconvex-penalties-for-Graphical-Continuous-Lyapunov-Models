@@ -371,25 +371,141 @@ DDK Appendix~F, steps 1--3, with $\varepsilon_1=\varepsilon_2=\varepsilon$.
 \end{itemize}
 \end{proof}
 
-\emph{Reading.} With $\hat w\equiv1$, $\kappa=2-\alpha$ and $\bar r=1$, Theorem~\ref{thm:W2} is DDK's Theorem~2. With a good pilot, $\bar r\to0$ and one may take $\alpha\to1$, so $c_w\to3c_{\Gamma^*}$. The sample size then no longer depends on an irrepresentability gap: it becomes $n\gtrsim\tilde c\,dp\cdot9c_{\Gamma^*}^2$, against DDK's $\tilde c\,dp\cdot36c_{\Gamma^*}^2/\alpha^2$ with $\alpha$ the (often non-existent) lasso gap. The order $\Omega(dp)$ in $(d,p)$ is unchanged; it comes from the spectral-norm route of Appendix~E, not from the penalty.
-
+\emph{Reading.} With $\hat w\equiv1$, $\kappa=2-\alpha$ and $\bar r=1$, Theorem~\ref{thm:W2} is DDK's Theorem~2. With a good pilot, $\bar r\to0$ and one may take $\alpha\to1$, so $c_w\to3c_{\Gamma^*}$. The sample size then no longer depends on an irrepresentability gap: it becomes $n\gtrsim\tilde c\,dp\cdot9c_{\Gamma^*}^2$, against DDK's $\tilde c\,dp\cdot36c_{\Gamma^*}^2/\alpha^2$ with $\alpha$ the (often non-existent) lasso gap. The order $\Omega(dp)$ in $(d,p)$ is unchanged.
 % =========================================================================
 \section{Corollaries, necessity, and the dense-end pilot}\label{sec:corollaries}
 
 \begin{corollary}[A pilot close to the truth]\label{cor:W3}
-Let $\|\hat M^0-M^*\|_\infty\le\delta<\beta_{\min}$. Here $\beta_{\min}$ includes the diagonal entries, which are typically the largest, so in practice it is the smallest true edge.
+Let $\delta < \beta_{\min}/(1+\rho)$ and put
+\[
+  \bar r := \frac{\delta}{\beta_{\min}-\delta},
+  \qquad
+  \alpha := 1-\rho\,\bar r .
+\]
+Then $\alpha \in (0,1]$, and on the event
+$\mathcal E_\delta := \{\|\hat M^0-M^*\|_\infty \le \delta\}$:
 \begin{itemize}
-  \item On $S^c$: $|\hat M^0_j|\le\delta$. On $S$: $|\hat M^0_k|\ge\beta_{\min}-\delta>0$, so $\bar w_S<\infty$.
-  \item Hence $r\le\delta/(\beta_{\min}-\delta)$ and
-  \[
-  \rho_w\le\rho\,r\le\rho\,\frac{\delta}{\beta_{\min}-\delta}\le1-\alpha\qquad\text{as soon as}\qquad \delta\le\frac{(1-\alpha)\,\beta_{\min}}{\rho+1-\alpha}.
-  \]
-  \item With the implemented normalisation, $c_{M^*}-\delta\le\hat\mu\le c_{M^*}+\delta$, $\underline w\ge\hat\mu/\delta$ and $\bar w_S\le\hat\mu/(\beta_{\min}-\delta)$.
+  \item[(i)] $\hat M^0_k \neq 0$ for every $k \in S$; hence $\bar w_S < \infty$,
+        and every infinite weight lies in $S^c$;
+  \item[(ii)] $r \le \bar r$;
+  \item[(iii)] $\rho_w \le \rho\, r \le 1-\alpha$, i.e.\ (W2) holds with this $\alpha$.
 \end{itemize}
-So Theorems~\ref{thm:W1}--\ref{thm:W2} hold for every pilot within $\beta_{\min}/(1+\rho)$ of the truth in sup norm, \textbf{whatever the size of DDK's constant $\rho$}. In Theorem~\ref{thm:W2} take $\mathcal E_w=\{\|\hat M^0-M^*\|_\infty\le\delta\}$ and $\bar r=\delta/(\beta_{\min}-\delta)$.
+Consequently, \textbf{whatever the size of DDK's constant $\rho$}:
+\begin{itemize}
+  \item[(a)] on $\mathcal E_\delta$, the conclusions of Theorem~\ref{thm:W1} hold with this
+        $\alpha$ whenever (W1), (W3) and (W4) hold; since $r \le \bar r$, (W3) is implied by
+        $\varepsilon_1 \le \alpha / \big(3c_{\Gamma^*}(\kappa\bar r + \alpha)\big)$;
+  \item[(b)] Theorem~\ref{thm:W2} applies with $\mathcal E_w := \mathcal E_\delta$ and with this
+        $\alpha$ and $\bar r$: under its sample-size and $\lambda$-conditions, its conclusions hold
+        with probability at least
+        $1 - c_2\exp(-\tau_1 p) - P\big(\|\hat M^0-M^*\|_\infty > \delta\big)$.
+\end{itemize}
 \end{corollary}
 
-This is ZvdGB's (8.5) / Theorem~2.1 in deterministic form. The LLA weights of Fan, Xue \& Zou (2014), $\hat w_j=P'_\lambda(|\hat M^0_j|)/\lambda$, have $\bar w_S=0$ once the pilot is within $a_0\lambda$; then $\rho_w=0$ and only (W4) remains, which is their Theorem~1.
+\begin{proof}
+Throughout, work on $\mathcal E_\delta$, so that
+$|\hat M^0_j - M^*_j| \le \|\hat M^0 - M^*\|_\infty \le \delta$ for every entry $j$.
+
+\emph{Step 0: $\alpha \in (0,1]$.}
+Since $\rho \ge 0$, we have $\delta < \beta_{\min}/(1+\rho) \le \beta_{\min}$, so
+$\beta_{\min} - \delta > 0$, $\bar r \ge 0$ is well defined, and $\alpha \le 1$. Moreover,
+multiplying by $\beta_{\min} - \delta > 0$,
+\[
+  \alpha > 0
+  \iff \rho\,\frac{\delta}{\beta_{\min}-\delta} < 1
+  \iff \rho\,\delta < \beta_{\min} - \delta
+  \iff (1+\rho)\,\delta < \beta_{\min},
+\]
+and the last inequality is the assumption.
+
+\emph{Step 1: location of the pilot entries; proof of (i).}
+Off the support: for $j \in S^c$ we have $M^*_j = 0$, hence
+\begin{equation}\label{eq:W3-off}
+  |\hat M^0_j| \;=\; |\hat M^0_j - M^*_j| \;\le\; \delta .
+\end{equation}
+On the support: for $k \in S$, the triangle inequality
+$|M^*_k| \le |M^*_k - \hat M^0_k| + |\hat M^0_k|$ gives the reverse triangle inequality
+\begin{equation}\label{eq:W3-on}
+  |\hat M^0_k| \;\ge\; |M^*_k| - |\hat M^0_k - M^*_k| \;\ge\; \beta_{\min} - \delta \;>\; 0,
+\end{equation}
+where we used $|M^*_k| \ge \beta_{\min}$ (definition of $\beta_{\min}$ as the minimum over $S$),
+$|\hat M^0_k - M^*_k| \le \delta$, and $\delta < \beta_{\min}$.
+Hence $\hat M^0_k \neq 0$ for every $k \in S$, so every weight on $S$ falls into the first case
+of the weight definition, $\hat w_k = \hat\mu / |\hat M^0_k|$, with $\hat\mu < \infty$ and a
+strictly positive denominator. Thus each $\hat w_k$, $k \in S$, is finite, and
+$\bar w_S = \max_{k \in S} \hat w_k$, a maximum of finitely many finite numbers, is finite.
+An infinite weight occurs only at a pilot zero, which by \eqref{eq:W3-on} is impossible on $S$.
+Hence the constraint $m_j = 0$ imposed by $\hat w_j = \infty$ only fixes entries with
+$M^*_j = 0$; no entry of the true support is excluded from the estimator.
+
+\emph{Step 2: proof of (ii).}
+By \eqref{eq:W3-on}, $\hat\mu \ge |\hat M^0_k| \ge \beta_{\min} - \delta > 0$ for any $k \in S$.
+With the convention $\hat\mu/0 := \infty$, which matches the definition of the excluded weights,
+$\hat w_j = \hat\mu / |\hat M^0_j|$ for every entry, and $t \mapsto \hat\mu/t$ is decreasing on
+$[0,\infty)$. Hence the largest weight on $S$ belongs to the smallest pilot entry on $S$, and
+the smallest weight on $S^c$ belongs to the largest pilot entry on $S^c$:
+\[
+  \bar w_S = \frac{\hat\mu}{\min_{k\in S}|\hat M^0_k|},
+  \qquad
+  \underline w = \frac{\hat\mu}{\max_{j\in S^c}|\hat M^0_j|}.
+\]
+(If $\hat M^0_{S^c} = 0$, then $\underline w = \infty$ and $r = 0$, and (ii) is trivial.)
+Therefore
+\[
+  r = \frac{\bar w_S}{\underline w}
+    = \frac{\max_{j\in S^c}|\hat M^0_j|}{\min_{k\in S}|\hat M^0_k|}
+    \le \frac{\delta}{\beta_{\min} - \delta} = \bar r,
+\]
+because by \eqref{eq:W3-off} the numerator is at most $\delta$, by \eqref{eq:W3-on} the
+denominator is at least $\beta_{\min} - \delta > 0$, and such a ratio increases when its
+numerator increases or its denominator decreases.
+
+\emph{Step 3: proof of (iii).}
+Let $j \in S^c$. If $\hat w_j = \infty$, the $j$-th term in the definition (1.2) of $\rho_w$
+is $0$. Otherwise, using $\hat w_j \ge \underline w$, $\hat w_k \le \bar w_S$ for $k \in S$,
+and $\sum_{k\in S}|P_{jk}| \le |||P|||_\infty = \rho$ (maximum absolute row sum),
+\[
+  \frac{1}{\hat w_j}\sum_{k\in S}|P_{jk}|\,\hat w_k
+  \;\le\; \frac{\bar w_S}{\underline w}\sum_{k\in S}|P_{jk}|
+  \;\le\; r\,\rho .
+\]
+Taking the maximum over $j \in S^c$ gives $\rho_w \le \rho\, r$. By (ii) and the definition
+of $\alpha$, $\rho_w \le \rho\, r \le \rho\,\bar r = 1 - \alpha$, and $\alpha \in (0,1]$ by
+Step 0. This is (W2).
+
+\emph{Step 4: consequences.}
+(a) By (i), the standing assumption $\bar w_S < \infty$ of Theorem~\ref{thm:W1} holds, and by
+(iii) so does (W2). The remaining hypotheses (W1), (W3), (W4) are assumed. The right-hand side
+of (W3) is decreasing in $r$ and $r \le \bar r$ by (ii), so
+$\varepsilon_1 \le \alpha/\big(3c_{\Gamma^*}(\kappa\bar r + \alpha)\big)$ implies (W3).
+
+(b) Theorem~\ref{thm:W2} requires an event on which $\bar w_S < \infty$,
+$\rho_w \le 1 - \alpha$ and $r \le \bar r$, for deterministic $\alpha$ and $\bar r$.
+By (i)--(iii), $\mathcal E_\delta$ is such an event, and $\alpha$, $\bar r$ depend only on
+$\delta$, $\beta_{\min}$ and $\rho$. Theorem~\ref{thm:W2} therefore gives its conclusions with
+probability at least $1 - c_2\exp(-\tau_1 p) - P(\mathcal E_\delta^c)$.
+\end{proof}
+
+\begin{remark}\label{rem:W3}
+\begin{itemize}
+  \item Since the diagonal is penalised, $\beta_{\min} = \min_{(j,k)\in S}|M^*_{jk}|$ runs over
+        all of $S$, diagonal included. The diagonal entries are typically the largest in
+        magnitude, so in practice $\beta_{\min}$ is the weakest true edge, and the tolerance
+        $\beta_{\min}/(1+\rho)$ is set by that edge.
+  \item DDK need $\rho \le 1-\alpha < 1$, a property of $(\Sigma^*, S)$ that no amount of data
+        changes. Here $\rho$ only determines how accurate the pilot must be: for every $\rho$
+        the tolerance $\beta_{\min}/(1+\rho)$ is positive. The constant $\rho$ does not
+        disappear, however. It enters $\kappa \ge 1+\rho$ in (W3)--(W4) and
+        $\alpha = 1 - \rho\bar r$, and as $\delta \uparrow \beta_{\min}/(1+\rho)$ we have
+        $\alpha \downarrow 0$, so (W3), (W4) and the sample size in Theorem~\ref{thm:W2}
+        become arbitrarily demanding.
+  \item For a prescribed $\alpha \in (0,1]$, the condition $\rho\bar r \le 1-\alpha$ is
+        equivalent to $\delta \le (1-\alpha)\beta_{\min}/(\rho + 1 - \alpha)$. The $\alpha$ of
+        Corollary~\ref{cor:W3} is the largest admissible one, and also the best choice, since
+        (W3) and (W4) become weaker requirements as $\alpha$ grows.
+\end{itemize}
+\end{remark}
+
 
 \begin{corollary}[Sign-weighted version]\label{cor:W4}
 Assume (W1), (W3), (W4) and $\beta_{\min}>b_w$. Replace (W2) by the weaker condition
