@@ -55,12 +55,12 @@ g(\Sigma)=-A(\Sigma)^\top\vect(C),
 \]
 so that
 \[
-\tfrac12\|M\Sigma+\Sigma M^\top+C\|_F^2=\tfrac12\vect(M)^\top\Gamma(\Sigma)\vect(M)-g(\Sigma)^\top\vect(M)+\tfrac12\|C\|_F^2 .
+L(M) := \tfrac12\|M\Sigma+\Sigma M^\top+C\|_F^2=\tfrac12\vect(M)^\top\Gamma(\Sigma)\vect(M)-g(\Sigma)^\top\vect(M)+\tfrac12\|C\|_F^2 .
 \]
 
 \paragraph{Shorthand.} $\hat\Gamma=\Gamma(\hat\Sigma)$, $\Gamma^*=\Gamma(\Sigma^*)$, $\hat g$, $g^*$, $\Delta_\Gamma=\hat\Gamma-\Gamma^*$, $\Delta_g=\hat g-g^*$. Indices are pairs $(j,k)$; $m=\vect(M)$, $m^*=\vect(M^*)$.
 
-\paragraph{Support.} $S=\{(j,k):M^*_{jk}\ne0\}$, $d=|S|$; Since $M^*$ solves the Lyapunov equation, $\Gamma^*m^*=g^*$.
+\paragraph{Support.} $S=\{(j,k):M^*_{jk}\ne0\}$, $d=|S|$; Since $M^*$ solves the Lyapunov equation, $\nabla L(m^*) = 0 \iff$ $\Gamma^*m^*=g^*$.
 
 \paragraph{Constants (DDK).}
 \begin{gather*}
@@ -110,7 +110,7 @@ r:=\frac{\bar w_S}{\underline w}=\frac{\max_{j\in S^c}|\hat M^0_j|}{\min_{k\in S
 \rho_w:=\max_{j\in S^c}\ \frac{1}{\hat w_j}\sum_{k\in S}|P_{jk}|\,\hat w_k\ \ \Big(=\opnorm{\hat W_{S^c}^{-1}P_{S^c\cdot}\hat W_{SS}}_\infty\Big).
 \end{equation}
 
-\paragraph{A free constant.} Fix any $\kappa\ge1+\rho$. The natural choice is $\kappa=1+\rho$. In DDK's setting, $\rho\le1-\alpha$ and $\kappa=2-\alpha$ is admissible, and this is the choice that reproduces D.1.
+\paragraph{\textbf{$\kappa$:}} Fix any $\kappa\ge1+\rho$. In DDK's setting, $\rho\le1-\alpha$ and $\kappa=2-\alpha$.
 
 % =========================================================================
 \section{W.1 (deterministic; analogue of DDK Theorem D.1)}\label{sec:W1}
@@ -138,15 +138,14 @@ Then:
   &<c_{\Gamma^*}\,\lambda\Big(\bar w_S+\frac{\alpha}{\kappa}\,\underline w\Big).
   \end{split}
   \end{equation}
-  The last bound is informative only when $\underline w<\infty$.
   \item If moreover $\beta_{\min}=\min_{(j,k)\in S}|M^*_{jk}|>b_w$, then $\hat S=S$ and $\sign(\hat M_{jk})=\sign(M^*_{jk})$ for all $(j,k)\in S$.
 \end{enumerate}
 \end{theorem}
 
-\paragraph{Reduction to DDK Theorem D.1.} Take $\hat w\equiv1$ and $\kappa=2-\alpha$; this needs $\rho\le1-\alpha$. Then:
+\paragraph{Reduction to DDK Theorem D.1.} Take $\hat w=\textbf{1}$ and $\kappa=2-\alpha$ with $\rho\le1-\alpha$. Then:
 \begin{itemize}
   \item (W2) is DDK's (D.1), $\rho\le1-\alpha$;
-  \item (W3) is DDK's $\varepsilon_1\le\alpha/(6c_{\Gamma^*})$, since $3c_{\Gamma^*}(\kappa\cdot1+\alpha)=6c_{\Gamma^*}$;
+  \item (W3) is DDK's $\varepsilon_1\le\alpha/(6c_{\Gamma^*})$, since $r=1$;
   \item (W4) is DDK's $\lambda>\frac{3(2-\alpha)}{\alpha}\max\{c_{M^*}\varepsilon_1,\varepsilon_2\}$;
   \item the right-hand bound in \eqref{eq:bw} is $c_{\Gamma^*}\lambda\big(1+\frac{\alpha}{2-\alpha}\big)=\frac{2c_{\Gamma^*}\lambda}{2-\alpha}$, which is DDK's bound;
   \item DDK's beta-min $\beta_{\min}>2c_{\Gamma^*}\lambda/(2-\alpha)$ implies the one in (b).
@@ -185,13 +184,13 @@ where the $S^c$-rows are taken only for $j$ with $\hat w_j<\infty$.
 The restricted objective is strictly convex (as $\hat\Gamma$ positive semidefinite and invertible according to DDK) and $\tilde m$ is unique.
 
 
-At $\tilde m$, where $\tilde m_{S^c}=0$, the $S$-rows give
+At $\tilde m$, where $\tilde m_{S^c}=0$, the $S$-rows of \ref{eq:kkt} give
 \begin{equation}\label{eq:Srows}
 (\hat\Gamma \tilde m - \hat g)_S + \lambda(\hat w\circ\tilde z)_S
   = \hat\Gamma_{SS}\tilde m_S - \hat g_S + \lambda(\hat w\circ\tilde z)_S = 0.
 \end{equation}
 
-\emph{\textbf{Error bound:}} 
+\emph{\textbf{Error bound $\tilde{m}_S - m^*_S$:}} 
 
 Since $m^*_{S^c}=0$ and $\Gamma^*_{SS}m^*_S-g^*_S = 0$, we have
 \begin{equation*}
@@ -247,9 +246,9 @@ b_w&<c_{\Gamma^*}\cdot\frac{3(\kappa r+\alpha)}{3\kappa r+2\alpha}\cdot\lambda\u
 
 \changed This is (D.4). With $\hat w\equiv1$ and $\kappa=2-\alpha$ the right-hand side is DDK's $\frac{6c_{\Gamma^*}}{6-\alpha}\cdot\frac{6-\alpha}{3(2-\alpha)}\lambda=\frac{2c_{\Gamma^*}\lambda}{2-\alpha}$.
 
-\paragraph{Step 2 (subgradient on $S$).} Take $\tilde z_S$ from \eqref{eq:Srows}. By construction it is a subgradient of $\|\cdot\|_1$ at $\tilde m_S$.
+\paragraph{Step 2 ($\tilde{z}_S$: subgradient on $S$).} Take $\tilde z_S$ from \eqref{eq:Srows}. By construction it is a subgradient of $\|\cdot\|_1$ at $\tilde m_S$.
 
-\paragraph{Step 3 (dual vector on $S^c$).} Evaluate the block form at $(\tilde m,\tilde z)$. Since $\tilde m_{S^c}=m^*_{S^c}=0$, we have $(\Delta_M)_{S^c}=0$ and $(\Delta_M)_S=\tilde\Delta_S$:
+\paragraph{Step 3 ($\tilde{z}_S^c$: dual vector on $S^c$).} Evaluate the block form at $(\tilde m,\tilde z)$. Since $\tilde m_{S^c}=m^*_{S^c}=0$, we have $(\Delta_M)_{S^c}=0$ and $(\Delta_M)_S=\tilde\Delta_S$:
 \begin{align*}
 &\begin{bmatrix}\Gamma^*_{SS}&\Gamma^*_{SS^c}\\\Gamma^*_{S^cS}&\Gamma^*_{S^cS^c}\end{bmatrix}
 \begin{bmatrix}\tilde\Delta_S\\0\end{bmatrix}\\
@@ -329,11 +328,11 @@ So $\tilde m$ is a minimiser.
 % =========================================================================
 \section{Theorem W.2 (probabilistic; the analogue of DDK Theorem 2)}\label{sec:W2}
 
-\paragraph{DDK's tools, used unchanged.}
+\paragraph{DDK's tools}
 \begin{itemize}
   \item Lemma~E.6: $\opnorm{\Delta_\Sigma}_2<\min\{\varepsilon_1/(\sqrt d(4+8c_{\Sigma^*})),\ \varepsilon_2/(2c_C)\}$ implies $\opnorm{(\Delta_\Gamma)_{\cdot S}}_\infty<\varepsilon_1$ and $\|\Delta_g\|_\infty<\varepsilon_2$, with $c_{\Sigma^*}=\opnorm{\Sigma^*}_2$ and $c_C=\|\vect(C)\|_2$.
   \item Corollary~E.5 (from Wainwright 2019, Thm~6.5) bounds $\opnorm{\Delta_\Sigma}_2$.
-  \item Neither involves the penalty. As in DDK,
+  \item As in DDK,
   \[
   \begin{split}
   \tilde c=\max\Big\{&\frac{4\max\{1,c_{\Sigma^*}^2\}(4+8c_{\Sigma^*})^2}{c_3},\ 16c_1^2c_{\Sigma^*}^2(4+8c_{\Sigma^*})^2,\\
@@ -371,7 +370,7 @@ DDK Appendix~F, steps 1--3, with $\varepsilon_1=\varepsilon_2=\varepsilon$.
 \end{itemize}
 \end{proof}
 
-\emph{Reading.} With $\hat w\equiv1$, $\kappa=2-\alpha$ and $\bar r=1$, Theorem~\ref{thm:W2} is DDK's Theorem~2. With a good pilot, $\bar r\to0$ and one may take $\alpha\to1$, so $c_w\to3c_{\Gamma^*}$. The sample size then no longer depends on an irrepresentability gap: it becomes $n\gtrsim\tilde c\,dp\cdot9c_{\Gamma^*}^2$, against DDK's $\tilde c\,dp\cdot36c_{\Gamma^*}^2/\alpha^2$ with $\alpha$ the (often non-existent) lasso gap. The order $\Omega(dp)$ in $(d,p)$ is unchanged.
+\emph{Reading.} With $\hat w\equiv1$, $\kappa=2-\alpha$ and $\bar r=1$, Theorem~\ref{thm:W2} is DDK's Theorem~2. Sample size generally depends on the quality of weights via $c_w$ and $\bar{r}$. With a good pilot, $\bar r\to0$ and one may take $\alpha\to1$, so $c_w\to3c_{\Gamma^*}$. The sample size then no longer depends on an irrepresentability gap: it becomes $n\gtrsim\tilde c\,dp\cdot9c_{\Gamma^*}^2$, against DDK's $\tilde c\,dp\cdot36c_{\Gamma^*}^2/\alpha^2$ with $\alpha$ the (often non-existent) lasso gap. The order $\Omega(dp)$ in $(d,p)$ is unchanged.
 % =========================================================================
 \begin{corollary}[A pilot close to the truth]\label{cor:W3}
 Let $\|\hat M^0-M^*\|_\infty\le\delta<\beta_{\min}/(1+\rho)$ and put
@@ -389,7 +388,7 @@ $\mathcal E_w=\{\|\hat M^0-M^*\|_\infty\le\delta\}$ and this $\bar r$.
 \begin{proof}
 Multiplying by $\beta_{\min}-\delta>0$, $\rho\bar r<1\iff(1+\rho)\delta<\beta_{\min}$, so $\alpha\in(0,1]$.
 
-(i) For $j\in S^c$, $M^*_j=0$, so $|\hat M^0_j|=|\hat M^0_j-M^*_j|\le\delta$. For $k\in S$, the
+(i) For $j\in S^c$, $M^*_j=0$, so $|\hat M^0_j|=|\hat M^0_j-M^*_j|\le\delta$, i.e. weights can be infinite. For $k\in S$, the
 reverse triangle inequality gives
 $|\hat M^0_k|\ge|M^*_k|-|\hat M^0_k-M^*_k|\ge\beta_{\min}-\delta>0$.
 So the pilot has no zero on $S$: every $\hat w_k=\hat\mu/|\hat M^0_k|$, $k\in S$, is finite, and
@@ -411,9 +410,10 @@ Finally, (i) and (iii) are the hypotheses of Theorem~\ref{thm:W1} that involve t
 \end{proof}
 
 \noindent
-Since the diagonal is penalised, $\beta_{\min}$ includes it. Diagonal entries are typically the
+\textbf{On $\beta_{\min}$:} Since the diagonal is penalised, $\beta_{\min}$ includes it. Diagonal entries are typically the
 largest, so in practice $\beta_{\min}$ is the weakest edge. As $\delta\uparrow\beta_{\min}/(1+\rho)$,
 $\alpha\downarrow0$ and (W3)--(W4) become more demanding: $\rho$ no longer restricts the model,
 only the required pilot accuracy.
+\textbf{Getting $P(\mathcal E_w), \bar{r}$:} The assumption for this corollary is more harsh than $(W2)$. But it would give us $\bar{r}$ that is necessary for the sample size computation and tell us whether $\mathcal E_w$ holds.
 
 \end{document}
