@@ -206,7 +206,7 @@ it (Fan, Xue & Zou 2014), gains about three quarters of dense → sparse at $p =
 
 So the nonconvex penalty is not what helps. What helps is the start: a fit that has seen all the
 edges, from which the weak ones are removed, instead of a fit that adds edges one by one and commits
-to a direction the moment a pair enters (`next_steps/051026/orientation_lock_in.md`).
+to a direction the moment a pair enters (`../claude_docs/orientation_lock_in_051026.md`).
 
 ![](../runs/campaign/figures/orientation_p20.png)
 

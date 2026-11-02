@@ -404,7 +404,7 @@ and reported in [`S4_campaign.md`](S4_campaign.md).*
 3. A data-generating process in which direction is identifiable (stronger edges, no 2-cycles): are
    the gains larger there, as IS §7 finds?
 4. Theory: why the standard path locks in a direction, and why the dense start resolves the hedge
-   (`../next_steps/051026/orientation_lock_in.md`, `docs/DENSE_START.md` §7).
+   (`../claude_docs/orientation_lock_in_051026.md`, `docs/DENSE_START.md` §7).
 5. The gain at $n = 1000$ is real at $p = 20$ (+0.056, $z = 12$) and small at $p = 10$ (+0.016,
    $z = 3$); for the selected graph at $p = 10$ it is zero.
 6. Settled (verdict 25). Wave 5a: the score with the maximised likelihood instead of the

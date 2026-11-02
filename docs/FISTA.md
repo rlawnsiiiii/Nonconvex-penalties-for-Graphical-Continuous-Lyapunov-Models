@@ -1,11 +1,9 @@
-# The FISTA backends: packaged and hand-written
-
-Purpose: document the default solver `fista`, the packaged FISTA `pyproximal`, and the package survey behind the choice.
+# FISTA backends
 
 ```
 src/gclm/solvers/
-├── proxgrad.py ─ solve_fista()          hand-written FISTA, the default       solver="fista"
-└── backends.py ─ _pyproximal_path()     packaged FISTA, pyproximal + pylops   solver="pyproximal"
+├── proxgrad.py ─ solve_fista()          hand-written FISTA + adaptive restart   solver="fista"       (default)
+└── backends.py ─ _pyproximal_path()     packaged FISTA, pyproximal + pylops     solver="pyproximal"
 tests/
 ├── test_fista.py                        22 tests, Section 4: analytic solution, duality-gap
 │                                        certificate, interior-point solver, every other backend
@@ -14,259 +12,273 @@ tests/
 
 ---
 
-## 1. The algorithm
+## 1. Algorithm
 
-Minimize $F(M)=f(M)+g(M)$, $f$ smooth and convex, $g$ convex and non-smooth:
+$$\min_M\ F(M)=f(M)+g(M)$$
 
-$$f(M)=\tfrac12\big\|M\hat\Sigma+\hat\Sigma M^\top+C\big\|_F^2$$
-$$g(M)=\lambda\sum_{ij}v_{ij}\lvert M_{ij}\rvert$$
+$$f(M)=\tfrac12\lVert M\hat\Sigma+\hat\Sigma M^\top+C\rVert_F^2,\qquad g(M)=\lambda\sum_{ij}v_{ij}\lvert M_{ij}\rvert$$
 
-FISTA iteration, Beck and Teboulle 2009, constant step $t=1/L$:
+Constant step $t=1/L$:
 
-$$M_{k+1}=\mathrm{prox}_{t g}\!\big(Y_k-t\,\nabla f(Y_k)\big)$$
+$$M_{k+1}=\mathrm{prox}_{tg}\big(Y_k-t\,\nabla f(Y_k)\big)$$
+
 $$t_{k+1}=\frac{1+\sqrt{1+4t_k^2}}{2}$$
+
 $$Y_{k+1}=M_{k+1}+\frac{t_k-1}{t_{k+1}}\big(M_{k+1}-M_k\big)$$
+
 $$\big[\mathrm{prox}_{tg}(Z)\big]_{ij}=\mathrm{sign}(Z_{ij})\max\big(\lvert Z_{ij}\rvert-t\lambda v_{ij},\,0\big)$$
+
 $$F(M_k)-F(M^\star)=O(1/k^2)\qquad\text{(ISTA: }O(1/k)\text{; Beck and Teboulle 2009, Theorem 4.4)}$$
 
-Gradient, with $R(M)=M\hat\Sigma+\hat\Sigma M^\top+C$:
+Gradient:
 
-$$\nabla f(M)=2\,R(M)\,\hat\Sigma$$
-$$f=\tfrac12\operatorname{tr}(R^2),\qquad df=\operatorname{tr}(R\,dR)=\operatorname{tr}\!\big(R(dM\,\hat\Sigma+\hat\Sigma\,dM^\top)\big)=2\langle R\hat\Sigma,\,dM\rangle$$
+$$R(M)=M\hat\Sigma+\hat\Sigma M^\top+C,\qquad\nabla f(M)=2\,R(M)\,\hat\Sigma$$
 
-Step size $t=1/L$:
+$$f=\tfrac12\operatorname{tr}(R^2),\qquad df=\operatorname{tr}(R\,dR)=\operatorname{tr}\big(R(dM\,\hat\Sigma+\hat\Sigma\,dM^\top)\big)=2\langle R\hat\Sigma,\,dM\rangle$$
 
-$$L=\big\|A(\hat\Sigma)\big\|_2^2\le\big(2\lambda_{\max}(\hat\Sigma)\big)^2$$
-$$A=(\Sigma\otimes I)+(I\otimes\Sigma)K,\qquad\big\|\Sigma\otimes I\big\|_2=\big\|(I\otimes\Sigma)K\big\|_2=\lambda_{\max}(\Sigma),\qquad K\ \text{orthogonal}$$
+Lipschitz bound:
 
-Adaptive restart, gradient scheme of O'Donoghue and Candès 2015: reset $t_k\leftarrow1$ whenever
+$$L=\lVert A(\hat\Sigma)\rVert_2^2\le\big(2\lambda_{\max}(\hat\Sigma)\big)^2$$
 
-$$\big\langle Y_k-M_{k+1},\;M_{k+1}-M_k\big\rangle>0$$
+$$A=(\Sigma\otimes I)+(I\otimes\Sigma)K,\qquad\lVert\Sigma\otimes I\rVert_2=\lVert(I\otimes\Sigma)K\rVert_2=\lambda_{\max}(\Sigma),\qquad K\ \text{orthogonal}$$
 
-Stopping rule:
+Restart: $t_k\leftarrow1$ if
+
+$$\langle Y_k-M_{k+1},\;M_{k+1}-M_k\rangle>0$$
+
+Stop:
 
 $$\lVert M_{k+1}-M_k\rVert_\infty<\texttt{tol}$$
 
-| part | fact |
-|---|---|
-| gradient cost | three $p\times p$ products, $O(p^3)$; the design matrix $A(\hat\Sigma)$ is never formed |
-| gradient checks | `tests/test_loss.py`: finite differences and $X^\top(X\beta-y)$ |
-| bound tightness | measured ratio 1.000, exactly tight, so nothing to gain from computing the true constant by power iteration |
-| bound test | `test_lipschitz_bound_dominates_true_constant` asserts $L\ge\lambda_{\max}(A^\top A)$; otherwise FISTA would diverge |
-| why restart | plain FISTA is non-monotone: the momentum overshoots and the objective oscillates, severe here because the Hessian is singular, §2.3 of `S1_reproduction.md` |
-| restart meaning | the momentum points against the direction the proximal step just took |
-| restart cost | no function evaluations and no strong-convexity parameter, which does not exist here |
+```
+solve_fista(Sigma, C, lam, v, tol, max_iter):             # src/gclm/solvers/proxgrad.py
+    L = (2 lambda_max(Sigma))^2;  t = 1/L                 # bound / true constant: measured ratio 1.000
+    M = Y = M0;  tk = 1
+    repeat max_iter times:
+        R     = Y Sigma + Sigma Y^T + C                   # three p x p products, O(p^3); A(Sigma) never formed
+        grad  = 2 R Sigma
+        M_new = soft_threshold(Y - t grad, t lam v)       # v_ii = 0: diagonal unpenalized
+        if <Y - M_new, M_new - M> > 0:                    # restart (O'Donoghue & Candes 2015, gradient scheme):
+            tk_new = 1;  Y = M_new                        #   momentum points against the prox step; no function
+        else:                                             #   evaluations, no strong-convexity parameter (none
+            tk_new = (1 + sqrt(1 + 4 tk^2)) / 2           #   exists here); plain FISTA is non-monotone, severe
+            Y = M_new + (tk - 1)/tk_new (M_new - M)       #   for a singular Hessian, S1_reproduction.md Section 2.3
+        delta = max_ij |M_new - M|
+        M, tk = M_new, tk_new
+        if delta < tol: break
+    return M
+```
 
 ---
 
 ## 2. References
 
-| | |
-|---|---|
-| **Beck, A. & Teboulle, M. (2009).** *A Fast Iterative Shrinkage-Thresholding Algorithm for Linear Inverse Problems.* SIAM J. Imaging Sciences **2**(1), 183–202. [doi:10.1137/080716542](https://doi.org/10.1137/080716542) | FISTA itself: the update above, the $O(1/k^2)$ rate (Thm 4.4), and the constant-step variant we use (§4). |
-| **O'Donoghue, B. & Candès, E. (2015).** *Adaptive Restart for Accelerated Gradient Schemes.* Foundations of Computational Mathematics **15**, 715–732. [doi:10.1007/s10208-013-9150-2](https://doi.org/10.1007/s10208-013-9150-2) | The restart condition. Their "gradient scheme", §3.2: the inner-product test, which is what the code implements. |
-| **Nesterov, Y. (1983).** *A method of solving a convex programming problem with convergence rate $O(1/k^2)$.* Soviet Mathematics Doklady **27**(2), 372–376. | The original acceleration that FISTA extends to the composite setting. |
-| **Parikh, N. & Boyd, S. (2014).** *Proximal Algorithms.* Foundations and Trends in Optimization **1**(3), 127–239. [doi:10.1561/2400000003](https://doi.org/10.1561/2400000003) | Reference for proximal operators generally, incl. the soft-threshold. **Cited by Varando & Hansen for their Algorithm 1**, so the same family the GCLM literature already uses. |
-| **Beck, A. & Teboulle, M. (2010).** *Gradient-based algorithms with applications to signal recovery.* In *Convex Optimization in Signal Processing and Communications*, CUP, 42–88. | Backtracking line search; cited by Varando & Hansen for the step-size rule in Algorithm 1. We use the closed-form bound instead, since it is tight. |
+```bibtex
+@article{BeckTeboulle2009,
+  author  = {Beck, A. and Teboulle, M.},
+  title   = {A Fast Iterative Shrinkage-Thresholding Algorithm for Linear Inverse Problems},
+  journal = {SIAM J. Imaging Sciences}, volume = {2}, number = {1}, pages = {183--202}, year = {2009},
+  doi     = {10.1137/080716542}}
+@article{ODonoghueCandes2015,
+  author  = {O'Donoghue, B. and Cand{\`e}s, E.},
+  title   = {Adaptive Restart for Accelerated Gradient Schemes},
+  journal = {Foundations of Computational Mathematics}, volume = {15}, pages = {715--732}, year = {2015},
+  doi     = {10.1007/s10208-013-9150-2}}
+@article{Nesterov1983,
+  author  = {Nesterov, Y.},
+  title   = {A method of solving a convex programming problem with convergence rate $O(1/k^2)$},
+  journal = {Soviet Mathematics Doklady}, volume = {27}, number = {2}, pages = {372--376}, year = {1983}}
+@article{ParikhBoyd2014,
+  author  = {Parikh, N. and Boyd, S.},
+  title   = {Proximal Algorithms},
+  journal = {Foundations and Trends in Optimization}, volume = {1}, number = {3}, pages = {127--239}, year = {2014},
+  doi     = {10.1561/2400000003}}
+@incollection{BeckTeboulle2010,
+  author    = {Beck, A. and Teboulle, M.},
+  title     = {Gradient-based algorithms with applications to signal recovery},
+  booktitle = {Convex Optimization in Signal Processing and Communications}, publisher = {CUP}, pages = {42--88}, year = {2010}}
+```
 
-Relation to the GCLM papers:
-
-| paper | method | relation |
+| | | Varando & Hansen, Algorithm 1 |
 |---|---|---|
-| Dettling, Appendix A | Direct Lyapunov Lasso fitted with *"the R package `glmnet`, which runs a coordinate descent algorithm"* | the `glmnet` backend |
-| Varando, Algorithm 1 | a proximal-gradient method, citing Parikh & Boyd and Beck & Teboulle 2010, for $L(\Sigma(B,C))+\lambda\rho_1(B)+\kappa\lVert C-I_p\rVert_F^2$ over $B$ **and** $C$; a Lyapunov equation solved every iteration; a line search keeps $B$ stable | the reference for S2, not S1 |
-| `solve_fista` | a standard method applied to our problem | a transcription of neither paper; neither prescribes FISTA for this estimator |
+| `BeckTeboulle2009` | updates; rate, Theorem 4.4; constant step, §4 | |
+| `ODonoghueCandes2015` | restart, §3.2 | |
+| `Nesterov1983` | acceleration | |
+| `ParikhBoyd2014` | prox, soft threshold | ✓ |
+| `BeckTeboulle2010` | backtracking; closed-form bound instead | ✓ |
+
+| | | |
+|---|---|---|
+| Dettling, Appendix A | `glmnet`, coordinate descent | `glmnet` |
+| Varando, Algorithm 1 | proximal gradient over $(B,C)$, $L(\Sigma(B,C))+\lambda\rho_1(B)+\kappa\lVert C-I_p\rVert_F^2$; Lyapunov solve, line search per iteration | S2 |
+| `solve_fista` | FISTA, Section 1 | neither paper |
 
 ---
 
-## 3. Package survey
+## 3. Packages
 
-Every candidate was installed and run on the real problem; the outcomes are measured, not assumed.
+### 3.1 `pyproximal`
 
-### Packaged FISTA: `pyproximal`
+`pyproximal.L2(Op=...)`, `pylops` `LinearOperator`:
 
-[`pyproximal`](https://pyproximal.readthedocs.io) with `pylops`, `solver="pyproximal"`, matrix-free through `pyproximal.L2(Op=...)` on any `pylops` `LinearOperator`:
-
-$$\texttt{matvec}:\ v\mapsto\mathrm{vec}(V\hat\Sigma+\hat\Sigma V^\top)$$
-$$\texttt{rmatvec}:\ u\mapsto\mathrm{vec}\big((U+U^\top)\hat\Sigma\big)$$
-
-| item | fact |
-|---|---|
-| cost | both $O(p^3)$; no $p^2\times p^2$ matrix is ever formed |
-| weights | `pyproximal.L1(sigma=ndarray)` takes per-element weights, so the unpenalized diagonal is expressible |
-| operator check | `test_pyproximal_operator_is_the_design_matrix`: both directions, against the explicit $A(\hat\Sigma)$ |
-
-Measured, single $\lambda=0.1\lambda_{\max}$, run to convergence rather than to a fixed iteration budget:
-
-| | $p=10$ | $p=20$ |
-|---|---|---|
-| `fista` (hand-written), time to machine precision | **19.5 ms** | **38 ms** |
-| `pyproximal`, time to machine precision | 1007 ms | 1561 ms |
-| ratio | ~50× | ~41× |
-| `pyproximal`, `F − F*` reached | ≈ −6.7e-16 | 1.4e-14 |
+$$\texttt{matvec}:\ v\mapsto\mathrm{vec}(V\hat\Sigma+\hat\Sigma V^\top),\qquad\texttt{rmatvec}:\ u\mapsto\mathrm{vec}\big((U+U^\top)\hat\Sigma\big),\qquad O(p^3)$$
 
 | | |
 |---|---|
-| verdict | both converge to the same optimum; the `tol` of `pyproximal` terminates early rather than burning the whole budget; the difference is wall-clock, not accuracy |
-| correction | an earlier version of this file reported `pyproximal` reaching only 2.7e-05: an artifact of capping `niter` in the benchmark, not a limit of the package; the speed gap is real, the accuracy gap was not |
+| weights | `pyproximal.L1(sigma=ndarray)` |
+| `test_pyproximal_operator_is_the_design_matrix` | both directions vs explicit $A(\hat\Sigma)$ |
+| restart | none; `acceleration` ∈ {`None`, `'vandenberghe'`, `'fista'`} |
 
-#### Exactly what differs
-
-`pyproximal.optimization.primal.ProximalGradient` with `acceleration='fista'`:
+`ProximalGradient(acceleration='fista')`: same recursion, $\tau=1/L$, prox:
 
 ```python
 told = t; t = (1.0 + np.sqrt(1.0 + 4.0 * t**2)) / 2.0; omega = (told - 1.0) / t
 y = x + omega * (x - xold)
 ```
 
-Character for character the same recursion as ours, with the same $\tau=1/L$ and the same prox; the only algorithmic difference is the restart branch.
+| ms to machine precision (to convergence), $\lambda=0.1\lambda_{\max}$ | $p=10$ | $p=20$ |
+|---|---|---|
+| `fista` | **19.5** | **38** |
+| `pyproximal` | 1007 | 1561 |
+| ratio | ~50× | ~41× |
+| `pyproximal`, $F-F^\star$ | $\approx-6.7\times10^{-16}$ | $1.4\times10^{-14}$ |
 
-| source of the runtime gap | kind | factor | how measured |
+Same optimum, wall-clock gap only; earlier $2.7\times10^{-5}$: `niter` cap artifact.
+
+| `pyproximal` → `fista` | factor | measurement |
+|---|---|---|
+| restart (algorithmic) | ~2–3×, grows with $p$ | 187 → 63 iterations to $F-F^\star<10^{-12}$, identical code |
+| per-iteration overhead (implementation) | ~4× | 42 → 10 $\mu\mathrm{s}$; `proxf(x)` per iteration when `tol is not None` (+1 operator application), `pylops`/`scipy` `LinearOperator` dispatch, `vec`/`unvec` reshapes |
+
+### 3.2 Others
+
+| | weighted $\ell_1$ | matrix-free | |
 |---|---|---|---|
-| **adaptive restart** | algorithmic | ~2–3× (more as $p$ grows) | toggling restart on/off in *identical* code: 63 vs 187 iterations to reach `F−F* < 1e-12` |
-| per-iteration overhead | implementation | ~4× | 42 µs/iter vs 10 µs/iter on the same problem |
+| `skglm` | `WeightedL1`, `WeightedMCPenalty`, `Quadratic`, no intercept; `SCAD` unweighted | ✗, $O(p^4)$ | `solver="skglm"`, JMLR 26 (2025); MCP without R |
+| `ncvreg::ncvfit` (R) | ✓ | ✗, $O(p^4)$ | most accurate (`R/ENCODING.md`); 48× slower at $p=20$ |
+| `glmnet` (R) | ✓ | ✗, $O(p^4)$ | Dettling's; least accurate; silent $\lambda$-path truncation on non-convergence |
+| `cvxpy` | ✓ | ✗ | 100-point path far slower; 4.3 |
+| `sklearn.linear_model.Lasso` | ✗ | | projection workaround converges badly |
+| `copt` | | ✓ `minimize_proximal_gradient(accelerated=True)` | `mutex lock failed` on import |
+| `proxmin` | ✗ | | subsumed by `pyproximal` |
+| `celer` | | | superseded by `skglm` |
 
-| overhead component | detail |
-|---|---|
-| stopping test | when `tol is not None`, `ProximalGradient` evaluates `proxf(x)` every iteration; with `L2(Op=...)` that is one extra operator application on top of the two the gradient already costs |
-| dispatch | `pylops`/`scipy` `LinearOperator` dispatch and the `vec`/`unvec` reshapes on each application |
-| restart | a published technique, O'Donoghue & Candès 2015, that `pyproximal` does not expose; its options are `None`, `'vandenberghe'`, `'fista'`; with restart and a cheaper stopping test the gap would largely close |
+### 3.3 Path, 100 $\lambda$, warm starts, `tol = 1e-12`
 
-### The rest
-
-| package | verdict |
-|---|---|
-| `sklearn.linear_model.Lasso` | **Cannot express the problem.** No per-feature penalty weights, so the unpenalized diagonal is impossible. The workaround (profile the diagonal out by projection) is correct but converges badly on the rank-deficient design. |
-| `copt` | **Unusable here**: segfaults on import in this environment (`mutex lock failed`). Its `minimize_proximal_gradient(accelerated=True)` would otherwise have been a good matrix-free fit. |
-| `proxmin` | Installs, but is a general multi-block PGM/APGM toolkit with no weighted-L1 prox out of the box; subsumed by `pyproximal` for our purposes. |
-| `celer` | `skglm`'s predecessor; superseded by it. |
-| **`skglm`** (JMLR 26, 2025) | **Works**: `WeightedL1`, `WeightedMCPenalty`, `Quadratic` datafit, no intercept, and MCP **without R**. Wired in as `solver="skglm"`. But it operates on the explicit $p^2\times p^2$ design, so it is $O(p^4)$ per sweep against our $O(p^3)$ per iteration. Measured below. `SCAD` has no weighted variant, so the unpenalized diagonal is not expressible there. |
-| `ncvreg::ncvfit` (R) | **Works and is the most accurate**, see `R/ENCODING.md`. Also $O(p^4)$; 48× slower than `fista` at $p=20$. |
-| `glmnet` (R) | Dettling's own choice. Least accurate, and silently truncates the λ path when it fails to converge. |
-| `cvxpy` | General convex modelling; would need the explicit design and is far slower for a 100-point path. |
-
-### Measured, 100-λ path, warm-started, `tol = 1e-12`
-
-| $p$ | backend | time | max distance to exact KKT solution |
+| $p$ | | $t\,[\mathrm{s}]$ | max distance, exact KKT |
 |---|---|---|---|
-| 10 | `fista` (ours) | **1.78 s** | **8.9e-09** |
-| 10 | `skglm` AndersonCD | 2.24 s | 8.9e-07 |
-| 10 | `skglm` `FISTA`, no warm starts | 42 s | |
-| 20 | `fista` (ours) | **6.84 s** | **1.2e-07** |
-| 20 | `skglm` AndersonCD | 30.45 s | 3.1e-06 |
+| 10 | `fista` | **1.78** | $8.9\times10^{-9}$ |
+| 10 | `skglm` `AndersonCD` | 2.24 | $8.9\times10^{-7}$ |
+| 10 | `skglm` `FISTA`, no warm starts | 42 | |
+| 20 | `fista` | **6.84** | $1.2\times10^{-7}$ |
+| 20 | `skglm` `AndersonCD` | 30.45 | $3.1\times10^{-6}$ |
 
 ---
 
-## 4. Evidence that the hand-written solver is correct
+## 4. Evidence
 
-`tests/test_fista.py` attacks `solve_fista` from five independent directions; none relies on agreement with another first-order method.
+`tests/test_fista.py`: five directions, none via another first-order method.
 
-### 4.1 An analytic solution, no optimizer involved
+### 4.1 Analytic solution
 
-$\hat\Sigma=\mathrm{diag}(s)$ and $C=\mathrm{diag}(c)$ with diagonal $M$ give a diagonal residual with entries $2m_is_i+c_i$, so
+$$\hat\Sigma=\mathrm{diag}(s),\quad C=\mathrm{diag}(c),\quad M=\mathrm{diag}(m)\ \Rightarrow\ R=\mathrm{diag}(2m_is_i+c_i)$$
 
-$$M^\star=\mathrm{diag}\!\big(-c_i/(2s_i)\big)$$
+$$M^\star=\mathrm{diag}\big(-c_i/(2s_i)\big),\qquad f(M^\star)=g(M^\star)=0\ \text{for every }\lambda$$
 
-| fact | value |
-|---|---|
-| loss at $M^\star$ | exactly zero at zero penalty cost: the global minimum, for every $\lambda$ |
-| `solve_fista` error | **2.4e-14**, at $\lambda=10^{-3}$, $0.5$ and $10$ alike |
+| $\lambda$ | $10^{-3}$ | $0.5$ | $10$ |
+|---|---|---|---|
+| `solve_fista` error | $2.4\times10^{-14}$ | $2.4\times10^{-14}$ | $2.4\times10^{-14}$ |
 
-### 4.2 A duality-gap certificate, a bound, not a comparison
+### 4.2 Duality gap
 
 $$P(\beta)=\tfrac12\lVert y-X\beta\rVert^2+\lambda\sum_jw_j\lvert\beta_j\rvert$$
-$$\theta=\text{the residual, rescaled so that }\lvert x_j^\top\theta\rvert\le\lambda w_j\ \text{for all }j\quad\Rightarrow\quad\theta\ \text{dual feasible}$$
+
+$$\theta=\text{residual, rescaled so that }\lvert x_j^\top\theta\rvert\le\lambda w_j\ \text{for all }j\quad\Rightarrow\quad\theta\ \text{dual feasible}$$
+
 $$D(\theta)=\tfrac12\lVert y\rVert^2-\tfrac12\lVert y-\theta\rVert^2\le\min_\beta P(\beta)$$
 
-The gap $P-D$ bounds suboptimality from above with no reference solution at all.
+$$0\le P(\hat\beta)-\min_\beta P\le P(\hat\beta)-D(\theta)$$
 
 | $\lambda$ | 0.05 | 0.3 | 2.0 |
 |---|---|---|---|
-| gap | **1.3e-13** | **6.7e-16** | **-7.4e-15** |
-| control | a second test: the gap widens when `tol` is loosened, so the certificate tracks the solver | | |
+| $P-D$ | $1.3\times10^{-13}$ | $6.7\times10^{-16}$ | $-7.4\times10^{-15}$ |
 
-### 4.3 An independent solver class
+Control: gap widens as `tol` loosens.
 
-| solver | class | objective | agreement |
+### 4.3 Interior point
+
+| | class | $F$ | $\Delta F$ |
 |---|---|---|---|
-| `cvxpy` with **CLARABEL** | interior-point conic; no shared code path or failure mode with a first-order proximal method | 0.759801966624 | **2.9e-08** |
-| `fista` | first-order proximal | 0.759801964632, the lower one | |
+| `cvxpy` + `CLARABEL` | interior-point conic | 0.759801966624 | $2.9\times10^{-8}$ |
+| `fista` | first-order proximal | 0.759801964632 (lower) | |
 
-### 4.4 Invariances the true minimizer must satisfy
+### 4.4 Invariances
 
-| property | why it must hold | measured |
-|---|---|---|
-| initialization independence | the problem is convex, so the optimal *value* is unique | spread **0.0** over 5 starts |
-| permutation equivariance | relabelling variables may only relabel the answer | **4.4e-16** |
-| scale equivariance | $(C,\lambda)\mapsto(aC,a\lambda)$ scales the minimizer by $a$ | 1e-9 |
-| $\lambda=0\Rightarrow\nabla f=0$ | nothing left to balance the gradient | < 1e-6 |
+| | measured |
+|---|---|
+| $F^\star$ over 5 starts | spread **0.0** |
+| permutation equivariance | $4.4\times10^{-16}$ |
+| scale equivariance, $(C,\lambda)\mapsto(aC,a\lambda)\Rightarrow M^\star\mapsto aM^\star$ | $10^{-9}$ |
+| $\lambda=0\Rightarrow\nabla f=0$ | $<10^{-6}$ |
 
-### 4.5 The promised convergence rate
+### 4.5 Rate
 
-$$F(x_k)-F^\star=O(1/k^2)\ \text{(Beck and Teboulle)}\quad\Rightarrow\quad k^2\big(F(x_k)-F^\star\big)\ \text{stays bounded}$$
+$$F(x_k)-F^\star=O(1/k^2)\ \Rightarrow\ k^2\big(F(x_k)-F^\star\big)\ \text{bounded}$$
 
 | $k$ | 10 | 20 | 50 | 200 |
 |---|---|---|---|---|
-| $k^2\big(F(x_k)-F^\star\big)$ | 4.31 | 0.56 | 1.2e-06 | |
+| $k^2\big(F(x_k)-F^\star\big)$ | 4.31 | 0.56 | $1.2\times10^{-6}$ | |
 | $F(x_k)-F^\star$ | | | | machine precision |
 
-Decreasing, so the adaptive restart buys better than guaranteed convergence; broken momentum would show as growth.
+Decreasing (growth: broken momentum).
 
-### 4.6 Cross-checks against the other backends
+### 4.6 Cross-checks
 
-| check | against | result |
+| | against | result |
 |---|---|---|
 | `test_gradient_matches_design_matrix` | $X^\top(X\beta-y)$ | exact |
-| `test_gradient_matches_finite_differences` | central differences | 1e-5 |
-| `test_lipschitz_bound_dominates_true_constant` | $\lambda_{\max}(A^\top A)$ | bound holds, within 4× |
-| `test_solvers_match_exact_restricted_solution` | **closed-form KKT solution** | **1e-9** |
-| `test_fista_matches_ncvreg` | `ncvreg::ncvfit` | 1e-9 |
+| `test_gradient_matches_finite_differences` | central differences | $10^{-5}$ |
+| `test_lipschitz_bound_dominates_true_constant` | $L\ge\lambda_{\max}(A^\top A)$ | holds, within 4× |
+| `test_solvers_match_exact_restricted_solution` | closed-form KKT solution, no optimizer | $10^{-9}$; `glmnet` inaccurate, dense end |
+| `test_fista_matches_ncvreg` | `ncvreg::ncvfit` | $10^{-9}$ |
 | `test_all_backends_agree` | `design`, `glmnet`, `ncvreg`, `skglm` | identical supports and metrics |
 | `test_example2_path_is_recovered_in_population_limit` | Dettling Figure 3, $n=\infty$ | exact |
 
+### 4.7 Campaign tolerance, 12 October 2026
+
 | | |
 |---|---|
-| closed-form KKT check | the important one: given the active set and signs the optimum solves a linear system, so the target involves no optimizer at all; it also established that `glmnet`, not our code, is the inaccurate one at the dense end of the path |
-
-### 4.7 Accuracy at the campaign's tolerance, against the packages, 12 October 2026
-
-| quantity | value |
-|---|---|
-| tolerance in 4.1 to 4.6 | $10^{-12}$ or tighter |
-| campaign tolerance | $10^{-8}$ |
-| reference | 12 campaign data sets, the exact KKT-certified lasso solution at every λ |
-| FISTA objective, relative | within $2.4\times10^{-7}$ |
-| FISTA support | differs at 0 to 9 of 100 λ, one entry each |
+| tolerance, 4.1–4.6 | $\le10^{-12}$ |
+| campaign | $10^{-8}$ |
+| reference | 12 campaign data sets; KKT-certified lasso, every $\lambda$ |
+| FISTA objective, relative | $\le2.4\times10^{-7}$ |
+| FISTA support | differs, 0–9 of 100 $\lambda$, one entry each |
 | oracle $F_1$ | unchanged |
 | AUPR | within 0.0006 |
-| glmnet, ncvreg, skglm at their defaults | miss the support at 35 to 87 of 100 λ |
-| FISTA at $10^{-10}$ | exact everywhere, for 1.6 times the time |
-| also checked in the same study | MCP, SCAD, the log-likelihood solver |
+| `glmnet`, `ncvreg`, `skglm` defaults | support missed, 35–87 of 100 $\lambda$ |
+| FISTA, $10^{-10}$ | exact everywhere, 1.6× time |
+| also | MCP, SCAD, log-likelihood solver |
 
 [`next_steps/121026/solver_accuracy_121026.md`](../next_steps/121026/solver_accuracy_121026.md)
 
 ---
 
-## 5. Why `fista` is the default
+## 5. Default
 
-Default `fista` for speed on the full grid, not because it is a better or more accurate algorithm: it is the same algorithm as any FISTA and converges to the same point, Section 3.
+Speed only, same optimum (Section 3).
 
-| against | advantage | reason |
-|---|---|---|
-| `ncvreg`, `skglm`, `glmnet` | *structural* | they need the explicit $p^2\times p^2$ design, so $O(p^4)$ per sweep against the matrix-free $O(p^3)$ |
-| `pyproximal`, also matrix-free here | *incidental* | ~4× lower per-iteration overhead and ~2–3× fewer iterations from adaptive restart; a package with restart would be competitive |
-
-| $p$ | `fista` (hand-written) | `ncvreg` | `skglm` |
+| path $[\mathrm{s}]$ | `fista` | `ncvreg` | `skglm` |
 |---|---|---|---|
-| 10 | 1.8 s | 10 s | 2.2 s |
-| 20 | 6.8 s | 244 s | 30 s |
+| $p=10$ | 1.8 | 10 | 2.2 |
+| $p=20$ | 6.8 | 244 | 30 |
 
-| fact | consequence |
+| | |
 |---|---|
-| `ncvreg` already 48× slower at $p=20$ | the gap grows with $p$ |
-| the Figure 5 grid runs to $p=50$ | no package backend reaches it in practical time, so the default has to be `fista` for the reproduction to be finishable at all |
-| the burden of proof | falls on Section 4, whose analytic solution, duality-gap certificate and interior-point cross-check are independent of FISTA's own failure modes |
-| `ncvreg` reaches 4e-12 at moderate $p$ | one flag away; the right choice when accuracy matters more than speed, in particular S1b's estimation-error comparison |
+| `ncvreg`, `skglm`, `glmnet` | structural: explicit $p^2\times p^2$ design, $O(p^4)$ per sweep vs matrix-free $O(p^3)$; `ncvreg` 48× slower at $p=20$, gap grows with $p$ |
+| `pyproximal` | incidental: ~4× overhead, ~2–3× iterations (restart); restart package would be competitive |
+| Figure 5 grid, $p\le50$ | `fista` only in practical time |
+| `ncvreg`, $4\times10^{-12}$ at moderate $p$ | `--solver ncvreg` for accuracy-critical runs, S1b estimation error |
+| burden of proof | Section 4, independent of FISTA |
 
 ```bash
 python simulations/run_s1.py                                   # fista (default)

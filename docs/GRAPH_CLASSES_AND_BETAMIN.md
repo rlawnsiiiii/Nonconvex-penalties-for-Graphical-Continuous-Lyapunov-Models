@@ -1,9 +1,7 @@
-# The generator's knobs: graph class (E4), beta-min (E3) and the share of 2-cycles (E5)
+# Generator knobs: E4 class, E3 beta-min, E5 2-cycles
 
-Three knobs on the generator, no new estimator: DAGs (E4), weak edges removed (E3), ever more 2-cycles
-(E5). Each asks where the dense → sparse pruners' gain over the lasso lives. Estimators: lasso, MCP dense →
-sparse, adaptive lasso; everything else is wave 1's. Status, 19 October 2026: built, tested, rehearsed on
-the laptop; nothing submitted.
+Three generator knobs; estimators `lasso`, `MCP-up` (dense → sparse), `adaptive`. Status 19 Oct 2026: built,
+tested, rehearsed; nothing submitted.
 
 ## 1. Files
 
@@ -23,41 +21,38 @@ simulations/diagnostics/plot_generator_knobs.py → docs/figures/               
 tests/  test_dgp.py  test_graphs.py  test_campaign_runner.py  test_campaign_submit.py  test_wave9_analysis.py  test_generator_knobs.py
 ```
 
-## 2. The data-generating process
+## 2. Data-generating process
 
 Per graph, seed `[20260922, p, k, C-index, rep]`, $d = k/p$:
 
 $$M_{ij} = \omega_{ij} w_{ij}\ (i \ne j), \qquad M_{ii} = -\sum_{j \ne i}|M_{ij}| - |\varepsilon_{ii}| \quad\Rightarrow\quad \text{Gershgorin: } \operatorname{Re}\lambda(M) \le -|\varepsilon_{ii}| < 0,\ M \text{ stable}$$
 
-$$C \in \{2I,\ \mathrm{diag}\,U[0.5,4],\ \mathrm{diag}\,U[2,4],\ \text{sparse symmetric, diagonally dominant}\} \qquad (\text{the new groups: } 2I \text{ only})$$
+$$C \in \lbrace 2I,\ \mathrm{diag}\ U[0.5,4],\ \mathrm{diag}\ U[2,4],\ \text{sparse symmetric, diagonally dominant}\rbrace \qquad (\text{E3, E5: } 2I \text{ only})$$
 
-$$M\Sigma + \Sigma M^\top + C = 0 \ \Rightarrow\ \Sigma = \int_0^\infty e^{tM} C e^{tM^\top} dt \quad (\text{Bartels–Stewart, SciPy}); \qquad X_1, \dots, X_n \sim N(0, \Sigma),\ \hat\Sigma = X^\top X / n;\ n = \infty: \hat\Sigma = \Sigma$$
+$$M\Sigma + \Sigma M^\top + C = 0 \ \Rightarrow\ \Sigma = \int_0^\infty e^{tM} C e^{tM^\top} dt \quad (\text{Bartels-Stewart, SciPy}); \qquad X_1, \dots, X_n \sim N(0, \Sigma),\ \hat\Sigma = X^\top X / n;\ n = \infty: \hat\Sigma = \Sigma$$
 
-$$s_i = \hat\Sigma_{ii}^{1/2},\quad \hat R = D^{-1}\hat\Sigma D^{-1},\quad \tilde M_{ij} = M_{ij}\, s_j / s_i,\quad \tilde C = 2I\ (\texttt{C2I})\ \text{or}\ 2\,\mathrm{diag}(1/s_i^2)\ (\texttt{Cresc})$$
+$$s_i = \hat\Sigma_{ii}^{1/2},\quad \hat R = D^{-1}\hat\Sigma D^{-1},\quad \tilde M_{ij} = M_{ij}\  s_j / s_i,\quad \tilde C = 2I\ (\text{C2I})\ \text{or}\ 2\ \mathrm{diag}(1/s_i^2)\ (\text{Cresc})$$
 
-$$\lambda_j = \lambda_{\max}\,10^{-4(1 - j/99)},\ j = 0..99 \ (\text{log-spaced: a constant factor } 10^{4/99});\qquad \lambda_{\max} = \max_{i \ne j}\bigl|[2(M_{\mathrm{diag}}\hat R + \hat R M_{\mathrm{diag}}^\top + \tilde C)\hat R]_{ij}\bigr|$$
+$$\lambda_j = \lambda_{\max}\ 10^{-4(1 - j/99)},\ j = 0..99 \ (\text{log-spaced: a constant factor } 10^{4/99});\qquad \lambda_{\max} = \max_{i \ne j}\bigl|[2(M_{\mathrm{diag}}\hat R + \hat R M_{\mathrm{diag}}^\top + \tilde C)\hat R]_{ij}\bigr|$$
 
-No centring because the mean is known to be zero; divisor $n$ as in Dettling's eq. (1.3).
+No centring (mean zero); divisor $n$: Dettling eq. (1.3).
 
-## 3. The knobs: construction and expected edges
+## 3. Knobs and expected edges
 
-| knob | construction (after the two default draws, so seeds stay untouched) | expected directed edges |
+| knob | construction | $\mathbb{E}\ \lvert E \rvert$ |
 |---|---|---|
-| `random` (thesis) | $\omega_{ij} \sim \mathrm{Bern}(d)$ i.i.d. | $p(p-1)d$; a pair is a 2-cycle w.p. $d^2$ |
-| `dag` (E4) | $\pi$ a random order; $\omega_{ij} \sim \mathrm{Bern}(\min(2d,1))\cdot\mathbb{1}[\pi(j) < \pi(i)]$ | $\binom{p}{2}\cdot 2d = p(p-1)d$ for $d \le 1/2$ |
-| `pairs` (E5) | pair $\{i,j\}$ connected w.p. $q = 2d/(1+s)$; then a 2-cycle w.p. $s$, else one direction by a fair coin | $\binom{p}{2}\,q\,(1+s) = p(p-1)d$; $s = d/(2-d)$ is the random class in law |
-| `uniform` weights (E3) | $\lvert w_{ij}\rvert \sim U[w_{\min}, 1]$, sign a fair coin; supports unchanged | unchanged |
-
-A random order gives a DAG because $\pi$ cannot increase around a cycle. The factors $2d$ and $2d/(1+s)$:
-half the ordered pairs are open in a DAG; a 2-cycle has two edges.
+| `random` | $\omega_{ij} \overset{\mathrm{iid}}{\sim} \mathrm{Bern}(d)$ | $p(p-1)d$; $P(\text{2-cycle}) = d^2$ |
+| `dag` (E4) | $\pi$ random permutation; $\omega_{ij} \sim \mathrm{Bern}(\min(2d,1))\cdot\mathbf{1}[\pi(j) < \pi(i)]$ | $\binom{p}{2}\cdot 2d = p(p-1)d$ for $d \le 1/2$ |
+| `pairs` (E5) | $P(\lbrace i,j\rbrace \text{ connected}) = q = \min(2d/(1+s), 1)$; $P(\text{2-cycle} \mid \text{connected}) = s$; else fair-coin direction | $\binom{p}{2}\ q\ (1+s) = p(p-1)d$; $s = d/(2-d)$ gives `random` in law |
+| `uniform` (E3) | $\lvert w_{ij}\rvert \sim U[w_{\min}, 1]$, sign fair coin; supports unchanged | unchanged |
 
 ```python
     if graph == "dag":
-        position = rng.permutation(p)                               # position[node] = pi(node)
-        allowed = position[None, :] < position[:, None]             # entry (i, j): pi(j) < pi(i)
-        omega = rng.binomial(1, min(2.0 * d, 1.0), size=(p, p)) * allowed
+        position = rng.permutation(p)                               # position[node] = pi(node); pi cannot increase
+        allowed = position[None, :] < position[:, None]             # around a cycle, so the graph is acyclic
+        omega = rng.binomial(1, min(2.0 * d, 1.0), size=(p, p)) * allowed   # half the ordered pairs are open: 2d
     elif graph == "pairs":
-        q = min(2.0 * d / (1.0 + two_cycle_share), 1.0)             # P(pair connected): E[edges] = p (p - 1) d
+        q = min(2.0 * d / (1.0 + two_cycle_share), 1.0)             # a 2-cycle has two edges: q (1 + s) = 2d
         upper = np.triu(np.ones((p, p), dtype=bool), 1)
         connected = (rng.random(size=(p, p)) < q) & upper
         two = connected & (rng.random(size=(p, p)) < two_cycle_share)
@@ -67,7 +62,7 @@ half the ordered pairs are open in a DAG; a 2-cycle has two edges.
         omega[two | two.T] = 1
         omega[single_up] = 1                                        # entry (i, j), i < j: the edge j -> i
         omega[single_down.T] = 1
-    if weights == "uniform":
+    if weights == "uniform":                                        # after the two default draws: seeds untouched
         magnitude = rng.uniform(w_min, 1.0, size=(p, p))
         sign = np.where(rng.random(size=(p, p)) < 0.5, -1.0, 1.0)
         values = magnitude if metzler else sign * magnitude
@@ -79,35 +74,29 @@ half the ordered pairs are open in a DAG; a 2-cycle has two edges.
 
 ![](figures/weight_laws.png)
 
-*Two classes on one seed; the DAG construction; the weight laws.*
-
 ## 4. Seven graphs per data set
 
-$$\text{oracle: } \arg\max_\lambda F_1(S_\lambda, S^*)\qquad \text{selection: } \arg\min_\lambda\ \hat L(S_\lambda) + \log n\,(p + |S_\lambda|)\ [+\,4\gamma|S_\lambda|\log p,\ \gamma \in \{0.5, 1\}]\qquad \text{search: greedy single-edge moves from each selection}$$
+$$\text{oracle: } \arg\max_\lambda F_1(S_\lambda, S^\ast)\qquad \text{selection: } \arg\min_\lambda\ \hat L(S_\lambda) + \log n\ (p + |S_\lambda|)\ [+\ 4\gamma|S_\lambda|\log p,\ \gamma \in \lbrace 0.5, 1\rbrace]\qquad \text{search: greedy single-edge moves from each selection}$$
 
-$\hat L$ is the refitted loss; at $n = \infty$ the score uses $n := 10^6$. Oracle: uses the truth. Selections: no
-truth. Search: the equaliser.
+$\hat L$ refitted loss; $n := 10^6$ at $n = \infty$; only the oracle sees $S^\ast$.
 
-## 5. The cluster runs (wave 9)
+## 5. Cluster runs (wave 9)
+
+All groups: $p \in \lbrace 10, 20\rbrace$ per cell, $n \in \lbrace 10^3, 10^4, \infty\rbrace$, `C2I` and `Cresc`, the seven graphs;
+`--shards` 4 / 16 / 4 (`lasso` / `MCP-up` / `adaptive`), 16 and $24\ \mathrm{h}$ at $n = 10^3$.
 
 | | `class` (E4) | `betamin` (E3) | `twocycle` (E5) |
 |---|---|---|---|
-| cells | `direct_<est>_<C>_dag_n<n>`: 3 est × 2 C × 1 class × 3 n = **18** | `direct_<est>_<C>_w<wmin>_n<n>`: 3 est × 2 C × 4 laws × 3 n = **72** | `direct_<est>_<C>_s<share>_n<n>`: 3 est × 2 C × 5 shares × 3 n = **90** |
-| estimators | lasso, MCP dense → sparse, adaptive lasso (MCP sparse → dense dropped on 19 Oct: its lock-in is wave 1's V1) | the same three | the same three |
-| estimator C | `C2I` = 2I, `Cresc` = $2\,\mathrm{diag}(1/s_i^2)$ | the same | the same |
-| knob levels | `dag` (the no-2-cycle case is E5's `pairs` at $s = 0$) | $w_{\min} \in \{0, 0.1, 0.25, 0.5\}$, $N(0,1)$ as reference | $s \in \{0, 0.25, 0.5, 0.75, 1\}$, wave 1 as reference `random` |
-| p | 10 and 20 in one cell | the same | the same |
-| n | $10^3$, $10^4$, $\infty$ | $10^3$, $10^4$, $\infty$ | $10^3$, $10^4$, $\infty$ |
-| true C, graphs per cell | all four C: $4k \times 4C \times 25$ reps = 400 per p, **800 per cell** | `C_ID` only: $4k \times 25$ = 100 per p, **200 per cell** (wave 1's 2I graphs, weights redrawn) | `C_ID` only, **200 per cell** |
-| per graph | path; oracle; BIC and eBIC(0.5, 1) selections, search from each | the same | the same |
-| runner line | `--p 10 20 --reps 25 --select search --ebic-gamma 0.5 1 --c-scale {identity,variance} <est> --graph <class>` | `... --ebic-gamma 0.5 1 --c-choices C_ID ... --weights uniform --w-min W` | `... --ebic-gamma 0.5 1 --c-choices C_ID ... --graph pairs --two-cycle-share S` |
-| shards (lasso / MCP-up / adaptive), time | 4 / 16 / 4, 12 h (16 shards, 24 h at $10^3$) | 4 / 16 / 4, 12 h (16 shards, 24 h at $10^3$) | 4 / 16 / 4, 12 h (16 shards, 24 h at $10^3$) |
-| cost (LRZ, from wave 1's seconds) | ≈ 105 per n, 115 at $\infty$ (800 graphs per cell) | ≈ 110 per n, 120 at $\infty$ | ≈ 130 per n, 150 at $\infty$ |
-| submit | `--group class --n 1e4 \| inf \| 1000 --shards 16 --time 24:00:00` | `--group betamin --n 1e4 \| inf \| 1000 --shards 16 --time 24:00:00` | `--group twocycle --n 1e4 \| inf \| 1000 --shards 16 --time 24:00:00` |
+| cells | `direct_<est>_<C>_dag_n<n>`: $3 \cdot 2 \cdot 1 \cdot 3 = 18$ | `direct_<est>_<C>_w<wmin>_n<n>`: $3 \cdot 2 \cdot 4 \cdot 3 = 72$ | `direct_<est>_<C>_s<share>_n<n>`: $3 \cdot 2 \cdot 5 \cdot 3 = 90$ |
+| levels | `dag` | $w_{\min} \in \lbrace 0, 0.1, 0.25, 0.5\rbrace$; reference $N(0,1)$ | $s \in \lbrace 0, 0.25, 0.5, 0.75, 1\rbrace$; reference `random` |
+| true C | all four | `C_ID` | `C_ID` |
+| graphs per cell | $4k \cdot 4C \cdot 25 \cdot 2p = 800$ | $4k \cdot 25 \cdot 2p = 200$ | $200$ |
+| runner flags | `--graph dag` | `--c-choices C_ID --weights uniform --w-min W` | `--c-choices C_ID --graph pairs --two-cycle-share S` |
+| CPU-h | $\approx 105$ per $n$, $115$ at $\infty$ | $\approx 110$, $120$ at $\infty$ | $\approx 130$, $150$ at $\infty$ |
 | analysis | `graph_class.py`, `plot_graph_class.py` | `betamin.py --c-choices C_ID`, `plot_betamin.py` | `twocycles.py --c-choices C_ID`, `plot_twocycles.py` |
-| rehearsed | 14 and 17 Oct, p = 10, 1 replicate | 19 Oct, p = 10, 2I, 4 replicates (figures below) | 19 Oct, p = 10, 2I, 4 replicates (figures below) |
+| rehearsed | 14, 17 Oct: $p = 10$, 1 replicate | 19 Oct: $p = 10$, $2I$, 4 replicates | 19 Oct: $p = 10$, $2I$, 4 replicates |
 
-### Commands, in this order
+### Commands, in order
 
 ```bash
 # 1. Laptop: stage what the run and its analysis need, test, commit, push
@@ -131,7 +120,7 @@ git push
 ssh ge47xod3@cool.hpc.lrz.de
 cd ~/repo && git pull
 module load python 2>/dev/null || module load anaconda3; source ~/venvs/gclm/bin/activate
-python -c "import gclm.solvers.path, gclm.objective.exact_fits; print('imports ok')"
+PYTHONPATH=src python -c "import gclm.solvers.path, gclm.objective.exact_fits; print('imports ok')"   # the venv holds numpy + scipy only; the runners add src/ themselves
 bash cluster/submit_campaign.sh --wave 9 --group betamin --n 1e4 --dry-run    # "would submit 192 tasks in 24 cells"
 bash cluster/submit_campaign.sh --wave 9 --group twocycle --n 1e4 --dry-run   # "would submit 240 tasks in 30 cells"
 bash cluster/submit_campaign.sh --wave 9 --group class --n 1e4 --dry-run      # "would submit 48 tasks in 6 cells"
@@ -174,8 +163,14 @@ campaign_per_dataset.csv ─┬─► graph_class.py:  gain within k and class, 
                           └─► twocycles.py:    the same Knob with the share as the level                                                  → gain_by_share, pair_outcomes_by_share_...
 ```
 
-Fates of a true edge $j \to i$: `correct` ($\hat S_{ij}$ only), `hedged` (both), `reversed` ($\hat S_{ji}$
-only), `missed`; a 2-cycle edge is `present` or `missed`. Shares average over graphs; levels are never pooled.
+Single-edge fates ($j \to i$ true); 2-cycle edges `present` or `missed`; shares average over graphs, never levels:
+
+| fate | $\hat S_{ij}$ | $\hat S_{ji}$ |
+|---|---|---|
+| `correct` | 1 | 0 |
+| `hedged` | 1 | 1 |
+| `reversed` | 0 | 1 |
+| `missed` | 0 | 0 |
 
 ![](figures/gain_by_wmin_rehearsal.png)
 
@@ -185,39 +180,36 @@ only), `missed`; a 2-cycle edge is `present` or `missed`. Shares average over gr
 
 ![](figures/pair_outcomes_by_share_p10_Cresc_n1e4_bic_rehearsal.png)
 
-*Previews, p = 10, 2I graphs, 16 graphs per cell.*
+Previews: $p = 10$, `Cresc`, $n = 10^4$, 16 graphs; gain oracle / BIC:
 
-| preview, p = 10, rescaled C, n = 10⁴, 16 graphs | N(0,1) | U[0,1] | U[0.1,1] | U[0.25,1] | U[0.5,1] |
+| E3 | $N(0,1)$ | $U[0,1]$ | $U[0.1,1]$ | $U[0.25,1]$ | $U[0.5,1]$ |
 |---|---|---|---|---|---|
-| lasso oracle F₁ | 0.64 | 0.66 | 0.66 | 0.67 | 0.66 |
-| MCP dense → sparse, gain (oracle / selected) | +0.11 / +0.10 | +0.09 / +0.05 | +0.06 / +0.05 | +0.10 / +0.11 | +0.13 / +0.13 |
-| adaptive lasso, gain (oracle / selected) | +0.07 / +0.07 | +0.09 / +0.08 | +0.09 / +0.08 | +0.10 / +0.12 | +0.12 / +0.12 |
-| lasso: hedged / missed share of single edges | 0.33 / 0.15 | 0.35 / 0.12 | 0.35 / 0.12 | 0.39 / 0.05 | 0.43 / 0.02 |
+| `lasso` oracle $F_1$ | 0.64 | 0.66 | 0.66 | 0.67 | 0.66 |
+| `MCP-up` gain | +0.11 / +0.10 | +0.09 / +0.05 | +0.06 / +0.05 | +0.10 / +0.11 | +0.13 / +0.13 |
+| `adaptive` gain | +0.07 / +0.07 | +0.09 / +0.08 | +0.09 / +0.08 | +0.10 / +0.12 | +0.12 / +0.12 |
+| `lasso` single edges `hedged` / `missed` | 0.33 / 0.15 | 0.35 / 0.12 | 0.35 / 0.12 | 0.39 / 0.05 | 0.43 / 0.02 |
 
-| preview, same cells | random | s = 0 | 0.25 | 0.5 | 0.75 | 1 |
+| E5 | `random` | $s = 0$ | $0.25$ | $0.5$ | $0.75$ | $1$ |
 |---|---|---|---|---|---|---|
-| lasso oracle F₁ | 0.64 | 0.61 | 0.67 | 0.71 | 0.74 | 0.75 |
-| MCP dense → sparse, gain (oracle / selected) | +0.11 / +0.10 | +0.11 / +0.07 | +0.08 / +0.07 | +0.04 / +0.04 | −0.04 / −0.08 | −0.09 / −0.12 |
-| adaptive lasso, gain (oracle / selected) | +0.07 / +0.07 | +0.08 / +0.07 | +0.08 / +0.09 | +0.06 / +0.10 | 0.00 / 0.00 | −0.09 / −0.09 |
-| true 2-cycles kept whole: lasso / MCP-up / adaptive | 0.37 / 0.08 / 0.16 | – | 0.46 / 0.20 / 0.25 | 0.50 / 0.21 / 0.37 | 0.40 / 0.11 / 0.21 | 0.42 / 0.11 / 0.17 |
-| identified share of graphs | 1.00 | 1.00 | 0.94 | 0.81 | 0.75 | 0.62 |
+| `lasso` oracle $F_1$ | 0.64 | 0.61 | 0.67 | 0.71 | 0.74 | 0.75 |
+| `MCP-up` gain | +0.11 / +0.10 | +0.11 / +0.07 | +0.08 / +0.07 | +0.04 / +0.04 | −0.04 / −0.08 | −0.09 / −0.12 |
+| `adaptive` gain | +0.07 / +0.07 | +0.08 / +0.07 | +0.08 / +0.09 | +0.06 / +0.10 | 0.00 / 0.00 | −0.09 / −0.09 |
+| true 2-cycles kept whole, `lasso` / `MCP-up` / `adaptive` | 0.37 / 0.08 / 0.16 | – | 0.46 / 0.20 / 0.25 | 0.50 / 0.21 / 0.37 | 0.40 / 0.11 / 0.21 | 0.42 / 0.11 / 0.17 |
+| identified graphs | 1.00 | 1.00 | 0.94 | 0.81 | 0.75 | 0.62 |
 
 ## 7. Expected outcomes
 
-The gain lives on detected true single edges: a missed edge costs everyone one false negative; a detected
-one is where they part, the lasso keeping both directions in a third of the cases, the pruners one. A true
-2-cycle reverses the roles.
+The gain lives on detected true single edges. A miss costs everyone one false negative; on a detection the
+lasso keeps both directions a third of the time, the pruners one. True 2-cycles reverse the roles.
 
-| knob | pruners (MCP dense → sparse, adaptive) | after the search | would refute §7 |
+| knob | pruners' gain | after search | refuted if |
 |---|---|---|---|
-| E3, $w_{\min} \uparrow$ | gain grows: rescued edges become hedges for the lasso, correct edges for the pruners; +0.15 → +0.2 at p = 20 | ≈ 0 at $n \ge 10^4$ | lasso hedge share falling with the bound |
-| E4, DAG | largest gain, every k: every hedge is a mistake | ≈ 0 | DAGs not gaining more than random within k |
-| E5, $s \uparrow$ | gain falls linearly, crosses zero between 0.5 and 0.8 (preview: 0.6 / 0.75) | ≈ 0 except isolated 2-cycles at s = 1 | pruners not losing at s = 1 |
+| E3, $w_{\min} \uparrow$ | grows (rescued edges: lasso hedges, pruners correct) | $\approx 0$ at $n \ge 10^4$ | lasso hedge share falls |
+| E4, `dag` | largest, every $k$ (every hedge is false) | $\approx 0$ | no gain over `random` within $k$ |
+| E5, $s \uparrow$ | falls linearly; zero at $s \approx 0.6$ / $0.75$ (preview) | $\approx 0$; isolated 2-cycles at $s = 1$ | pruners not losing at $s = 1$ |
 
-MCP sparse → dense is not run: wave 1 settled its lock-in, and the previews show it flat in both knobs.
-
-At $n = \infty$ E3's curves should be flat with the gain largest; E5's identified share and all oracle
-levels fall with $s$.
+MCP sparse → dense not run: lock-in settled in wave 1, previews flat. At $n = \infty$: E3 flat at its largest
+gain; E5's identified share and oracle levels fall with $s$.
 
 ## References
 

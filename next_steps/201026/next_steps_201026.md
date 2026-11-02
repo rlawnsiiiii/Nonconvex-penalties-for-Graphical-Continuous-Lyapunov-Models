@@ -41,6 +41,28 @@ lasso can never recover it), or it puts **more weight on the reversed than on th
 
 ---
 
+## 2b. Basis-pursuit reading (decided 20 Oct, 17:00: this comes right after ZvdGB §2/§8/§12 — it is the piece that replaces their RE-based Theorem 4.3)
+
+The object: the population dense end solves $\min\|M_{\rm off}\|_1$ s.t. $A(\Sigma^*)\,\mathrm{vec}(M) = -\mathrm{vec}(C)$, a basis-pursuit
+problem with free (diagonal) variables. What to extract from each paper is the condition under which a *given* sparse
+vector is the unique $\ell_1$ minimiser, and how it relates to Dettling's irrepresentability constants.
+
+| order | paper | read | extract |
+|---|---|---|---|
+| 1 | **Fuchs (2004)**, *On sparse representations in arbitrary redundant bases*, IEEE Trans. IT 50(6):1341–1344 (4 pages) | all of it; the two theorems | (a) the necessary-and-sufficient condition for uniqueness: a dual vector $h$ with $A_S^\top h=\operatorname{sign}(x_S)$ and $\|A_{S^c}^\top h\|_\infty<1$, plus full column rank of $A_S$; (b) the closed-form sufficient condition obtained with the least-norm $h=A_S(A_S^\top A_S)^{-1}\operatorname{sign}(x_S)$ — check that it equals Dettling's weak constant (G.1) in our notation. This is `bp_certificate` (with the extra constraint $A_D^\top h=0$ for the free diagonal). |
+| 2 | **Tropp (2006)**, *Just relax*, IEEE Trans. IT 52(3):1030–1051 | §II (notation, the Exact Recovery Coefficient $\mathrm{ERC}(S)=1-\max_{j\notin S}\|A_S^+a_j\|_1$), §III (exact recovery of BP when $\mathrm{ERC}>0$); skip §IV–VI (noisy / lasso) | ERC $>0$ is Dettling's uniform condition (3.1) ($\rho<1$) in the noiseless problem; so (3.1) ⟹ (G.1) ⟹ certificate exists, and the sign-specific certificate is strictly weaker. |
+| 3 | **Tibshirani (2013)**, *The lasso problem and uniqueness*, EJS 7:1456–1490 | §1–2 (uniqueness, general position) and the paragraph(s) on the limit $\lambda\to0^+$ (the lasso path tends to the minimum-$\ell_1$ interpolant) | justifies "population dense end = BP solution", and says when the lasso solution is unique although the design is rank-deficient — relevant because $\hat\Gamma$ is singular here. |
+| 4 (optional) | **Gribonval & Nielsen (2003)**, IEEE Trans. IT 49(12), Thm 1; **Cohen, Dahmen & DeVore (2009)**, JAMS 22(1), §4 | the null-space property | the all-sign-patterns version ($\theta(S)>1$ of the 7 Oct note); explains why that version fails in every graph while the sign-specific certificate holds in some. |
+| 5 (optional) | **Chen, Donoho & Saunders (1998)**, SIAM J. Sci. Comput. 20(1), §1–2 | definition of basis pursuit, the LP formulation | for citing the problem; nothing to extract. |
+
+Skip RIP / Candès–Tao and Donoho's polytope papers: the Lyapunov design is far from RIP and the polytope language
+is not needed for the thesis.
+
+What to write after reading (half a page): the chain
+$$\text{Dettling (3.1)}\ \Rightarrow\ \text{Dettling (G.1)}\ \Rightarrow\ \text{Fuchs certificate for }M^*\ \Rightarrow\ \rho_{\rm ad}(\text{dense-end pilot})=0\ \Rightarrow\ \text{adaptive lasso sign-consistent (Thm B)},$$
+with the two implications on the left proved by exhibiting the least-norm certificate, and the table of §3.2 as the
+evidence that every arrow is strict.
+
 ## 3. Empirical programme: which pilots satisfy the condition, and how often
 
 All functions are in `gclmth.py` (numpy/scipy only; `python gclmth.py` runs the self-test).
@@ -146,7 +168,8 @@ problem; rates in $(n,p)$ better than DDK's — a concentration problem, separat
 
 ## 6. Order of work
 
-1. Read ZvdGB §2, §8, §12 and Wainwright §II–III (one day); check (B1)–(B2) against (2.12)–(2.14).
+1. Read ZvdGB §2, §8, §12 (one day); check (B1)–(B2) against (2.12)–(2.14).
+1b. Read Fuchs (2004) and Tropp (2006) §II–III (§2b; half a day), then Tibshirani (2013) §1–2; write the chain of implications.
 2. Add the four columns of §3.1 to `campaign.py` for the stored wave-1 shards (laptop); produce the split tables.
 3. Run `bp_certificate` over the DGP variants (§3.2; minutes on the laptop at $p=10$, cluster for $p=20$–50 with
    many graphs); produce the "for which DGPs" table.

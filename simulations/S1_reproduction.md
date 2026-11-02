@@ -138,9 +138,11 @@ Gershgorin **every draw is stable** — no rejection sampling needed.
 call consumes the generator exactly as before, so every seed still produces its graph — `tests/test_dgp.py`):
 `weights="uniform"` draws $|M_{ij}| \sim U[w_{\min}, 1]$ with a random sign instead of $N(0,1)$ (the
 beta-min knob of the mechanism plan, experiment E3; supports and the diagonal rule unchanged);
-`graph="no2c"` drops one direction of every 2-cycle at random; `graph="dag"` keeps the edge $j \to i$
+`graph="dag"` keeps the edge $j \to i$
 only if $\pi(j) < \pi(i)$ for a random permutation $\pi$, each with probability $\min(2d, 1)$, so the
-expected number of edges equals the random class's for $k \le p/2$ (experiment E4). The shard runner's
+expected number of edges equals the random class's for $k \le p/2$ (experiment E4); `graph="pairs"` with
+`two_cycle_share` $= s$ connects each unordered pair with probability $2d/(1+s)$ and makes it a 2-cycle with
+probability $s$, the same expected number of edges at every $s$ (experiment E5, 19 October 2026). The shard runner's
 `--weights`, `--w-min`, `--graph`; recorded in the shard's config.
 
 ### 3.2 Volatility matrix — Dettling's four choices

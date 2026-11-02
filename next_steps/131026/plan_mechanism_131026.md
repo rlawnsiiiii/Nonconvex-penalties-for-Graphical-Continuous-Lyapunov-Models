@@ -198,10 +198,10 @@ end has all three at once:
 
 1. it is an **exact fit** of the sample Lyapunov equation, i.e. it sits on the fibre
    $\{M : M\hat\Sigma + \hat\Sigma M^\top + C = 0\}$ on which the direct loss is zero;
-2. it is the **$\ell_1$-smallest** point of that fibre: a vertex, sparse (saturated at $p(p-1)/2$ off-diagonal
+2. it is the **$\ell_1$-smallest** point of that fibre: a vertex, sparse (saturated at $p (p-1)/2$ off-diagonal
    entries in two thirds of the $p = 10$ graphs), keeping *both* directions of an uncertain pair ("hedging",
    S3a) rather than committing to one, as the sparse → dense path does at its first entry (a coin flip; the
-   lock-in of `next_steps/051026/orientation_lock_in.md`);
+   lock-in of `../../claude_docs/orientation_lock_in_051026.md`);
 3. it is **oriented**: on the population scale the dense end contains every true edge whenever the BP
    condition holds, and in the campaign's graphs it contains the true direction of most true edges even when
    that condition fails (the "dense-start content" counts of the 7 October note).
