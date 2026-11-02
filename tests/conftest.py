@@ -29,7 +29,7 @@ requires_ncvreg = pytest.mark.skipif(
 try:
     import skglm  # noqa: F401
     SKGLM_AVAILABLE = True
-except ImportError:  # pragma: no cover
+except Exception:  # pragma: no cover  (ImportError, or OSError when numba's llvmlite cannot load its library)
     SKGLM_AVAILABLE = False
 
 requires_skglm = pytest.mark.skipif(

@@ -1,7 +1,7 @@
 # S4 — The campaign: every estimator with $C = 2I$ and with the rescaled $C$, at scale
 
 *Results of the cluster campaign planned in
-[`../next_steps/051026/cluster_campaign_051026.md`](../next_steps/051026/cluster_campaign_051026.md)
+[`../next_steps/Oct2026/051026`](../next_steps/Oct2026/051026/cluster_campaign_051026.md)
 (the plan, the reasons, the code map). Status on 12 October 2026: waves 1 to 7 complete (wave 6:
 the eBIC penalty inside the search for every wave 1 cell, and 300 starting graphs, §4a, §5; wave 7:
 the log-likelihood loss at $p = 10$ and 20 with the dense-start estimators, §6); wave 8 (the
@@ -422,7 +422,7 @@ differences to lasso + search, per setting of the true $C$.*
   (0.81 to 0.87 for the random diagonals, 0.43 to 0.66 for `C_Random_Full`): there the score prefers
   another graph, and no search can fix that. At $p = 20$, $n = \infty$ the data-driven searches end
   lower than at $n = 10^4$ (0.62 against 0.65): the dense graphs where the search gets stuck
-  (`next_steps/051026/next_steps_051026.md` §2).
+  (`../next_steps/Oct2026/051026` §2).
 
 ![](../runs/campaign/figures/selection_checks.png)
 
@@ -533,7 +533,7 @@ The ranking of the estimators never changes.
 
 *Solver note (13 October 2026).* The cells of this section were computed with the covariance-loss
 solver before its backtracking test was corrected (`docs/LIKELIHOOD.md` §4.3; code review A1 in
-`next_steps/121026/code_review_121026.md`): the old test let a step pass once the predicted
+`../next_steps/Oct2026/121026`): the old test let a step pass once the predicted
 decrease of the loss was at rounding level, which moved stationary warm starts by one uncontrolled
 step and ran 255 to 970 of the 40,000 solves of a cell with the rescaled $C$ to the iteration cap.
 Measured on the stored data set with the largest diagonal ratio of $C$ (250): the lasso path is

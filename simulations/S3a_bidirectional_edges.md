@@ -3,7 +3,7 @@
 *First part of the reversal-search study S3 (`plan.md`: score-based search). Before building a
 search with reversal moves, this measures what the three penalties do with the two directions of a
 pair, $M_{ij}$ and $M_{ji}$, on Dettling's Figure 5 graphs. Started 2 October 2026; the context is
-in [`../next_steps/021026/next_steps_021026.md`](../next_steps/021026/next_steps_021026.md) §1–§4.*
+in [`../next_steps/Oct2026/021026`](../next_steps/Oct2026/021026/next_steps_021026.md) §1–§4.*
 
 **Status: complete (2 October 2026).** Runs, validation and figures are in §4, and the answers in §4.6.
 

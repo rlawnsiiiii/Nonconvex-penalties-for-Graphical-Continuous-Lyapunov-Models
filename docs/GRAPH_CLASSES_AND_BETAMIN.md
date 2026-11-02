@@ -214,4 +214,4 @@ gain; E5's identified share and oracle levels fall with $s$.
 ## References
 
 Dettling, Drton, Kolar (2024) §5; Varando & Hansen (2020) §4; Kalisch & Bühlmann (2007) §4.1; pcalg
-`randomDAG`; NOTEARS `simulate_dag`; plan and memo in `../next_steps/131026/`.
+`randomDAG`; NOTEARS `simulate_dag`; plan and memo in `../next_steps/Oct2026/131026`.

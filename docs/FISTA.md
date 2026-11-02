@@ -259,7 +259,7 @@ Decreasing (growth: broken momentum).
 | FISTA, $10^{-10}$ | exact everywhere, 1.6× time |
 | also | MCP, SCAD, log-likelihood solver |
 
-[`next_steps/121026/solver_accuracy_121026.md`](../next_steps/121026/solver_accuracy_121026.md)
+[`../next_steps/Oct2026/121026`](../next_steps/Oct2026/121026/solver_accuracy_121026.md)
 
 ---
 

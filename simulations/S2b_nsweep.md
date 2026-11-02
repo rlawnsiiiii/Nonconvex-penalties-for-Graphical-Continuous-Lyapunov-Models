@@ -9,7 +9,7 @@ sample sizes. Run on the LRZ cluster on 2–3 October 2026, analysed on 4 Octobe
 **This sweep is the baseline: Dettling's Figure 5 pipeline** (standardised data, $C = 2I$ in the
 fit) **and paths that run from $\lambda_{\max}$ to the dense end.** The two changes that the
 3 October notes found to matter, the rescaled $C$ and dense → sparse paths
-([`../next_steps/031026/next_steps_031026.md`](../next_steps/031026/next_steps_031026.md)), are not
+([`../next_steps/Oct2026/031026`](../next_steps/Oct2026/031026/next_steps_031026.md)), are not
 part of it.
 
 ---
@@ -361,7 +361,7 @@ Per cell, means over the four sample sizes (`nsweep_audit.csv`):
   nonconvex penalties keep it. The lasso keeps both directions and lets the data sort them out as
   $n$ grows.
 - **This is the baseline, not the last word.** The independent study and its replication
-  (`next_steps/031026/`) find that MCP and SCAD beat the lasso when two things are changed: the
+  (`../next_steps/Oct2026/031026`) find that MCP and SCAD beat the lasso when two things are changed: the
   volatility is rescaled to match the standardised data, and the path runs dense → sparse. Neither
   is in this sweep. The corresponding cluster arms are Step 3 of the 3 October plan.
 - **The misspecified setting shows in the data:** in `C_Random_Full` the lasso does not improve

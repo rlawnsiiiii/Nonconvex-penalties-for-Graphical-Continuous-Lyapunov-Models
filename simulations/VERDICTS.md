@@ -1,9 +1,9 @@
 # Verdicts so far
 
 *As of 12 October 2026. The bottom line, the verdicts as a table, then the evidence for them figure by figure; the evidence is in the documents named in each row. "IS" is the
-independent study (`../next_steps/021026/independent_study/independent_study_021026.md`), "031026"
-the combined note (`../next_steps/031026/next_steps_031026.md`), "campaign note"
-`../next_steps/051026/cluster_campaign_051026.md`, "S4" the campaign's results (`S4_campaign.md`).
+independent study (`../next_steps/Oct2026/021026`), "031026"
+the combined note (`../next_steps/Oct2026/031026`), "campaign note"
+`../next_steps/Oct2026/051026`, "S4" the campaign's results (`S4_campaign.md`).
 Terms: a graph is selected by its score, the sum of a loss and a penalty (the BIC penalty or the
 eBIC penalty); definitions in [`../docs/SEARCH.md`](../docs/SEARCH.md) §2.*
 
@@ -360,7 +360,7 @@ $n = 10^4$: lasso 0.601, MCP dense → sparse 0.661, adaptive lasso 0.671; after
 ## What the two papers do about $C$
 
 *Longer, with the argument for and against rescaling:
-[`../next_steps/051026/cluster_campaign_051026.md`](../next_steps/051026/cluster_campaign_051026.md) §2.*
+[`../next_steps/Oct2026/051026`](../next_steps/Oct2026/051026/cluster_campaign_051026.md) §2.*
 
 **Neither paper rescales $C$.** Dettling, Drton & Kolar (2024) fit with $C = 2I_p$ throughout.
 
@@ -392,7 +392,7 @@ Varando & Hansen (2020) estimate $C$ instead.
 
 ## Open
 
-*The campaign is planned in [`../next_steps/051026/cluster_campaign_051026.md`](../next_steps/051026/cluster_campaign_051026.md)
+*The campaign is planned in [`../next_steps/Oct2026/051026`](../next_steps/Oct2026/051026/cluster_campaign_051026.md)
 and reported in [`S4_campaign.md`](S4_campaign.md).*
 
 1. Settled (verdict 22, wave 7): the log-likelihood MCP path started from the log-likelihood
@@ -421,7 +421,7 @@ and reported in [`S4_campaign.md`](S4_campaign.md).*
    rescaled $C$ and at $n = 10^3$ (the 100-start search with the likelihood refit) are queued on
    the cluster; verdicts 24 and 25 are stated for what has arrived.
 10. The covariance-loss solver's backtracking test was corrected on 13 October 2026 (code review
-    A1, `next_steps/121026/code_review_121026.md`; `docs/LIKELIHOOD.md` §4.3). The log-likelihood
+    A1, `../next_steps/Oct2026/121026`; `docs/LIKELIHOOD.md` §4.3). The log-likelihood
     cells of waves 3, 7 and 8 were computed with the old test; on the stored data set with the
     worst-scaled $C$ the lasso path is unchanged and the MCP dense → sparse path differs at 8 of
     100 $\lambda$ with the oracle $F_1$ 0.493 → 0.507, a change well inside a cell's standard

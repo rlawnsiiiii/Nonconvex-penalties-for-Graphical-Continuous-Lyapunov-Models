@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| reasons | [`simulations/VERDICTS.md`](../simulations/VERDICTS.md) 3–7; [`cluster_campaign_051026.md`](../next_steps/051026/cluster_campaign_051026.md) (campaign note) |
+| reasons | [`simulations/VERDICTS.md`](../simulations/VERDICTS.md) 3–7; [`cluster_campaign_051026.md`](../next_steps/Oct2026/051026/cluster_campaign_051026.md) (campaign note) |
 | lock-in | [`orientation_lock_in_051026.md`](../claude_docs/orientation_lock_in_051026.md) |
 | solver | [`NONCONVEX.md`](NONCONVEX.md) §4 (monotone accelerated proximal gradient) |
 

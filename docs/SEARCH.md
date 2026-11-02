@@ -119,7 +119,7 @@ $$\hat M_S = \arg\min\big\{\tfrac12\lVert M\hat\Sigma + \hat\Sigma M^\top + C\rV
 
 $$L(S) = -2\ell(\hat M_S) + \mathrm{const} \ \ge\ \min_{M \text{ on } S \cup \mathrm{diag}}\big[-2\ell(M)\big] + \mathrm{const}\ \ (\texttt{CovRefit});\qquad \text{equal at } n = \infty \text{ with the correct } C \text{ on the true support}$$
 
-`next_steps/091026/score_check.py`, `.txt`: 32 graphs, $p = 10$, $C = 2I$, $k = 1, \dots, 4$, 4 true $C$ $\times$ 2 replicates, 23.7 true edges on average; lasso path, direct loss; $\mathrm{pen}_{\mathrm{BIC}}$:
+`../next_steps/Oct2026/091026`, `.txt`: 32 graphs, $p = 10$, $C = 2I$, $k = 1, \dots, 4$, 4 true $C$ $\times$ 2 replicates, 23.7 true edges on average; lasso path, direct loss; $\mathrm{pen}_{\mathrm{BIC}}$:
 
 | $n$ | refit, loss term | truth: $F_1$ (edges) | path | search | s/graph |
 |---|---|---|---|---|---|
@@ -143,7 +143,7 @@ $$\text{the term } (M_{ii} + M_{jj})\hat\Sigma_{ij} \text{ of } R_{ij} \text{ co
 | empty graph, $p = 10$ / $20$ | 6–7 % / 24–25 % (`C_Random_Min_Diag`, `C_Random_Full`) |
 | true support | 2–5 % (`C_Random_Full`) |
 | best of 11 starts | 1 of 2 375 |
-| first such $p = 20$ graph, empty start (`next_steps/051026/files/time_starts.py`): $\max\operatorname{Re}\lambda$ | `DirectRefit` $+0.11$; `CovRefit` $-0.36$, finite, 43 moves |
+| first such $p = 20$ graph, empty start (`../next_steps/Oct2026/051026`): $\max\operatorname{Re}\lambda$ | `DirectRefit` $+0.11$; `CovRefit` $-0.36$, finite, 43 moves |
 
 ## 3. Moves and search
 
@@ -292,7 +292,7 @@ the starting graphs differ: 10 sparse ones against 300, or 100 uniform ones. R =
 | $P(e \in S)$ | uniform over the class by MCMC (Algorithm 1) | not stated | $\tfrac12$ independently: exactly uniform, no MCMC | $d \sim U[0, 0.3]$ per graph, then $d$ |
 | mean edges, $p = 10$; $20$ | | | 45; 190 (truth: density $< 0.4$; $< 0.2$) | density $\le 0.3$ |
 | $R$ | 100 | 300 | 100 (wave 5b) | 10 + $\varnothing$ (wave 2); 100 (wave 5b) |
-| false positives, best of 5, `next_steps/051026/files/time_starts.txt` | | | 114 | 3 |
+| false positives, best of 5, `../next_steps/Oct2026/051026` | | | 114 | 3 |
 | wave 5b cell, $R = 100$ | | | `search100u_p10_Cresc` | `search100s_p10_Cresc` |
 
 $$\text{the paper's class, uniform: each of the } \binom p2 \text{ pairs} \in \{\varnothing,\ i \to j,\ j \to i\} \text{ with probability } \tfrac13,\ \text{density } \tfrac23;\qquad \text{with 2-cycles: a fair coin per entry}$$

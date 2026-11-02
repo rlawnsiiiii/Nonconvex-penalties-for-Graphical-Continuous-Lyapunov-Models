@@ -3,11 +3,11 @@
 *Second part of S3 (`plan.md`: score-based search with a BIC-type penalty). Written 2 October 2026.
 S3a (`S3a_bidirectional_edges.md`) showed that the direction entering the path first is close to a
 coin flip for every penalty. The lasso later corrects it by keeping both directions; MCP freezes it.
-Example 2 (`../next_steps/021026/next_steps_021026.md` §3) showed that the MCP objective prefers the
+Example 2 (`../next_steps/Oct2026/021026` §3) showed that the MCP objective prefers the
 truth at large $n$, and that a reversal search on that objective reaches it while the continuation
 path does not.*
 
-**Status (3 October 2026): implemented and validated; phases 1–2 complete for the direct loss (the $p = 20$ run on Dettling's pipeline was stopped early). Phase 3, the covariance losses on random graphs, was not run. The follow-up is planned in `next_steps/031026/next_steps_031026.md`.**
+**Status (3 October 2026): implemented and validated; phases 1–2 complete for the direct loss (the $p = 20$ run on Dettling's pipeline was stopped early). Phase 3, the covariance losses on random graphs, was not run. The follow-up is planned in `../next_steps/Oct2026/031026`.**
 
 ## Summary (morning of 3 October)
 
@@ -51,8 +51,8 @@ stopped early and covers sparse graphs only (§9.4).*
 6. **At $p = 20$ (§9.4)** lasso + search matches Dettling's oracle-tuned lasso on his pipeline for
    sparse graphs ($k = 1, 2$: +0.07 to +0.09 over the lasso tuned by the score) and does nothing for
    dense ones at $n = 10^3$. On the raw scale ($n = 10^4$, all $k$) every search gains +0.16 to +0.21.
-7. **Combined with the independent study** (`next_steps/031026/next_steps_031026.md`): the
-   standardised pipeline needs the rescaled $C = 2\,\mathrm{diag}(1/s_{ii}^2)$, and MCP/SCAD should
+7. **Combined with the independent study** (`../next_steps/Oct2026/031026`): the
+   standardised pipeline needs the rescaled $C = 2\,\mathrm{diag} (1/s_{ii}^2)$, and MCP/SCAD should
    be run dense → sparse. Both change the conclusions about the penalties.
 
 All runs of this study have ended. The $p = 20$ run on Dettling's pipeline was stopped early
@@ -160,7 +160,7 @@ of the path and computing the score above.
 
 **Ablation: score = the penalised objective.** For MCP and SCAD on the direct loss only: the same
 moves, each re-solved with the penalised solver at the start's $\lambda$, accepted if the MCP/SCAD
-objective decreases. This is the Example 2 search (`next_steps/021026/files/m0_objective.py`), now
+objective decreases. This is the Example 2 search (`../next_steps/Oct2026/021026`), now
 from the data-driven start. For the lasso this is pointless: its objective is convex, so no move
 can lower it.
 

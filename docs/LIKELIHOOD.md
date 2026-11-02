@@ -185,7 +185,7 @@ solve(sigma_hat, C, lam, loss, method, tol):      # every method: descent on F =
 | dense end | $7\times10^{-4}$ ($k=500$) to $2\times10^{-8}$ ($k=50000$) | $\lVert\Delta M\rVert_\infty=2\times10^{-7}$ |
 | $\lambda\approx10^{-3}\lambda_{\max}$ | $10^{-3}$ to $5\times10^{-5}$, oscillating (`prox` alike) | $\lVert\Delta M\rVert_\infty\in[0.8,1.1]$, $\lvert S\,\triangle\,S'\rvert\in[20,22]$, $\Delta F<0$ (Section 5) |
 | `loglik` cells, rescaled $C$ | 0.6–2.4 % of solves; `converged` | |
-| waves 3, 7, 8 (`loglik`, before 2026-10-13) | old test; $\lvert\Delta\rvert<\mathrm{s.e.}$ (`next_steps/121026/code_review_121026.md`, A1) | re-run open |
+| waves 3, 7, 8 (`loglik`, before 2026-10-13) | old test; $\lvert\Delta\rvert<\mathrm{s.e.}$ (`../next_steps/Oct2026/121026`, A1) | re-run open |
 
 $$\texttt{penalties.stationarity}(M)\le\texttt{tol}:\qquad \lvert\nabla L_{ij}\rvert\le\lambda\ \text{ on the zeros},\qquad \nabla L_{ij}+P'(M_{ij})=0\ \text{ elsewhere}$$
 
